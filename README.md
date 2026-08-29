@@ -41,14 +41,37 @@ packages/ai       LLM integration
 - Public REST API (`/v1/jobs`, `/v1/export`) + MCP tool manifest
 - Internal admin: tenants, jobs, feature flags, retry
 
-## Deploy to VPS (one command)
+## Deploy to VPS (PM2 + nginx) — recommended
+
+On your Ubuntu server (`/var/www/tidySync`):
+
+```bash
+cp .env.example .env
+# Edit .env — APP_URL, Shopify keys, DATABASE_URL, REDIS_URL (see below)
+
+chmod +x scripts/*.sh
+npm run deploy:pm2
+```
+
+**`.env` for PM2 on VPS (not Docker app container):**
+
+```env
+APP_URL=https://sync.tidyflowapp.com
+PORT=4000
+DATABASE_URL=postgresql://user:pass@127.0.0.1:5432/tidysync
+REDIS_URL=redis://127.0.0.1:6379
+```
+
+Nginx proxies `https://sync.tidyflowapp.com` → `http://127.0.0.1:4000`
+
+Redeploy after updates: `git pull && npm run deploy:pm2`
+
+## Deploy with Docker Compose
 
 See **[docs/SHOPIFY_SETUP.md](docs/SHOPIFY_SETUP.md)** for Partner app configuration.
 
 ```bash
 cp .env.example .env
-# Edit .env — at minimum: SHOPIFY_API_KEY, SHOPIFY_API_SECRET, POSTGRES_PASSWORD, secrets
-
 chmod +x scripts/deploy.sh scripts/setup-tls.sh
 ./scripts/deploy.sh
 sudo ./scripts/setup-tls.sh sync.tidyflowapp.com your@email.com

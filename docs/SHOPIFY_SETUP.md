@@ -31,7 +31,10 @@ read_locations
 read_customers, write_customers
 read_orders
 read_discounts, write_discounts
+read_metaobjects, write_metaobjects
 ```
+
+Product/customer metafields use the parent resource scopes (`read_products`, etc.) — there is no `read_metafields` scope.
 
 ## 4. Copy credentials to `.env`
 

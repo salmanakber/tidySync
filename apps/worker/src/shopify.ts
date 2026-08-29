@@ -8,7 +8,7 @@ const shopify = shopifyApi({
   apiKey: process.env.SHOPIFY_API_KEY ?? "",
   apiSecretKey: process.env.SHOPIFY_API_SECRET ?? "",
   scopes: (process.env.SHOPIFY_SCOPES ??
-    "read_products,write_products,read_inventory,write_inventory,read_locations,read_customers,write_customers,read_orders,read_discounts,write_discounts,read_metafields,write_metafields").split(","),
+    "read_products,write_products,read_inventory,write_inventory,read_locations,read_customers,write_customers,read_orders,read_discounts,write_discounts,read_metaobjects,write_metaobjects").split(","),
   hostName: appUrl.replace(/^https?:\/\//, ""),
   hostScheme: appUrl.startsWith("https") ? "https" : "http",
   apiVersion: ApiVersion.January25,

@@ -282,20 +282,37 @@ export function AdminConsole() {
 
   if (!token) {
     return (
-      <div style={{ maxWidth: 400, margin: "80px auto", padding: 24 }}>
-        <h1 style={{ marginBottom: 8 }}>TidySync Admin</h1>
-        <p style={{ color: "var(--muted)", marginBottom: 24 }}>Internal ops console</p>
-        {error && <p style={{ color: "var(--critical)" }}>{error}</p>}
-        <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <input className="input" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input
-            className="input"
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          <button className="btn" onClick={handleLogin} disabled={loading}>Sign in</button>
+      <div className="login-page">
+        <div className="login-card">
+          <div className="login-logo">
+            <div className="login-logo-icon">TS</div>
+            <div>
+              <h1 className="login-title">TidySync</h1>
+            </div>
+          </div>
+          <p className="login-subtitle">Internal operations console</p>
+          {error && <div className="login-error">{error}</div>}
+          <div className="login-form">
+            <input
+              className="input"
+              placeholder="Email address"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            <input
+              className="input"
+              type="password"
+              placeholder="Password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <button className="btn" onClick={handleLogin} disabled={loading}>
+              {loading ? "Signing in…" : "Sign in"}
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -312,17 +329,31 @@ export function AdminConsole() {
     { id: "audit", label: "Audit log" },
   ];
 
+  const activeTabLabel = tabs.find((t) => t.id === tab)?.label ?? "Overview";
+
   return (
-    <div style={{ padding: 24, maxWidth: 1400, margin: "0 auto" }}>
-      <header style={{ display: "flex", justifyContent: "space-between", marginBottom: 16, alignItems: "center" }}>
-        <div>
-          <h1 style={{ margin: 0 }}>TidySync Admin</h1>
-          <p style={{ color: "var(--muted)", margin: 4 }}>sync.tidyflowapp.com</p>
+    <div className="admin-shell">
+      <aside className="admin-sidebar">
+        <div className="sidebar-brand">
+          <h1>TidySync</h1>
+          <span>Operations console</span>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn" onClick={() => token && loadData(token)}>Refresh</button>
+        <nav className="sidebar-nav">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className={`nav-item${tab === t.id ? " active" : ""}`}
+              onClick={() => setTab(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-footer">
           <button
-            className="btn"
+            type="button"
+            className="nav-item"
             onClick={() => {
               localStorage.removeItem("tidysync_admin_token");
               setToken(null);
@@ -331,61 +362,66 @@ export function AdminConsole() {
             Sign out
           </button>
         </div>
-      </header>
+      </aside>
 
-      <nav style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            className="btn"
-            style={{ opacity: tab === t.id ? 1 : 0.6 }}
-            onClick={() => setTab(t.id)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
+      <div className="admin-main">
+        <header className="admin-topbar">
+          <h2 className="topbar-title">{activeTabLabel}</h2>
+          <div className="topbar-actions">
+            <button type="button" className="btn btn-secondary" onClick={() => token && loadData(token)}>
+              Refresh
+            </button>
+          </div>
+        </header>
 
-      {(tab === "tenants" || tab === "jobs") && (
-        <div style={{ marginBottom: 16, display: "flex", gap: 8 }}>
-          <input
-            className="input"
-            placeholder="Search..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ maxWidth: 280 }}
-          />
-          {tab === "jobs" && (
-            <select className="input" value={jobFilter} onChange={(e) => setJobFilter(e.target.value)} style={{ maxWidth: 160 }}>
-              <option value="">All statuses</option>
-              <option value="RUNNING">RUNNING</option>
-              <option value="FAILED">FAILED</option>
-              <option value="COMPLETED">COMPLETED</option>
-              <option value="QUEUED">QUEUED</option>
-            </select>
-          )}
-        </div>
-      )}
+        <div className="admin-content">
+          {error && <div className="login-error" style={{ marginBottom: 16 }}>{error}</div>}
 
-      {tab === "overview" && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
-          {[
-            { label: "Total jobs", value: stats.total ?? 0 },
-            { label: "Running", value: stats.running ?? 0 },
-            { label: "Failed", value: stats.failed ?? 0 },
-            { label: "Completed", value: stats.completed ?? 0 },
-          ].map((s) => (
-            <div key={s.label} className="card">
-              <div style={{ color: "var(--muted)", fontSize: 11 }}>{s.label}</div>
-              <div style={{ fontSize: 28, fontWeight: 600 }}>{s.value}</div>
+          {(tab === "tenants" || tab === "jobs") && (
+            <div className="toolbar">
+              <input
+                className="input"
+                placeholder="Search…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {tab === "jobs" && (
+                <select className="input" value={jobFilter} onChange={(e) => setJobFilter(e.target.value)} style={{ maxWidth: 160 }}>
+                  <option value="">All statuses</option>
+                  <option value="RUNNING">Running</option>
+                  <option value="FAILED">Failed</option>
+                  <option value="COMPLETED">Completed</option>
+                  <option value="QUEUED">Queued</option>
+                </select>
+              )}
             </div>
-          ))}
-        </div>
-      )}
+          )}
+
+          {tab === "overview" && (
+            <div className="stats-grid">
+              <div className="stat-card accent">
+                <div className="stat-label">Total jobs</div>
+                <div className="stat-value">{stats.total ?? 0}</div>
+              </div>
+              <div className="stat-card success">
+                <div className="stat-label">Completed</div>
+                <div className="stat-value">{stats.completed ?? 0}</div>
+              </div>
+              <div className="stat-card warning">
+                <div className="stat-label">Running</div>
+                <div className="stat-value">{stats.running ?? 0}</div>
+              </div>
+              <div className="stat-card critical">
+                <div className="stat-label">Failed</div>
+                <div className="stat-value">{stats.failed ?? 0}</div>
+              </div>
+            </div>
+          )}
 
       {tab === "tenants" && (
         <div className="card">
-          <h2 style={{ marginTop: 0 }}>Tenants ({filteredTenants.length})</h2>
+          <h2 className="card-title">Tenants ({filteredTenants.length})</h2>
+          <div className="table-wrap">
           <table>
             <thead>
               <tr>
@@ -405,7 +441,8 @@ export function AdminConsole() {
                   <td>{t.productCount}</td>
                   <td>{t.aiCreditsUsed}{t.extraAiCredits ? ` +${t.extraAiCredits}` : ""}</td>
                   <td>{t.plan?.name ?? "—"}</td>
-                  <td style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                  <td>
+                    <div className="flex-row">
                     <select
                       className="input"
                       value={t.plan?.slug ?? ""}
@@ -417,22 +454,25 @@ export function AdminConsole() {
                       ))}
                     </select>
                     {t.status === "ACTIVE" ? (
-                      <button className="btn" onClick={() => updateTenantStatus(t.id, "SUSPENDED")}>Suspend</button>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => updateTenantStatus(t.id, "SUSPENDED")}>Suspend</button>
                     ) : (
-                      <button className="btn" onClick={() => updateTenantStatus(t.id, "ACTIVE")}>Activate</button>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => updateTenantStatus(t.id, "ACTIVE")}>Activate</button>
                     )}
-                    <button className="btn" onClick={() => grantTenantCredits(t.id, 10)}>+10 credits</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => grantTenantCredits(t.id, 10)}>+10 credits</button>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
       {tab === "jobs" && (
         <div className="card">
-          <h2 style={{ marginTop: 0 }}>Jobs ({filteredJobs.length})</h2>
+          <h2 className="card-title">Jobs ({filteredJobs.length})</h2>
+          <div className="table-wrap">
           <table>
             <thead>
               <tr>
@@ -458,19 +498,21 @@ export function AdminConsole() {
                   <td>{new Date(j.createdAt).toLocaleString()}</td>
                   <td>
                     {j.status === "FAILED" && (
-                      <button className="btn" onClick={() => retryJob(j.id)}>Retry</button>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => retryJob(j.id)}>Retry</button>
                     )}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
       {tab === "billing" && (
         <div className="card">
-          <h2 style={{ marginTop: 0 }}>Plans</h2>
+          <h2 className="card-title">Plans</h2>
+          <div className="table-wrap">
           <table>
             <thead>
               <tr>
@@ -491,8 +533,9 @@ export function AdminConsole() {
               ))}
             </tbody>
           </table>
-          <h3>Grant credits to tenant</h3>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          </div>
+          <h3 className="card-title" style={{ marginTop: 24 }}>Grant credits</h3>
+          <div className="flex-row">
             <select className="input" value={selectedTenantId} onChange={(e) => setSelectedTenantId(e.target.value)}>
               <option value="">Select tenant</option>
               {tenants.map((t) => (
@@ -501,6 +544,7 @@ export function AdminConsole() {
             </select>
             <input className="input" value={grantCredits} onChange={(e) => setGrantCredits(e.target.value)} style={{ maxWidth: 80 }} />
             <button
+              type="button"
               className="btn"
               onClick={() => selectedTenantId && grantTenantCredits(selectedTenantId, Number(grantCredits) || 10)}
             >
@@ -512,13 +556,13 @@ export function AdminConsole() {
 
       {tab === "apikeys" && (
         <div className="card">
-          <h2 style={{ marginTop: 0 }}>API keys</h2>
+          <h2 className="card-title">API keys</h2>
           {createdApiKey && (
-            <p style={{ color: "var(--success)", marginBottom: 12 }}>
+            <div className="alert-success">
               New key (copy now — shown once): <code>{createdApiKey}</code>
-            </p>
+            </div>
           )}
-          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <div className="flex-row" style={{ marginBottom: 16 }}>
             <select className="input" value={selectedTenantId} onChange={(e) => setSelectedTenantId(e.target.value)}>
               <option value="">Select tenant</option>
               {tenants.map((t) => (
@@ -526,8 +570,9 @@ export function AdminConsole() {
               ))}
             </select>
             <input className="input" placeholder="Key name" value={newApiKeyName} onChange={(e) => setNewApiKeyName(e.target.value)} />
-            <button className="btn" onClick={createApiKey}>Create key</button>
+            <button type="button" className="btn" onClick={createApiKey}>Create key</button>
           </div>
+          <div className="table-wrap">
           <table>
             <thead>
               <tr>
@@ -545,24 +590,26 @@ export function AdminConsole() {
                   <td>{k.name}</td>
                   <td>{k.keyPrefix}…</td>
                   <td>{k.scopes.join(", ")}</td>
-                  <td><button className="btn" onClick={() => revokeApiKey(k.id)}>Revoke</button></td>
+                  <td><button type="button" className="btn btn-danger btn-sm" onClick={() => revokeApiKey(k.id)}>Revoke</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
       {tab === "health" && (
         <div className="card">
-          <h2 style={{ marginTop: 0 }}>System health</h2>
-          <pre style={{ fontSize: 13 }}>{JSON.stringify(health, null, 2)}</pre>
+          <h2 className="card-title">System health</h2>
+          <pre className="health-pre">{JSON.stringify(health, null, 2)}</pre>
         </div>
       )}
 
       {tab === "flags" && (
         <div className="card">
-          <h2 style={{ marginTop: 0 }}>Feature flags</h2>
+          <h2 className="card-title">Feature flags</h2>
+          <div className="table-wrap">
           <table>
             <thead>
               <tr>
@@ -579,7 +626,7 @@ export function AdminConsole() {
                   <td>{f.description ?? "—"}</td>
                   <td>{statusBadge(f.enabled ? "ACTIVE" : "SUSPENDED")}</td>
                   <td>
-                    <button className="btn" onClick={() => toggleFlag(f.key, !f.enabled)}>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => toggleFlag(f.key, !f.enabled)}>
                       {f.enabled ? "Disable" : "Enable"}
                     </button>
                   </td>
@@ -587,12 +634,14 @@ export function AdminConsole() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
       {tab === "audit" && (
         <div className="card">
-          <h2 style={{ marginTop: 0 }}>Audit log</h2>
+          <h2 className="card-title">Audit log</h2>
+          <div className="table-wrap">
           <table>
             <thead>
               <tr>
@@ -611,8 +660,11 @@ export function AdminConsole() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
+        </div>
+      </div>
     </div>
   );
 }
