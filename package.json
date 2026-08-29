@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "turbo dev",
+    "dev": "node server/dev.js",
     "build": "turbo build",
     "start": "node server/start.js",
     "lint": "turbo lint",
@@ -24,6 +24,7 @@
     "dotenv": "^16.4.7"
   },
   "devDependencies": {
+    "tsx": "^4.19.2",
     "turbo": "^2.3.3",
     "typescript": "^5.7.2"
   },

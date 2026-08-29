@@ -107,10 +107,14 @@ npm run db:generate
 npm run db:migrate
 npm run db:seed
 
-npm run dev -w @tidysync/api
-npm run dev -w @tidysync/worker
-npm run dev -w @tidysync/embedded
-npm run dev -w @tidysync/admin
+npm run dev                   # one server on PORT (default 4000)
+```
+
+Set in `.env` for local testing:
+
+```env
+APP_URL=http://localhost:4000
+PORT=4000
 ```
 
 | Service | URL |

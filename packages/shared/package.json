@@ -4,6 +4,11 @@
   "private": true,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "typesVersions": {
+    "*": {
+      "file-parser": ["./dist/file-parser.d.ts"]
+    }
+  },
   "exports": {
     ".": "./dist/index.js",
     "./file-parser": "./dist/file-parser.js"

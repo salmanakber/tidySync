@@ -2,8 +2,9 @@
   "name": "@tidysync/worker",
   "version": "0.1.0",
   "private": true,
+  "type": "commonjs",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "echo \"Use npm run dev from the repo root\" && exit 1",
     "build": "tsc",
     "start": "node dist/index.js"
   },

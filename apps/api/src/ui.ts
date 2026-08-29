@@ -8,8 +8,10 @@ export async function attachUiApps(app: Express) {
   const embeddedDir = path.join(root, "apps/embedded");
   const adminDir = path.join(root, "apps/admin");
 
-  const embedded = next({ dev: false, dir: embeddedDir });
-  const admin = next({ dev: false, dir: adminDir });
+  const isDev = process.env.NODE_ENV !== "production";
+
+  const embedded = next({ dev: isDev, dir: embeddedDir });
+  const admin = next({ dev: isDev, dir: adminDir });
 
   await embedded.prepare();
   await admin.prepare();
