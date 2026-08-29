@@ -225,6 +225,7 @@ async function main() {
     { key: "scheduled_jobs", enabled: true, description: "Scheduled jobs" },
     { key: "public_api", enabled: true, description: "Public REST API" },
     { key: "multi_store", enabled: true, description: "Agency multi-store" },
+    { key: "require_install_approval", enabled: false, description: "New installs need admin approval" },
   ];
 
   for (const flag of flags) {

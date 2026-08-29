@@ -1,26 +1,26 @@
 :root {
-  --bg: #0b0f14;
-  --bg-elevated: #111827;
-  --surface: #151c27;
-  --surface-hover: #1c2533;
-  --border: #2a3544;
-  --border-light: #374151;
-  --text: #f3f4f6;
-  --text-secondary: #9ca3af;
-  --text-muted: #6b7280;
-  --accent: #6366f1;
-  --accent-hover: #818cf8;
-  --accent-soft: rgba(99, 102, 241, 0.15);
-  --success: #10b981;
-  --success-soft: rgba(16, 185, 129, 0.15);
-  --warning: #f59e0b;
-  --warning-soft: rgba(245, 158, 11, 0.15);
-  --critical: #ef4444;
-  --critical-soft: rgba(239, 68, 68, 0.15);
-  --sidebar-width: 240px;
-  --radius: 10px;
-  --radius-sm: 6px;
-  --shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+  --bg: #f6f6f7;
+  --bg-elevated: #ffffff;
+  --surface: #ffffff;
+  --surface-hover: #f3f4f6;
+  --border: #e1e3e5;
+  --border-light: #d2d5d8;
+  --text: #202223;
+  --text-secondary: #6d7175;
+  --text-muted: #8c9196;
+  --accent: #008060;
+  --accent-hover: #006e52;
+  --accent-soft: rgba(0, 128, 96, 0.1);
+  --success: #008060;
+  --success-soft: rgba(0, 128, 96, 0.1);
+  --warning: #b98900;
+  --warning-soft: rgba(185, 137, 0, 0.12);
+  --critical: #d82c0d;
+  --critical-soft: rgba(216, 44, 13, 0.1);
+  --sidebar-width: 260px;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 16px rgba(0, 0, 0, 0.04);
 }
 
 * {
@@ -50,7 +50,7 @@ a {
   justify-content: center;
   padding: 24px;
   background:
-    radial-gradient(ellipse 80% 60% at 50% -20%, rgba(99, 102, 241, 0.25), transparent),
+    radial-gradient(ellipse 80% 60% at 50% -20%, rgba(0, 128, 96, 0.12), transparent),
     var(--bg);
 }
 
@@ -75,7 +75,7 @@ a {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: linear-gradient(135deg, var(--accent), #8b5cf6);
+  background: linear-gradient(135deg, var(--accent), #00a884);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -508,4 +508,17 @@ select.input:focus {
     flex-wrap: wrap;
     overflow-x: auto;
   }
+}
+
+.detail-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.tenant-detail-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }

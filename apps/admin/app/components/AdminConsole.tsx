@@ -28,10 +28,24 @@ interface Tenant {
   shopName?: string;
   status: string;
   billingStatus?: string;
+  billingBypass?: boolean;
+  installApproved?: boolean;
+  adminNotes?: string;
+  installedAt?: string;
   productCount: number;
+  skuCount?: number;
   aiCreditsUsed: number;
   extraAiCredits?: number;
-  plan?: { name: string; slug?: string };
+  plan?: { name: string; slug?: string; maxProducts?: number; aiCreditsPerMonth?: number; aiCreditsRemaining?: number };
+}
+
+interface TenantDetail {
+  tenant: Tenant;
+  jobStats: { total: number; running: number; failed: number; completed: number };
+  recentJobs: Job[];
+  billingCharges: Array<{ id: string; type: string; status: string; amountCents: number; createdAt: string }>;
+  aiOperationsCount: number;
+  auditLogCount: number;
 }
 
 interface Plan {
@@ -78,7 +92,7 @@ interface AuditLog {
   tenant?: { shopDomain: string };
 }
 
-type Tab = "overview" | "tenants" | "jobs" | "billing" | "flags" | "apikeys" | "health" | "audit";
+type Tab = "overview" | "tenants" | "tenant-detail" | "jobs" | "billing" | "flags" | "apikeys" | "health" | "audit";
 
 export function AdminConsole() {
   const [token, setToken] = useState<string | null>(null);
@@ -93,6 +107,8 @@ export function AdminConsole() {
   const [health, setHealth] = useState<Record<string, unknown>>({});
   const [stats, setStats] = useState<Record<string, number>>({});
   const [selectedTenantId, setSelectedTenantId] = useState("");
+  const [tenantDetail, setTenantDetail] = useState<TenantDetail | null>(null);
+  const [tenantNotes, setTenantNotes] = useState("");
   const [grantCredits, setGrantCredits] = useState("10");
   const [newApiKeyName, setNewApiKeyName] = useState("");
   const [createdApiKey, setCreatedApiKey] = useState<string | null>(null);
@@ -112,7 +128,11 @@ export function AdminConsole() {
       const [tenantsData, jobsData, statsData, flagsData, auditData, plansData, healthData, keysData] =
         await Promise.all([
         adminGql<{ adminTenants: Tenant[] }>(
-          `query { adminTenants(limit: 100) { id shopDomain shopName status billingStatus productCount aiCreditsUsed extraAiCredits plan { name slug } } }`,
+          `query { adminTenants(limit: 100) {
+            id shopDomain shopName status billingStatus billingBypass installApproved adminNotes installedAt
+            productCount skuCount aiCreditsUsed extraAiCredits
+            plan { name slug maxProducts aiCreditsPerMonth aiCreditsRemaining }
+          } }`,
           {},
           authToken,
         ),
@@ -246,6 +266,69 @@ export function AdminConsole() {
       token,
     );
     await loadData(token);
+  };
+
+  const loadTenantDetail = async (tenantId: string, authToken: string) => {
+    const data = await adminGql<{ adminTenantDetail: TenantDetail }>(
+      `query($tenantId: ID!) {
+        adminTenantDetail(tenantId: $tenantId) {
+          tenant {
+            id shopDomain shopName status billingStatus billingBypass installApproved adminNotes installedAt
+            productCount skuCount aiCreditsUsed extraAiCredits
+            plan { name slug maxProducts aiCreditsPerMonth aiCreditsRemaining }
+          }
+          jobStats { total running failed completed }
+          recentJobs { id type status rowCount successCount failedCount createdAt errorSummary }
+          billingCharges { id type status amountCents createdAt }
+          aiOperationsCount
+          auditLogCount
+        }
+      }`,
+      { tenantId },
+      authToken,
+    );
+    setTenantDetail(data.adminTenantDetail);
+    setTenantNotes(data.adminTenantDetail.tenant.adminNotes ?? "");
+    setSelectedTenantId(tenantId);
+    setTab("tenant-detail");
+  };
+
+  const updateBillingBypass = async (tenantId: string, billingBypass: boolean) => {
+    if (!token) return;
+    await adminGql(
+      `mutation($tenantId: ID!, $billingBypass: Boolean!) {
+        adminUpdateTenantBillingBypass(tenantId: $tenantId, billingBypass: $billingBypass) { id billingBypass }
+      }`,
+      { tenantId, billingBypass },
+      token,
+    );
+    await loadData(token);
+    if (selectedTenantId === tenantId) await loadTenantDetail(tenantId, token);
+  };
+
+  const updateInstallApproved = async (tenantId: string, installApproved: boolean) => {
+    if (!token) return;
+    await adminGql(
+      `mutation($tenantId: ID!, $installApproved: Boolean!) {
+        adminUpdateTenantInstallApproved(tenantId: $tenantId, installApproved: $installApproved) { id installApproved }
+      }`,
+      { tenantId, installApproved },
+      token,
+    );
+    await loadData(token);
+    if (selectedTenantId === tenantId) await loadTenantDetail(tenantId, token);
+  };
+
+  const saveTenantNotes = async (tenantId: string) => {
+    if (!token) return;
+    await adminGql(
+      `mutation($tenantId: ID!, $notes: String) {
+        adminUpdateTenantNotes(tenantId: $tenantId, notes: $notes) { id adminNotes }
+      }`,
+      { tenantId, notes: tenantNotes },
+      token,
+    );
+    await loadTenantDetail(tenantId, token);
   };
 
   const grantTenantCredits = async (tenantId: string, credits: number) => {
@@ -443,6 +526,9 @@ export function AdminConsole() {
                   <td>{t.plan?.name ?? "—"}</td>
                   <td>
                     <div className="flex-row">
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => token && loadTenantDetail(t.id, token)}>
+                      Details
+                    </button>
                     <select
                       className="input"
                       value={t.plan?.slug ?? ""}
@@ -458,6 +544,15 @@ export function AdminConsole() {
                     ) : (
                       <button type="button" className="btn btn-secondary btn-sm" onClick={() => updateTenantStatus(t.id, "ACTIVE")}>Activate</button>
                     )}
+                    {t.billingBypass && <span className="badge badge-success">Test mode</span>}
+                    {t.installApproved === false && <span className="badge badge-attention">Pending</span>}
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => updateBillingBypass(t.id, !t.billingBypass)}
+                    >
+                      {t.billingBypass ? "Disable test" : "Enable test"}
+                    </button>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => grantTenantCredits(t.id, 10)}>+10 credits</button>
                     </div>
                   </td>
@@ -465,6 +560,164 @@ export function AdminConsole() {
               ))}
             </tbody>
           </table>
+          </div>
+        </div>
+      )}
+
+      {tab === "tenant-detail" && tenantDetail && (
+        <div className="tenant-detail-layout">
+          <div className="card">
+            <div className="flex-row" style={{ marginBottom: 16 }}>
+              <h2 className="card-title" style={{ margin: 0 }}>
+                {tenantDetail.tenant.shopDomain}
+              </h2>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setTab("tenants")}>
+                Back to tenants
+              </button>
+            </div>
+            <div className="stats-grid">
+              <div className="stat-card accent">
+                <div className="stat-label">Products</div>
+                <div className="stat-value">{tenantDetail.tenant.productCount.toLocaleString()}</div>
+              </div>
+              <div className="stat-card success">
+                <div className="stat-label">Jobs completed</div>
+                <div className="stat-value">{tenantDetail.jobStats.completed}</div>
+              </div>
+              <div className="stat-card warning">
+                <div className="stat-label">Jobs running</div>
+                <div className="stat-value">{tenantDetail.jobStats.running}</div>
+              </div>
+              <div className="stat-card critical">
+                <div className="stat-label">Jobs failed</div>
+                <div className="stat-value">{tenantDetail.jobStats.failed}</div>
+              </div>
+            </div>
+            <div className="detail-meta-grid">
+              <div>
+                <div className="stat-label">Plan</div>
+                <strong>{tenantDetail.tenant.plan?.name ?? "—"}</strong>
+              </div>
+              <div>
+                <div className="stat-label">Billing</div>
+                <strong>{tenantDetail.tenant.billingStatus ?? "—"}</strong>
+              </div>
+              <div>
+                <div className="stat-label">AI credits used</div>
+                <strong>{tenantDetail.tenant.aiCreditsUsed}</strong>
+              </div>
+              <div>
+                <div className="stat-label">AI operations</div>
+                <strong>{tenantDetail.aiOperationsCount}</strong>
+              </div>
+              <div>
+                <div className="stat-label">Audit events</div>
+                <strong>{tenantDetail.auditLogCount}</strong>
+              </div>
+              <div>
+                <div className="stat-label">Installed</div>
+                <strong>{tenantDetail.tenant.installedAt ? new Date(tenantDetail.tenant.installedAt).toLocaleDateString() : "—"}</strong>
+              </div>
+            </div>
+            <div className="flex-row" style={{ marginTop: 16 }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => updateBillingBypass(tenantDetail.tenant.id, !tenantDetail.tenant.billingBypass)}
+              >
+                {tenantDetail.tenant.billingBypass ? "Disable testing mode" : "Enable testing mode (skip Shopify billing)"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => updateInstallApproved(tenantDetail.tenant.id, !tenantDetail.tenant.installApproved)}
+              >
+                {tenantDetail.tenant.installApproved ? "Revoke store access" : "Approve store"}
+              </button>
+              <select
+                className="input"
+                value={tenantDetail.tenant.plan?.slug ?? ""}
+                onChange={(e) => updateTenantPlan(tenantDetail.tenant.id, e.target.value)}
+                style={{ maxWidth: 160 }}
+              >
+                {plans.map((p) => (
+                  <option key={p.slug} value={p.slug}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ marginTop: 16 }}>
+              <label className="stat-label">Admin notes</label>
+              <textarea
+                className="input"
+                rows={3}
+                value={tenantNotes}
+                onChange={(e) => setTenantNotes(e.target.value)}
+                placeholder="Internal notes about this store…"
+              />
+              <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 8 }} onClick={() => saveTenantNotes(tenantDetail.tenant.id)}>
+                Save notes
+              </button>
+            </div>
+          </div>
+
+          <div className="card">
+            <h3 className="card-title">Recent jobs</h3>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Rows</th>
+                    <th>Success</th>
+                    <th>Failed</th>
+                    <th>Created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tenantDetail.recentJobs.map((j) => (
+                    <tr key={j.id}>
+                      <td>{j.type}</td>
+                      <td>{statusBadge(j.status)}</td>
+                      <td>{j.rowCount}</td>
+                      <td>{j.successCount}</td>
+                      <td>{j.failedCount}</td>
+                      <td>{new Date(j.createdAt).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="card">
+            <h3 className="card-title">Billing charges</h3>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Amount</th>
+                    <th>Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tenantDetail.billingCharges.length === 0 ? (
+                    <tr><td colSpan={4}>No charges yet</td></tr>
+                  ) : (
+                    tenantDetail.billingCharges.map((c) => (
+                      <tr key={c.id}>
+                        <td>{c.type}</td>
+                        <td>{statusBadge(c.status)}</td>
+                        <td>${(c.amountCents / 100).toFixed(2)}</td>
+                        <td>{new Date(c.createdAt).toLocaleString()}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -511,7 +764,17 @@ export function AdminConsole() {
 
       {tab === "billing" && (
         <div className="card">
-          <h2 className="card-title">Plans</h2>
+          <h2 className="card-title">Billing & testing</h2>
+          <p style={{ color: "var(--text-secondary)", marginBottom: 16 }}>
+            Global Shopify test charges:{" "}
+            <strong>{health.shopifyBillingTest ? "ON (test mode)" : "OFF (live charges)"}</strong>
+            — set <code>SHOPIFY_BILLING_TEST=true</code> in server <code>.env</code> for dev stores.
+          </p>
+          <p style={{ color: "var(--text-secondary)", marginBottom: 16 }}>
+            Per-store <strong>testing mode</strong> skips Shopify subscription checks and activates billing locally.
+            Use the tenant list or store detail page to toggle it.
+          </p>
+          <h3 className="card-title">Plans</h3>
           <div className="table-wrap">
           <table>
             <thead>

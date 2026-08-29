@@ -35,9 +35,25 @@ export async function consumeAiCredit(tenantId: string, credits = 1) {
 
 export async function ensureTenant(shopDomain: string, shopName?: string) {
   const freePlan = await prisma.plan.findFirst({ where: { slug: "free" } });
-  return tenantRepository.upsertByShopDomain(shopDomain, {
-    shopName,
-    planId: freePlan?.id,
+  const { featureFlagRepository } = await import("@tidysync/database");
+  const requireApproval = await featureFlagRepository.isEnabled("require_install_approval");
+  const existing = await tenantRepository.findByShopDomain(shopDomain);
+  if (existing) {
+    return tenantRepository.upsertByShopDomain(shopDomain, {
+      shopName,
+      planId: existing.planId ?? freePlan?.id,
+    });
+  }
+  return prisma.tenant.create({
+    data: {
+      shopDomain,
+      shopName,
+      planId: freePlan?.id,
+      status: "ACTIVE",
+      installApproved: !requireApproval,
+      aiCreditsResetAt: new Date(),
+    },
+    include: { plan: true },
   });
 }
 

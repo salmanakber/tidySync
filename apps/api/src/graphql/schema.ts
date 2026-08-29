@@ -75,11 +75,40 @@ export const typeDefs = `#graphql
     shopName: String
     status: String!
     billingStatus: String!
+    billingBypass: Boolean!
+    installApproved: Boolean!
+    adminNotes: String
+    installedAt: DateTime!
     productCount: Int!
     skuCount: Int!
     aiCreditsUsed: Int!
     extraAiCredits: Int!
     plan: Plan
+  }
+
+  type TenantJobStats {
+    total: Int!
+    running: Int!
+    failed: Int!
+    completed: Int!
+  }
+
+  type BillingChargeSummary {
+    id: ID!
+    type: String!
+    status: String!
+    amountCents: Int!
+    createdAt: DateTime!
+    plan: Plan
+  }
+
+  type TenantDetail {
+    tenant: Tenant!
+    jobStats: TenantJobStats!
+    recentJobs: [Job!]!
+    billingCharges: [BillingChargeSummary!]!
+    aiOperationsCount: Int!
+    auditLogCount: Int!
   }
 
   type BillingConfirmation {
@@ -194,6 +223,7 @@ export const typeDefs = `#graphql
     adminPlans: [Plan!]!
     adminSystemHealth: JSON!
     adminApiKeys(tenantId: ID): [ApiKey!]!
+    adminTenantDetail(tenantId: ID!): TenantDetail!
   }
 
   type Mutation {
@@ -212,6 +242,9 @@ export const typeDefs = `#graphql
     adminUpdateTenantPlan(tenantId: ID!, planSlug: String!): Tenant!
     adminUpdateTenantStatus(tenantId: ID!, status: String!): Tenant!
     adminGrantCredits(tenantId: ID!, credits: Int!): Tenant!
+    adminUpdateTenantBillingBypass(tenantId: ID!, billingBypass: Boolean!): Tenant!
+    adminUpdateTenantInstallApproved(tenantId: ID!, installApproved: Boolean!): Tenant!
+    adminUpdateTenantNotes(tenantId: ID!, notes: String): Tenant!
     adminCreateApiKey(tenantId: ID!, name: String!, scopes: [String!]): ApiKeyCreated!
     adminRevokeApiKey(id: ID!): Boolean!
   }
@@ -321,12 +354,62 @@ export const resolvers = {
             startedAt: { lt: new Date(Date.now() - 2 * 60 * 60 * 1000) },
           },
         }),
+        shopifyBillingTest:
+          process.env.SHOPIFY_BILLING_TEST === "true" || process.env.NODE_ENV !== "production",
+        appUrl: process.env.APP_URL ?? null,
       };
     },
     adminApiKeys: async (_: unknown, args: { tenantId?: string }, ctx: GraphQLContext) => {
       requireAdmin(ctx);
       const { apiKeyRepository } = await import("@tidysync/database");
       return apiKeyRepository.listForAdmin(args.tenantId);
+    },
+    adminTenantDetail: async (_: unknown, args: { tenantId: string }, ctx: GraphQLContext) => {
+      requireAdmin(ctx);
+      const tenant = await tenantRepository.findById(args.tenantId);
+      if (!tenant) throw new Error("Tenant not found");
+
+      const [total, running, failed, completed] = await Promise.all([
+        prisma.job.count({ where: { tenantId: tenant.id } }),
+        prisma.job.count({ where: { tenantId: tenant.id, status: "RUNNING" } }),
+        prisma.job.count({ where: { tenantId: tenant.id, status: "FAILED" } }),
+        prisma.job.count({ where: { tenantId: tenant.id, status: "COMPLETED" } }),
+      ]);
+
+      const recentJobs = await prisma.job.findMany({
+        where: { tenantId: tenant.id },
+        orderBy: { createdAt: "desc" },
+        take: 25,
+        include: { lineItems: { take: 0 } },
+      });
+
+      const billingCharges = await prisma.billingCharge.findMany({
+        where: { tenantId: tenant.id },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+        include: { plan: true },
+      });
+
+      const [aiOperationsCount, auditLogCount] = await Promise.all([
+        prisma.aiOperation.count({ where: { tenantId: tenant.id } }),
+        prisma.auditLog.count({ where: { tenantId: tenant.id } }),
+      ]);
+
+      return {
+        tenant: mapTenant(tenant),
+        jobStats: { total, running, failed, completed },
+        recentJobs: recentJobs.map(mapJob),
+        billingCharges: billingCharges.map((c) => ({
+          id: c.id,
+          type: c.type,
+          status: c.status,
+          amountCents: c.amountCents,
+          createdAt: c.createdAt,
+          plan: c.plan,
+        })),
+        aiOperationsCount,
+        auditLogCount,
+      };
     },
   },
   Mutation: {
@@ -608,7 +691,10 @@ export const resolvers = {
       requireAdmin(ctx);
       const plan = await prisma.plan.findUnique({ where: { slug: args.planSlug } });
       if (!plan) throw new Error("Plan not found");
-      const tenant = await tenantRepository.update(args.tenantId, { planId: plan.id });
+      const tenant = await tenantRepository.update(args.tenantId, {
+        planId: plan.id,
+        billingStatus: "ACTIVE",
+      });
       await prisma.auditLog.create({
         data: {
           action: "admin.tenant_plan_updated",
@@ -646,6 +732,54 @@ export const resolvers = {
           action: "admin.credits_granted",
           metadata: { tenantId: args.tenantId, credits: args.credits },
         },
+      });
+      return mapTenant(tenant);
+    },
+    adminUpdateTenantBillingBypass: async (
+      _: unknown,
+      args: { tenantId: string; billingBypass: boolean },
+      ctx: GraphQLContext,
+    ) => {
+      requireAdmin(ctx);
+      const tenant = await tenantRepository.update(args.tenantId, {
+        billingBypass: args.billingBypass,
+        billingStatus: args.billingBypass ? "ACTIVE" : undefined,
+      });
+      await prisma.auditLog.create({
+        data: {
+          action: "admin.billing_bypass_updated",
+          tenantId: args.tenantId,
+          metadata: { billingBypass: args.billingBypass },
+        },
+      });
+      return mapTenant(tenant);
+    },
+    adminUpdateTenantInstallApproved: async (
+      _: unknown,
+      args: { tenantId: string; installApproved: boolean },
+      ctx: GraphQLContext,
+    ) => {
+      requireAdmin(ctx);
+      const tenant = await tenantRepository.update(args.tenantId, {
+        installApproved: args.installApproved,
+      });
+      await prisma.auditLog.create({
+        data: {
+          action: "admin.install_approval_updated",
+          tenantId: args.tenantId,
+          metadata: { installApproved: args.installApproved },
+        },
+      });
+      return mapTenant(tenant);
+    },
+    adminUpdateTenantNotes: async (
+      _: unknown,
+      args: { tenantId: string; notes?: string },
+      ctx: GraphQLContext,
+    ) => {
+      requireAdmin(ctx);
+      const tenant = await tenantRepository.update(args.tenantId, {
+        adminNotes: args.notes ?? null,
       });
       return mapTenant(tenant);
     },

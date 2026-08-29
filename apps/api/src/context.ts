@@ -10,6 +10,7 @@ export interface GraphQLContext {
   shop?: string;
   tenantId?: string;
   tenantStatus?: string;
+  tenantInstallApproved?: boolean;
   adminUserId?: string;
   adminRole?: string;
 }
@@ -61,6 +62,7 @@ export async function buildContext(
             shop,
             tenantId: tenant.id,
             tenantStatus: tenant.status,
+            tenantInstallApproved: tenant.installApproved,
           };
         }
       }
@@ -73,7 +75,13 @@ export async function buildContext(
   if (shop) {
     const tenant = await tenantRepository.findByShopDomain(shop);
     if (tenant) {
-      return { role: "merchant", shop, tenantId: tenant.id, tenantStatus: tenant.status };
+      return {
+        role: "merchant",
+        shop,
+        tenantId: tenant.id,
+        tenantStatus: tenant.status,
+        tenantInstallApproved: tenant.installApproved,
+      };
     }
   }
 
@@ -94,6 +102,9 @@ export function requireActiveMerchant(ctx: GraphQLContext) {
   }
   if (ctx.tenantStatus === "UNINSTALLED") {
     throw new Error("App not installed on this store.");
+  }
+  if (ctx.tenantInstallApproved === false) {
+    throw new Error("This store is pending approval. Contact TidySync support.");
   }
   return merchant;
 }

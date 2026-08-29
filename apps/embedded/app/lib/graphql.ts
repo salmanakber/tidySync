@@ -99,7 +99,7 @@ export const QUERIES = {
   meTenant: `
     query MeTenant {
       meTenant {
-        id shopDomain shopName productCount aiCreditsUsed extraAiCredits billingStatus
+        id shopDomain shopName productCount aiCreditsUsed extraAiCredits billingStatus billingBypass installApproved
         plan { name slug maxProducts aiCreditsPerMonth aiCreditsRemaining isFree scheduledJobs crossPlatform multiStore priceMonthlyCents }
       }
     }

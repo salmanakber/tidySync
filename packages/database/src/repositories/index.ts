@@ -57,6 +57,10 @@ export const tenantRepository = {
     status?: "ACTIVE" | "SUSPENDED" | "UNINSTALLED";
     billingStatus?: "ACTIVE" | "PENDING_APPROVAL" | "DECLINED" | "FROZEN";
     shopifySubscriptionId?: string | null;
+    billingBypass?: boolean;
+    installApproved?: boolean;
+    adminNotes?: string | null;
+    extraAiCredits?: number;
   }) {
     return prisma.tenant.update({
       where: { id },
@@ -66,6 +70,10 @@ export const tenantRepository = {
         status: data.status,
         billingStatus: data.billingStatus,
         shopifySubscriptionId: data.shopifySubscriptionId,
+        billingBypass: data.billingBypass,
+        installApproved: data.installApproved,
+        adminNotes: data.adminNotes,
+        extraAiCredits: data.extraAiCredits,
       },
       include: { plan: true },
     });

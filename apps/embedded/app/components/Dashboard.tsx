@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import {
   Page,
   Layout,
@@ -19,6 +18,7 @@ import {
   EmptyState,
   Modal,
   Select,
+  Spinner,
 } from "@shopify/polaris";
 import {
   gqlRequest,
@@ -29,6 +29,7 @@ import {
   MUTATIONS,
 } from "../lib/graphql";
 import { MappingEditor } from "./MappingEditor";
+import { useShop } from "../providers";
 
 interface Tenant {
   shopDomain: string;
@@ -37,6 +38,8 @@ interface Tenant {
   aiCreditsUsed: number;
   extraAiCredits?: number;
   billingStatus?: string;
+  billingBypass?: boolean;
+  installApproved?: boolean;
   plan?: {
     name: string;
     slug?: string;
@@ -90,8 +93,9 @@ interface Job {
 }
 
 export function Dashboard() {
-  const searchParams = useSearchParams();
-  const shop = searchParams.get("shop") ?? "";
+  const { shop: urlShop, ready: shopReady } = useShop();
+  const [sessionShop, setSessionShop] = useState("");
+  const shop = urlShop || sessionShop;
 
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -99,6 +103,7 @@ export function Dashboard() {
   const [tab, setTab] = useState(0);
   const [nlPrompt, setNlPrompt] = useState("");
   const [loading, setLoading] = useState(false);
+  const [bootstrapping, setBootstrapping] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [exportPlatform, setExportPlatform] = useState("shopify");
   const [importPlatform, setImportPlatform] = useState("woocommerce");
@@ -119,6 +124,28 @@ export function Dashboard() {
   const [creditTopUp, setCreditTopUp] = useState("10");
 
   const loadData = useCallback(async () => {
+    if (!shop && !sessionShop) {
+      try {
+        const tenantData = await gqlRequest<{ meTenant: Tenant | null }>(QUERIES.meTenant, {});
+        if (tenantData.meTenant) {
+          setSessionShop(tenantData.meTenant.shopDomain);
+          setTenant(tenantData.meTenant);
+          const jobsData = await gqlRequest<{ jobs: Job[] }>(QUERIES.jobs, { limit: 20 });
+          setJobs(jobsData.jobs);
+          const plansData = await gqlRequest<{ availablePlans: PlanOption[] }>(QUERIES.availablePlans, {});
+          setPlans(plansData.availablePlans);
+          const templatesData = await gqlRequest<{ mappingTemplates: typeof mappingTemplates }>(
+            QUERIES.mappingTemplates,
+            {},
+          );
+          setMappingTemplates(templatesData.mappingTemplates);
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load");
+      }
+      return;
+    }
+
     if (!shop) return;
     try {
       const tenantData = await gqlRequest<{ meTenant: Tenant }>(QUERIES.meTenant, {}, shop);
@@ -133,16 +160,23 @@ export function Dashboard() {
         shop,
       );
       setMappingTemplates(templatesData.mappingTemplates);
+      setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load");
+      const message = e instanceof Error ? e.message : "Failed to load";
+      setError(message);
+      if (message.includes("not installed") && shop) {
+        window.open(`/auth?shop=${encodeURIComponent(shop)}`, "_top");
+      }
     }
-  }, [shop]);
+  }, [shop, sessionShop]);
 
   useEffect(() => {
-    loadData();
-    const interval = setInterval(loadData, 5000);
+    if (!shopReady) return;
+    setBootstrapping(true);
+    loadData().finally(() => setBootstrapping(false));
+    const interval = setInterval(loadData, 8000);
     return () => clearInterval(interval);
-  }, [loadData]);
+  }, [loadData, shopReady]);
 
   const handleExport = async () => {
     setLoading(true);
@@ -275,12 +309,55 @@ export function Dashboard() {
     setSchedules(data.scheduledJobs);
   };
 
-  if (!shop) {
+  const effectiveShop = shop;
+  const needsBilling =
+    tenant &&
+    !tenant.billingBypass &&
+    tenant.billingStatus &&
+    tenant.billingStatus !== "ACTIVE" &&
+    !tenant.plan?.isFree;
+
+  if (!shopReady || bootstrapping) {
     return (
       <Page title="TidySync">
-        <Banner tone="warning">
-          Open this app from Shopify Admin or add ?shop=your-store.myshopify.com
-        </Banner>
+        <Layout>
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="400" inlineAlign="center">
+                <Spinner accessibilityLabel="Loading TidySync" size="large" />
+                <Text as="p" variant="bodyMd" tone="subdued">Loading your store dashboard…</Text>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
+      </Page>
+    );
+  }
+
+  if (!effectiveShop && !tenant) {
+    return (
+      <Page title="TidySync">
+        <Layout>
+          <Layout.Section>
+            <Banner tone="warning">
+              Open this app from Shopify Admin. If you just installed, complete OAuth from your store apps list.
+            </Banner>
+          </Layout.Section>
+        </Layout>
+      </Page>
+    );
+  }
+
+  if (tenant && tenant.installApproved === false) {
+    return (
+      <Page title="TidySync">
+        <Layout>
+          <Layout.Section>
+            <Banner tone="warning" title="Store pending approval">
+              Your store is waiting for TidySync approval. Contact support if you need access sooner.
+            </Banner>
+          </Layout.Section>
+        </Layout>
       </Page>
     );
   }
@@ -288,7 +365,7 @@ export function Dashboard() {
   return (
     <Page
       title="TidySync"
-      subtitle="AI-guided bulk data for your store"
+      subtitle={tenant?.shopName ?? tenant?.shopDomain ?? effectiveShop}
       primaryAction={{
         content: "Refresh",
         onAction: loadData,
@@ -303,16 +380,74 @@ export function Dashboard() {
           </Layout.Section>
         )}
 
+        {needsBilling && (
+          <Layout.Section>
+            <Banner
+              tone="warning"
+              title="Complete your subscription"
+              action={{ content: "View plans", onAction: () => setTab(7) }}
+            >
+              Choose a plan to unlock imports, exports, and AI bulk edits for your store.
+            </Banner>
+          </Layout.Section>
+        )}
+
+        {tenant && (
+          <Layout.Section>
+            <div className="tidysync-stats-grid">
+              <Card>
+                <BlockStack gap="200">
+                  <Text as="span" variant="bodySm" tone="subdued">Current plan</Text>
+                  <Text as="p" variant="headingLg">{tenant.plan?.name ?? "Free"}</Text>
+                  <Badge tone="success">{tenant.billingBypass ? "Testing mode" : tenant.billingStatus ?? "ACTIVE"}</Badge>
+                </BlockStack>
+              </Card>
+              <Card>
+                <BlockStack gap="200">
+                  <Text as="span" variant="bodySm" tone="subdued">Products</Text>
+                  <Text as="p" variant="headingLg">{tenant.productCount.toLocaleString()}</Text>
+                  <Text as="span" variant="bodySm" tone="subdued">
+                    of {tenant.plan?.maxProducts?.toLocaleString() ?? "—"} allowed
+                  </Text>
+                </BlockStack>
+              </Card>
+              <Card>
+                <BlockStack gap="200">
+                  <Text as="span" variant="bodySm" tone="subdued">AI credits</Text>
+                  <Text as="p" variant="headingLg">{tenant.plan?.aiCreditsRemaining ?? "—"}</Text>
+                  <Text as="span" variant="bodySm" tone="subdued">remaining this month</Text>
+                </BlockStack>
+              </Card>
+              <Card>
+                <BlockStack gap="200">
+                  <Text as="span" variant="bodySm" tone="subdued">Recent jobs</Text>
+                  <Text as="p" variant="headingLg">{jobs.length}</Text>
+                  <Text as="span" variant="bodySm" tone="subdued">
+                    {jobs.filter((j) => j.status === "RUNNING").length} running now
+                  </Text>
+                </BlockStack>
+              </Card>
+            </div>
+          </Layout.Section>
+        )}
+
         {tenant?.plan && (
           <Layout.Section>
             <Card>
-              <InlineStack gap="400" align="space-between">
-                <Text as="span" variant="bodyMd">
-                  Plan: <strong>{tenant.plan.name}</strong> · {tenant.productCount} products
-                </Text>
-                <Text as="span" variant="bodyMd">
-                  AI credits remaining: {tenant.plan.aiCreditsRemaining ?? "—"}
-                </Text>
+              <InlineStack gap="400" align="space-between" blockAlign="center">
+                <BlockStack gap="100">
+                  <Text as="span" variant="bodyMd">
+                    <strong>{tenant.plan.name}</strong> · {tenant.productCount.toLocaleString()} products in catalog
+                  </Text>
+                  <Text as="span" variant="bodySm" tone="subdued">
+                    AI credits remaining: {tenant.plan.aiCreditsRemaining ?? "—"}
+                  </Text>
+                </BlockStack>
+                <InlineStack gap="200">
+                  <Button onClick={() => setTab(1)}>Import</Button>
+                  <Button onClick={() => setTab(2)}>Export</Button>
+                  <Button variant="primary" onClick={() => setTab(3)}>AI bulk edit</Button>
+                </InlineStack>
               </InlineStack>
             </Card>
           </Layout.Section>

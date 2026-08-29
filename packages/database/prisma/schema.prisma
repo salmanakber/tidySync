@@ -46,6 +46,9 @@ model Tenant {
   extraAiCredits   Int      @default(0) @map("extra_ai_credits")
   shopifySubscriptionId String? @map("shopify_subscription_id")
   billingStatus     BillingStatus @default(ACTIVE) @map("billing_status")
+  billingBypass     Boolean  @default(false) @map("billing_bypass")
+  installApproved   Boolean  @default(true) @map("install_approved")
+  adminNotes        String?  @map("admin_notes")
   installedAt   DateTime @default(now()) @map("installed_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
@@ -250,7 +253,7 @@ model JobLineItem {
   resourceType  String?  @map("resource_type")
   resourceId    String?  @map("resource_id")
   status        LineItemStatus
-  beforeValue   Json?    @map("before_value")
+beforeValue   Json?    @map("before_value")
   afterValue    Json?    @map("after_value")
   errorMessage  String?  @map("error_message")
   autoFixSuggestion String? @map("auto_fix_suggestion")
