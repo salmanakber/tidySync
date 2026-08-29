@@ -4,7 +4,7 @@ FROM node:22-alpine AS base
 WORKDIR /app
 
 FROM base AS deps
-COPY package.json package-lock.json turbo.json tsconfig.base.json ./
+COPY package.json package-lock.json .npmrc turbo.json tsconfig.base.json ./
 COPY packages ./packages
 COPY apps ./apps
 RUN npm ci
