@@ -1,11 +1,11 @@
 export const TIDYSYNC_APP_NAME = "TidySync";
 
 export const QUEUE_NAMES = {
-  IMPORT: "tidysync:import",
-  EXPORT: "tidysync:export",
-  BULK_EDIT: "tidysync:bulk-edit",
-  UNDO: "tidysync:undo",
-  CATALOG_SCAN: "tidysync:catalog-scan",
+  IMPORT: "tidysync-import",
+  EXPORT: "tidysync-export",
+  BULK_EDIT: "tidysync-bulk-edit",
+  UNDO: "tidysync-undo",
+  CATALOG_SCAN: "tidysync-catalog-scan",
 } as const;
 
 export const SUPPORTED_PLATFORMS = [

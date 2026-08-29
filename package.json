@@ -14,6 +14,7 @@
     "pm2:start": "pm2 start ecosystem.config.js",
     "pm2:restart": "pm2 restart tidysync",
     "pm2:stop": "pm2 stop tidysync",
+    "pm2:reset": "bash scripts/pm2-reset.sh",
     "db:generate": "npm run generate -w @tidysync/database",
     "db:push": "npm run push -w @tidysync/database",
     "db:migrate": "npm run migrate -w @tidysync/database",
