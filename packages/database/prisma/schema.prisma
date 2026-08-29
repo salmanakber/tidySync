@@ -1,0 +1,497 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Shopify OAuth sessions (@shopify/shopify-app-session-storage-prisma) ───
+
+model Session {
+  id                   String    @id
+  shop                 String
+  state                String
+  isOnline             Boolean   @default(false)
+  scope                String?
+  expires              DateTime?
+  accessToken          String
+  userId               BigInt?
+  firstName            String?
+  lastName             String?
+  email                String?
+  accountOwner         Boolean   @default(false)
+  locale               String?
+  collaborator         Boolean   @default(false)
+  emailVerified        Boolean   @default(false)
+  refreshToken         String?
+  refreshTokenExpires  DateTime?
+
+  @@index([shop])
+}
+
+// ─── Tenants (one per installed Shopify store) ───────────────────────────────
+
+model Tenant {
+  id            String   @id @default(cuid())
+  shopDomain    String   @unique @map("shop_domain")
+  shopName      String?  @map("shop_name")
+  planId        String?  @map("plan_id")
+  status        TenantStatus @default(ACTIVE)
+  productCount  Int      @default(0) @map("product_count")
+  skuCount      Int      @default(0) @map("sku_count")
+  aiCreditsUsed Int      @default(0) @map("ai_credits_used")
+  aiCreditsResetAt DateTime? @map("ai_credits_reset_at")
+  extraAiCredits   Int      @default(0) @map("extra_ai_credits")
+  shopifySubscriptionId String? @map("shopify_subscription_id")
+  billingStatus     BillingStatus @default(ACTIVE) @map("billing_status")
+  installedAt   DateTime @default(now()) @map("installed_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  plan          Plan?    @relation(fields: [planId], references: [id])
+  billingCharges BillingCharge[]
+  jobs          Job[]
+  jobSnapshots  JobSnapshot[]
+  jobLineItems  JobLineItem[]
+  aiOperations  AiOperation[]
+  auditLogs     AuditLog[]
+  fieldMaps     PlatformFieldMap[]
+  mappingTemplates MappingTemplate[]
+  scheduledJobs ScheduledJob[]
+  integrations  TenantIntegration[]
+  apiKeys       ApiKey[]
+  approvalRequests ApprovalRequest[]
+  linkedStores  LinkedStore[] @relation("AgencyTenant")
+  notificationSettings NotificationSetting?
+
+  @@map("tenants")
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  UNINSTALLED
+}
+
+enum BillingStatus {
+  ACTIVE
+  PENDING_APPROVAL
+  DECLINED
+  FROZEN
+}
+
+// ─── Internal admin users (ops team only) ───────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String?
+  role         AdminRole @default(SUPPORT)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  auditLogs    AuditLog[]
+
+  @@map("users")
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  SUPPORT
+  BILLING
+}
+
+// ─── Plans & pricing tiers ───────────────────────────────────────────────────
+
+model Plan {
+  id                    String   @id @default(cuid())
+  name                  String   @unique
+  slug                  String   @unique
+  maxProducts           Int      @map("max_products")
+  aiCreditsPerMonth     Int      @map("ai_credits_per_month")
+  scheduledJobs         Boolean  @default(false) @map("scheduled_jobs")
+  crossPlatform         Boolean  @default(false) @map("cross_platform")
+  multiStore            Boolean  @default(false) @map("multi_store")
+  priceMonthlyCents     Int      @map("price_monthly_cents")
+  isFree                Boolean  @default(false) @map("is_free")
+  shopifyPlanName       String?  @map("shopify_plan_name")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  tenants               Tenant[]
+  billingCharges        BillingCharge[]
+
+  @@map("plans")
+}
+
+// ─── Shopify billing charges (subscriptions + one-time top-ups) ─────────────
+
+model BillingCharge {
+  id              String   @id @default(cuid())
+  tenantId        String   @map("tenant_id")
+  type            BillingChargeType
+  shopifyChargeId String   @map("shopify_charge_id")
+  status          BillingChargeStatus @default(PENDING)
+  amountCents     Int      @map("amount_cents")
+  creditsGranted  Int?     @map("credits_granted")
+  planId          String?  @map("plan_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  activatedAt     DateTime? @map("activated_at")
+
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan            Plan?    @relation(fields: [planId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([shopifyChargeId])
+  @@map("billing_charges")
+}
+
+enum BillingChargeType {
+  RECURRING
+  ONE_TIME
+}
+
+enum BillingChargeStatus {
+  PENDING
+  ACTIVE
+  DECLINED
+  EXPIRED
+}
+
+// ─── Jobs (import/export/bulk-edit) ──────────────────────────────────────────
+
+model Job {
+  id            String    @id @default(cuid())
+  tenantId      String    @map("tenant_id")
+  type          JobType
+  status        JobStatus @default(PENDING)
+  resourceType  String    @default("products") @map("resource_type")
+  sourcePlatform String?  @map("source_platform")
+  targetPlatform String?  @map("target_platform")
+  fileName      String?   @map("file_name")
+  filePath      String?   @map("file_path")
+  rowCount      Int       @default(0) @map("row_count")
+  processedCount Int      @default(0) @map("processed_count")
+  successCount  Int       @default(0) @map("success_count")
+  failedCount   Int       @default(0) @map("failed_count")
+  skippedCount  Int       @default(0) @map("skipped_count")
+  mutationPlan  Json?     @map("mutation_plan")
+  diffPreview   Json?     @map("diff_preview")
+  impactSummary String?   @map("impact_summary")
+  errorSummary  String?   @map("error_summary")
+  nlPrompt      String?   @map("nl_prompt")
+  isAiGenerated Boolean   @default(false) @map("is_ai_generated")
+  approvedAt    DateTime? @map("approved_at")
+  startedAt     DateTime? @map("started_at")
+  finishedAt    DateTime? @map("finished_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  snapshots     JobSnapshot[]
+  lineItems     JobLineItem[]
+  aiOperations  AiOperation[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt])
+  @@map("jobs")
+}
+
+enum JobType {
+  IMPORT
+  EXPORT
+  BULK_EDIT
+  UNDO
+  CATALOG_HEALTH_SCAN
+  CONTENT_REWRITE
+}
+
+enum JobStatus {
+  PENDING
+  MAPPING
+  PREVIEW
+  APPROVED
+  QUEUED
+  RUNNING
+  PAUSED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+// ─── Snapshots for undo ──────────────────────────────────────────────────────
+
+model JobSnapshot {
+  id            String   @id @default(cuid())
+  tenantId      String   @map("tenant_id")
+  jobId         String   @map("job_id")
+  resourceType  String   @map("resource_type")
+  resourceId    String   @map("resource_id")
+  beforeState   Json     @map("before_state")
+  afterState    Json?    @map("after_state")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  job           Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([tenantId, resourceType, resourceId])
+  @@map("job_snapshots")
+}
+
+// ─── Per-row job results ───────────────────────────────────────────────────────
+
+model JobLineItem {
+  id            String   @id @default(cuid())
+  tenantId      String   @map("tenant_id")
+  jobId         String   @map("job_id")
+  rowIndex      Int      @map("row_index")
+  resourceType  String?  @map("resource_type")
+  resourceId    String?  @map("resource_id")
+  status        LineItemStatus
+  beforeValue   Json?    @map("before_value")
+  afterValue    Json?    @map("after_value")
+  errorMessage  String?  @map("error_message")
+  autoFixSuggestion String? @map("auto_fix_suggestion")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  job           Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@map("job_line_items")
+}
+
+enum LineItemStatus {
+  SUCCESS
+  FAILED
+  SKIPPED
+  PREVIEW
+}
+
+// ─── AI operation audit trail ─────────────────────────────────────────────────
+
+model AiOperation {
+  id              String   @id @default(cuid())
+  tenantId        String   @map("tenant_id")
+  jobId           String?  @map("job_id")
+  operationType   AiOperationType @map("operation_type")
+  prompt          String?
+  generatedPlan   Json?    @map("generated_plan")
+  approvedPlan    Json?    @map("approved_plan")
+  creditsConsumed Int      @default(1) @map("credits_consumed")
+  modelUsed       String?  @map("model_used")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  job             Job?     @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@map("ai_operations")
+}
+
+enum AiOperationType {
+  NL_BULK_EDIT
+  COLUMN_MAPPING
+  CATALOG_HEALTH_SCAN
+  CONTENT_REWRITE
+  IMPACT_SUMMARY
+  ANOMALY_DETECTION
+}
+
+// ─── Audit log ─────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  tenantId    String?  @map("tenant_id")
+  userId      String?  @map("user_id")
+  action      String
+  resourceType String? @map("resource_type")
+  resourceId  String?  @map("resource_id")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([userId, createdAt])
+  @@map("audit_logs")
+}
+
+// ─── Platform field maps (config-driven cross-platform mapping) ───────────────
+
+model PlatformFieldMap {
+  id          String   @id @default(cuid())
+  tenantId    String?  @map("tenant_id")
+  platformKey String   @map("platform_key")
+  version     String   @default("1")
+  name        String
+  isGlobal    Boolean  @default(false) @map("is_global")
+  mappings    Json
+  transforms  Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([platformKey, version, tenantId])
+  @@map("platform_field_maps")
+}
+
+// ─── Saved mapping templates per tenant ───────────────────────────────────────
+
+model MappingTemplate {
+  id          String   @id @default(cuid())
+  tenantId    String   @map("tenant_id")
+  name        String
+  platformKey String   @map("platform_key")
+  mappings    Json
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("mapping_templates")
+}
+
+// ─── Scheduled / recurring jobs ─────────────────────────────────────────────
+
+model ScheduledJob {
+  id          String   @id @default(cuid())
+  tenantId    String   @map("tenant_id")
+  name        String
+  jobType     JobType  @map("job_type")
+  schedule    String
+  config      Json     @default("{}")
+  enabled     Boolean  @default(true)
+  lastRunAt   DateTime? @map("last_run_at")
+  nextRunAt   DateTime? @map("next_run_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, enabled])
+  @@map("scheduled_jobs")
+}
+
+// ─── Feature flags (global + per-tenant overrides) ───────────────────────────
+
+model FeatureFlag {
+  id          String   @id @default(cuid())
+  key         String
+  tenantId    String?  @map("tenant_id")
+  enabled     Boolean  @default(false)
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([key, tenantId])
+  @@map("feature_flags")
+}
+
+// ─── Tenant integrations (FTP, Drive, Dropbox, Slack, Sheets) ───────────────
+
+model TenantIntegration {
+  id          String   @id @default(cuid())
+  tenantId    String   @map("tenant_id")
+  type        IntegrationType
+  config      Json     @default("{}")
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, type])
+  @@map("tenant_integrations")
+}
+
+enum IntegrationType {
+  FTP
+  SFTP
+  GOOGLE_DRIVE
+  DROPBOX
+  GOOGLE_SHEETS
+  SLACK
+  EMAIL
+}
+
+// ─── Public API keys ─────────────────────────────────────────────────────────
+
+model ApiKey {
+  id          String   @id @default(cuid())
+  tenantId    String   @map("tenant_id")
+  name        String
+  keyPrefix   String   @map("key_prefix")
+  keyHash     String   @map("key_hash")
+  scopes      String[] @default([])
+  lastUsedAt  DateTime? @map("last_used_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  revokedAt   DateTime? @map("revoked_at")
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([keyPrefix])
+  @@map("api_keys")
+}
+
+// ─── Approval workflows for large bulk ops ───────────────────────────────────
+
+model ApprovalRequest {
+  id            String   @id @default(cuid())
+  tenantId      String   @map("tenant_id")
+  jobId         String   @unique @map("job_id")
+  requestedBy   String?  @map("requested_by")
+  status        ApprovalStatus @default(PENDING)
+  impactThreshold Int?   @map("impact_threshold")
+  reviewedBy    String?  @map("reviewed_by")
+  reviewedAt    DateTime? @map("reviewed_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@map("approval_requests")
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// ─── Multi-store / agency linked stores ──────────────────────────────────────
+
+model LinkedStore {
+  id              String   @id @default(cuid())
+  agencyTenantId  String   @map("agency_tenant_id")
+  linkedShopDomain String  @map("linked_shop_domain")
+  linkedTenantId  String?  @map("linked_tenant_id")
+  label           String?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  agencyTenant    Tenant   @relation("AgencyTenant", fields: [agencyTenantId], references: [id], onDelete: Cascade)
+
+  @@unique([agencyTenantId, linkedShopDomain])
+  @@map("linked_stores")
+}
+
+// ─── Notification preferences ────────────────────────────────────────────────
+
+model NotificationSetting {
+  id              String   @id @default(cuid())
+  tenantId        String   @unique @map("tenant_id")
+  email           String?
+  emailOnComplete Boolean  @default(true) @map("email_on_complete")
+  emailOnFailure  Boolean  @default(true) @map("email_on_failure")
+  slackWebhook    String?  @map("slack_webhook")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("notification_settings")
+}

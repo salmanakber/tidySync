@@ -1,0 +1,27 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+@keyframes tidysync-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.tidysync-diff-row {
+  animation: tidysync-fade-in 0.3s ease forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tidysync-diff-row {
+    animation: none;
+  }
+}
+
+.tidysync-ai-accent {
+  border-left: 3px solid #5c6ac4;
+}

@@ -1,0 +1,70 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tidysync}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tidysync}
+      POSTGRES_DB: ${POSTGRES_DB:-tidysync}
+    volumes:
+      - tidysync_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tidysync"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - tidysync_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  tidysync:
+    build:
+      context: .
+      args:
+        SHOPIFY_API_KEY: ${SHOPIFY_API_KEY:-}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tidysync}:${POSTGRES_PASSWORD:-tidysync}@postgres:5432/${POSTGRES_DB:-tidysync}
+      REDIS_URL: redis://redis:6379
+      APP_URL: ${APP_URL:-https://sync.tidyflowapp.com}
+      EMBEDDED_APP_URL: ${EMBEDDED_APP_URL:-https://sync.tidyflowapp.com}
+      ADMIN_APP_URL: ${ADMIN_APP_URL:-https://sync.tidyflowapp.com/admin}
+      API_URL: ${API_URL:-https://sync.tidyflowapp.com}
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+      - "4000:4000"
+    volumes:
+      - tidysync_uploads:/app/uploads
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on:
+      - tidysync
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/tidysync.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/nginx/snippets:/etc/nginx/snippets:ro
+      - ./deploy/certs:/etc/nginx/certs:ro
+
+volumes:
+  tidysync_pgdata:
+  tidysync_redis:
+  tidysync_uploads:

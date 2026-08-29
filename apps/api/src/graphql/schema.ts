@@ -1,0 +1,686 @@
+import { prisma, tenantRepository, jobRepository, type Job, type JobStatus } from "@tidysync/database";
+import {
+  buildFieldMappings,
+  detectPlatformFromHeaders,
+  parseNlBulkEdit,
+  detectAnomalies,
+  buildImpactSummary,
+} from "@tidysync/shared";
+import { consumeAiCredit } from "../services/tenant";
+import {
+  createPlanSubscription,
+  createCreditTopUpPurchase,
+  listAvailablePlans,
+  computeAiCreditsRemaining,
+} from "../services/billing";
+import {
+  importQueue,
+  exportQueue,
+  bulkEditQueue,
+  undoQueue,
+} from "../queues";
+import { getShopGraphqlClient } from "../shopify/client";
+import { parseFileHeaders, parseFilePreview } from "../services/file-parser";
+import { fetchProductsForExport, buildDiffFromMutationPlan } from "../services/shopify-products";
+import {
+  type GraphQLContext,
+  requireMerchant,
+  requireActiveMerchant,
+  requireAdmin,
+} from "../context";
+
+export const typeDefs = `#graphql
+  scalar JSON
+  scalar DateTime
+
+  enum JobStatus {
+    PENDING
+    MAPPING
+    PREVIEW
+    APPROVED
+    QUEUED
+    RUNNING
+    PAUSED
+    COMPLETED
+    FAILED
+    CANCELLED
+  }
+
+  enum JobType {
+    IMPORT
+    EXPORT
+    BULK_EDIT
+    UNDO
+    CATALOG_HEALTH_SCAN
+    CONTENT_REWRITE
+  }
+
+  type Plan {
+    id: ID!
+    name: String!
+    slug: String!
+    maxProducts: Int!
+    aiCreditsPerMonth: Int!
+    aiCreditsRemaining: Int
+    scheduledJobs: Boolean!
+    crossPlatform: Boolean!
+    multiStore: Boolean!
+    priceMonthlyCents: Int!
+    isFree: Boolean!
+  }
+
+  type Tenant {
+    id: ID!
+    shopDomain: String!
+    shopName: String
+    status: String!
+    billingStatus: String!
+    productCount: Int!
+    skuCount: Int!
+    aiCreditsUsed: Int!
+    extraAiCredits: Int!
+    plan: Plan
+  }
+
+  type BillingConfirmation {
+    confirmationUrl: String!
+    chargeId: String!
+  }
+
+  type ApiKey {
+    id: ID!
+    name: String!
+    keyPrefix: String!
+    scopes: [String!]!
+    lastUsedAt: DateTime
+    createdAt: DateTime!
+    tenant: ApiKeyTenant
+  }
+
+  type ApiKeyTenant {
+    shopDomain: String!
+  }
+
+  type ApiKeyCreated {
+    id: ID!
+    name: String!
+    keyPrefix: String!
+    rawKey: String!
+    scopes: [String!]!
+  }
+
+  type JobLineItem {
+    id: ID!
+    rowIndex: Int!
+    resourceType: String
+    resourceId: String
+    status: String!
+    beforeValue: JSON
+    afterValue: JSON
+    errorMessage: String
+    autoFixSuggestion: String
+  }
+
+  type Job {
+    id: ID!
+    type: JobType!
+    status: JobStatus!
+    resourceType: String!
+    sourcePlatform: String
+    targetPlatform: String
+    fileName: String
+    rowCount: Int!
+    processedCount: Int!
+    successCount: Int!
+    failedCount: Int!
+    skippedCount: Int!
+    mutationPlan: JSON
+    diffPreview: JSON
+    impactSummary: String
+    errorSummary: String
+    nlPrompt: String
+    isAiGenerated: Boolean!
+    approvedAt: DateTime
+    startedAt: DateTime
+    finishedAt: DateTime
+    createdAt: DateTime!
+    lineItems: [JobLineItem!]!
+  }
+
+  type FieldMappingSuggestion {
+    sourceColumn: String!
+    targetField: String!
+    suggested: Boolean!
+  }
+
+  type PlatformProfile {
+    id: ID!
+    platformKey: String!
+    version: String!
+    name: String!
+    mappings: JSON!
+  }
+
+  type MappingTemplate {
+    id: ID!
+    name: String!
+    platformKey: String!
+    mappings: JSON!
+  }
+
+  type AdminUser {
+    id: ID!
+    email: String!
+    name: String
+    role: String!
+  }
+
+  type AuthPayload {
+    token: String!
+    user: AdminUser!
+  }
+
+  type Query {
+    health: String!
+    meTenant: Tenant
+    availablePlans: [Plan!]!
+    jobs(limit: Int = 20): [Job!]!
+    job(id: ID!): Job
+    platformProfiles: [PlatformProfile!]!
+    mappingTemplates: [MappingTemplate!]!
+    adminTenants(limit: Int = 50): [Tenant!]!
+    adminJobs(limit: Int = 100, status: JobStatus): [Job!]!
+    adminJobStats: JSON!
+    adminPlans: [Plan!]!
+    adminSystemHealth: JSON!
+    adminApiKeys(tenantId: ID): [ApiKey!]!
+  }
+
+  type Mutation {
+    adminLogin(email: String!, password: String!): AuthPayload!
+    createExportJob(format: String, platformKey: String, resourceType: String): Job!
+    uploadImportFile(filePath: String!, fileName: String!, resourceType: String): Job!
+    suggestFieldMappings(jobId: ID!, platformKey: String): [FieldMappingSuggestion!]!
+    updateJobMappings(jobId: ID!, mappings: JSON!): Job!
+    generateNlBulkEdit(prompt: String!): Job!
+    approveJob(jobId: ID!): Job!
+    undoJob(jobId: ID!): Job!
+    saveMappingTemplate(name: String!, platformKey: String!, mappings: JSON!): MappingTemplate!
+    cancelJob(jobId: ID!): Job!
+    createPlanSubscription(planSlug: String!): BillingConfirmation!
+    purchaseCreditTopUp(credits: Int!): BillingConfirmation!
+    adminUpdateTenantPlan(tenantId: ID!, planSlug: String!): Tenant!
+    adminUpdateTenantStatus(tenantId: ID!, status: String!): Tenant!
+    adminGrantCredits(tenantId: ID!, credits: Int!): Tenant!
+    adminCreateApiKey(tenantId: ID!, name: String!, scopes: [String!]): ApiKeyCreated!
+    adminRevokeApiKey(id: ID!): Boolean!
+  }
+`;
+
+function mapTenant(tenant: NonNullable<Awaited<ReturnType<typeof tenantRepository.findById>>>) {
+  return {
+    ...tenant,
+    plan: tenant.plan
+      ? {
+          ...tenant.plan,
+          aiCreditsRemaining: computeAiCreditsRemaining(tenant),
+        }
+      : null,
+  };
+}
+
+export const resolvers = {
+  JSON: {
+    serialize: (v: unknown) => v,
+    parseValue: (v: unknown) => v,
+    parseLiteral: (ast: { value: unknown }) => ast.value,
+  },
+  DateTime: {
+    serialize: (v: Date) => v.toISOString(),
+    parseValue: (v: string) => new Date(v),
+  },
+  Query: {
+    health: () => "ok",
+    availablePlans: async () => listAvailablePlans(),
+    meTenant: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
+      const { tenantId } = requireMerchant(ctx);
+      const tenant = await tenantRepository.findById(tenantId);
+      if (!tenant) return null;
+      return mapTenant(tenant);
+    },
+    jobs: async (_: unknown, args: { limit?: number }, ctx: GraphQLContext) => {
+      const { tenantId } = requireMerchant(ctx);
+      const jobs = await jobRepository.listForTenant(tenantId, args.limit ?? 20);
+      return jobs.map(mapJob);
+    },
+    job: async (_: unknown, args: { id: string }, ctx: GraphQLContext) => {
+      const { tenantId } = requireMerchant(ctx);
+      const job = await jobRepository.findForTenant(tenantId, args.id);
+      return job ? mapJob(job) : null;
+    },
+    platformProfiles: async () => {
+      return prisma.platformFieldMap.findMany({
+        where: { isGlobal: true },
+      });
+    },
+    mappingTemplates: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
+      const { tenantId } = requireMerchant(ctx);
+      return prisma.mappingTemplate.findMany({ where: { tenantId } });
+    },
+    adminTenants: async (_: unknown, args: { limit?: number }, ctx: GraphQLContext) => {
+      requireAdmin(ctx);
+      return tenantRepository.listForAdmin(args.limit ?? 50);
+    },
+    adminJobs: async (
+      _: unknown,
+      args: { limit?: number; status?: string },
+      ctx: GraphQLContext,
+    ) => {
+      requireAdmin(ctx);
+      return jobRepository.listForAdmin(args.limit ?? 100, args.status as JobStatus | undefined);
+    },
+    adminJobStats: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
+      requireAdmin(ctx);
+      const [total, running, failed, completed] = await jobRepository.countByStatus();
+      return { total, running, failed, completed };
+    },
+    adminPlans: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
+      requireAdmin(ctx);
+      return listAvailablePlans();
+    },
+    adminSystemHealth: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
+      requireAdmin(ctx);
+      const { getRedisConnection } = await import("../queues");
+      const redis = getRedisConnection();
+      let redisOk = false;
+      try {
+        const pong = await redis.ping();
+        redisOk = pong === "PONG";
+      } catch {
+        redisOk = false;
+      }
+      const [tenantCount, jobCounts] = await Promise.all([
+        prisma.tenant.count({ where: { status: "ACTIVE" } }),
+        jobRepository.countByStatus(),
+      ]);
+      const { listConfiguredAiProviders } = await import("@tidysync/ai");
+      return {
+        redis: redisOk ? "ok" : "error",
+        activeTenants: tenantCount,
+        aiProviders: listConfiguredAiProviders(),
+        aiProviderMode: process.env.AI_PROVIDER ?? "auto",
+        jobs: {
+          total: jobCounts[0],
+          running: jobCounts[1],
+          failed: jobCounts[2],
+          completed: jobCounts[3],
+        },
+        stuckJobs: await prisma.job.count({
+          where: {
+            status: "RUNNING",
+            startedAt: { lt: new Date(Date.now() - 2 * 60 * 60 * 1000) },
+          },
+        }),
+      };
+    },
+    adminApiKeys: async (_: unknown, args: { tenantId?: string }, ctx: GraphQLContext) => {
+      requireAdmin(ctx);
+      const { apiKeyRepository } = await import("@tidysync/database");
+      return apiKeyRepository.listForAdmin(args.tenantId);
+    },
+  },
+  Mutation: {
+    adminLogin: async (_: unknown, args: { email: string; password: string }) => {
+      const bcrypt = await import("bcryptjs");
+      const jwt = await import("jsonwebtoken");
+      const user = await prisma.user.findUnique({ where: { email: args.email } });
+      if (!user || !(await bcrypt.compare(args.password, user.passwordHash))) {
+        throw new Error("Invalid credentials");
+      }
+      const token = jwt.sign(
+        { userId: user.id, role: user.role },
+        process.env.ADMIN_JWT_SECRET ?? "dev-secret",
+        { expiresIn: "12h" },
+      );
+      return {
+        token,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+        },
+      };
+    },
+    createExportJob: async (
+      _: unknown,
+      args: { format?: string; platformKey?: string; resourceType?: string },
+      ctx: GraphQLContext,
+    ) => {
+      const { tenantId, shop } = requireActiveMerchant(ctx);
+      const resourceType = args.resourceType ?? "products";
+
+      const job = await prisma.job.create({
+        data: {
+          tenantId,
+          type: "EXPORT",
+          status: "QUEUED",
+          targetPlatform: args.platformKey ?? "shopify",
+          resourceType,
+        },
+      });
+
+      await exportQueue.add("export", {
+        jobId: job.id,
+        tenantId,
+        shop,
+        platformKey: args.platformKey,
+        resourceType,
+      });
+      return mapJob({ ...job, lineItems: [] });
+    },
+    uploadImportFile: async (
+      _: unknown,
+      args: { filePath: string; fileName: string; resourceType?: string },
+      ctx: GraphQLContext,
+    ) => {
+      const { tenantId } = requireActiveMerchant(ctx);
+      const resourceType = args.resourceType ?? "products";
+
+      const headers = await parseFileHeaders(args.filePath);
+      const detected = detectPlatformFromHeaders(headers);
+
+      const job = await prisma.job.create({
+        data: {
+          tenantId,
+          type: "IMPORT",
+          status: "MAPPING",
+          fileName: args.fileName,
+          filePath: args.filePath,
+          sourcePlatform: detected ?? "unknown",
+          resourceType,
+          rowCount: 0,
+        },
+      });
+
+      const preview = await parseFilePreview(args.filePath, 5);
+      await prisma.auditLog.create({
+        data: {
+          tenantId,
+          action: "import.uploaded",
+          resourceType: "job",
+          resourceId: job.id,
+          metadata: { fileName: args.fileName, detectedPlatform: detected },
+        },
+      });
+
+      return mapJob({ ...job, lineItems: [], diffPreview: { previewRows: preview } as unknown as Job["diffPreview"] });
+    },
+    suggestFieldMappings: async (
+      _: unknown,
+      args: { jobId: string; platformKey: string },
+      ctx: GraphQLContext,
+    ) => {
+      const { tenantId } = requireActiveMerchant(ctx);
+      const { suggestMappingsWithAi } = await import("./extensions");
+      return suggestMappingsWithAi(tenantId, args.jobId, args.platformKey);
+    },
+    updateJobMappings: async (
+      _: unknown,
+      args: { jobId: string; mappings: unknown },
+      ctx: GraphQLContext,
+    ) => {
+      const { tenantId } = requireActiveMerchant(ctx);
+
+      const job = await prisma.job.findFirst({ where: { id: args.jobId, tenantId } });
+      if (!job?.filePath) throw new Error("Job not found");
+
+      const previewRows = await parseFilePreview(job.filePath, 100);
+      const mappings = args.mappings as Array<{ sourceColumn: string; targetField: string }>;
+      const resType = job.resourceType ?? "products";
+
+      const diffRows: Array<{
+        resourceType: string;
+        resourceId: string;
+        resourceTitle?: string;
+        field: string;
+        before: string | number | null;
+        after: string | number | null;
+      }> = [];
+
+      for (let i = 0; i < previewRows.length; i++) {
+        const row = previewRows[i];
+        for (const mapping of mappings) {
+          if (!mapping.targetField) continue;
+          const after = row[mapping.sourceColumn] ?? null;
+          diffRows.push({
+            resourceType: resType,
+            resourceId: `preview-${i}`,
+            resourceTitle:
+              row[mappings.find((m) => m.targetField === "title" || m.targetField === "email")?.sourceColumn ?? ""] ??
+              `Row ${i + 1}`,
+            field: mapping.targetField,
+            before: null,
+            after: after as string | number | null,
+          });
+        }
+      }
+
+      const anomalies = detectAnomalies(
+        diffRows.map((r) => ({ field: r.field, before: r.before, after: r.after })),
+      );
+      const impactSummary = buildImpactSummary(diffRows.length, diffRows);
+
+      const updated = await prisma.job.update({
+        where: { id: job.id },
+        data: {
+          status: "PREVIEW",
+          mutationPlan: { mappings },
+          diffPreview: { rows: diffRows, totalChanges: diffRows.length, anomalies },
+          impactSummary,
+          rowCount: previewRows.length,
+        },
+        include: { lineItems: { take: 0 } },
+      });
+
+      return mapJob(updated);
+    },
+    generateNlBulkEdit: async (
+      _: unknown,
+      args: { prompt: string },
+      ctx: GraphQLContext,
+    ) => {
+      const { tenantId, shop } = requireActiveMerchant(ctx);
+      const { generateNlBulkEditWithAi } = await import("./extensions");
+      return generateNlBulkEditWithAi(tenantId, shop, args.prompt);
+    },
+    approveJob: async (_: unknown, args: { jobId: string }, ctx: GraphQLContext) => {
+      const { tenantId, shop } = requireActiveMerchant(ctx);
+
+      const job = await prisma.job.findFirst({ where: { id: args.jobId, tenantId } });
+      if (!job) throw new Error("Job not found");
+      if (job.status !== "PREVIEW") throw new Error("Job must be in PREVIEW status to approve");
+
+      const updated = await prisma.job.update({
+        where: { id: job.id },
+        data: { status: "QUEUED", approvedAt: new Date() },
+        include: { lineItems: { take: 0 } },
+      });
+
+      const queuePayload = { jobId: job.id, tenantId, shop };
+
+      if (job.type === "IMPORT") {
+        await importQueue.add("import", queuePayload);
+      } else if (job.type === "EXPORT") {
+        await exportQueue.add("export", queuePayload);
+      } else if (job.type === "BULK_EDIT") {
+        await bulkEditQueue.add("bulk-edit", queuePayload);
+      }
+
+      await prisma.auditLog.create({
+        data: {
+          tenantId,
+          action: "job.approved",
+          resourceType: "job",
+          resourceId: job.id,
+        },
+      });
+
+      return mapJob(updated);
+    },
+    undoJob: async (_: unknown, args: { jobId: string }, ctx: GraphQLContext) => {
+      const { tenantId, shop } = requireActiveMerchant(ctx);
+
+      const originalJob = await prisma.job.findFirst({
+        where: { id: args.jobId, tenantId, status: "COMPLETED" },
+      });
+      if (!originalJob) throw new Error("Completed job not found for undo");
+
+      const undoJob = await prisma.job.create({
+        data: {
+          tenantId,
+          type: "UNDO",
+          status: "QUEUED",
+          mutationPlan: { undoJobId: originalJob.id },
+        },
+      });
+
+      await undoQueue.add("undo", {
+        jobId: undoJob.id,
+        tenantId,
+        shop,
+        undoJobId: originalJob.id,
+      });
+
+      return mapJob({ ...undoJob, lineItems: [] });
+    },
+    saveMappingTemplate: async (
+      _: unknown,
+      args: { name: string; platformKey: string; mappings: unknown },
+      ctx: GraphQLContext,
+    ) => {
+      const { tenantId } = requireActiveMerchant(ctx);
+
+      return prisma.mappingTemplate.create({
+        data: {
+          tenantId,
+          name: args.name,
+          platformKey: args.platformKey,
+          mappings: args.mappings as object,
+        },
+      });
+    },
+    cancelJob: async (_: unknown, args: { jobId: string }, ctx: GraphQLContext) => {
+      const { tenantId } = requireActiveMerchant(ctx);
+
+      const job = await prisma.job.findFirst({ where: { id: args.jobId, tenantId } });
+      if (!job) throw new Error("Job not found");
+
+      const updated = await prisma.job.update({
+        where: { id: job.id },
+        data: { status: "CANCELLED" },
+        include: { lineItems: { take: 0 } },
+      });
+
+      return mapJob(updated);
+    },
+    createPlanSubscription: async (
+      _: unknown,
+      args: { planSlug: string },
+      ctx: GraphQLContext,
+    ) => {
+      const { tenantId, shop } = requireActiveMerchant(ctx);
+      return createPlanSubscription(shop, tenantId, args.planSlug);
+    },
+    purchaseCreditTopUp: async (
+      _: unknown,
+      args: { credits: number },
+      ctx: GraphQLContext,
+    ) => {
+      const { tenantId, shop } = requireActiveMerchant(ctx);
+      return createCreditTopUpPurchase(shop, tenantId, args.credits);
+    },
+    adminUpdateTenantPlan: async (
+      _: unknown,
+      args: { tenantId: string; planSlug: string },
+      ctx: GraphQLContext,
+    ) => {
+      requireAdmin(ctx);
+      const plan = await prisma.plan.findUnique({ where: { slug: args.planSlug } });
+      if (!plan) throw new Error("Plan not found");
+      const tenant = await tenantRepository.update(args.tenantId, { planId: plan.id });
+      await prisma.auditLog.create({
+        data: {
+          action: "admin.tenant_plan_updated",
+          metadata: { tenantId: args.tenantId, planSlug: args.planSlug },
+        },
+      });
+      return mapTenant(tenant);
+    },
+    adminUpdateTenantStatus: async (
+      _: unknown,
+      args: { tenantId: string; status: string },
+      ctx: GraphQLContext,
+    ) => {
+      requireAdmin(ctx);
+      const tenant = await tenantRepository.update(args.tenantId, {
+        status: args.status as "ACTIVE" | "SUSPENDED" | "UNINSTALLED",
+      });
+      await prisma.auditLog.create({
+        data: {
+          action: "admin.tenant_status_updated",
+          metadata: { tenantId: args.tenantId, status: args.status },
+        },
+      });
+      return mapTenant(tenant);
+    },
+    adminGrantCredits: async (
+      _: unknown,
+      args: { tenantId: string; credits: number },
+      ctx: GraphQLContext,
+    ) => {
+      requireAdmin(ctx);
+      const tenant = await tenantRepository.grantExtraCredits(args.tenantId, args.credits);
+      await prisma.auditLog.create({
+        data: {
+          action: "admin.credits_granted",
+          metadata: { tenantId: args.tenantId, credits: args.credits },
+        },
+      });
+      return mapTenant(tenant);
+    },
+    adminCreateApiKey: async (
+      _: unknown,
+      args: { tenantId: string; name: string; scopes: string[] },
+      ctx: GraphQLContext,
+    ) => {
+      requireAdmin(ctx);
+      const { apiKeyRepository } = await import("@tidysync/database");
+      const { record, rawKey } = await apiKeyRepository.create(
+        args.tenantId,
+        args.name,
+        args.scopes,
+      );
+      return {
+        id: record.id,
+        name: record.name,
+        keyPrefix: record.keyPrefix,
+        rawKey,
+        scopes: record.scopes,
+      };
+    },
+    adminRevokeApiKey: async (_: unknown, args: { id: string }, ctx: GraphQLContext) => {
+      requireAdmin(ctx);
+      const { apiKeyRepository } = await import("@tidysync/database");
+      await apiKeyRepository.revoke(args.id);
+      return true;
+    },
+  },
+};
+
+function mapJob(job: Job & { lineItems?: unknown[] }) {
+  return {
+    ...job,
+    lineItems: job.lineItems ?? [],
+  };
+}
