@@ -21,6 +21,7 @@ In **App setup**:
 
 ## 3. API scopes
 
+
 Enable these scopes (match `.env` / `shopify.app.toml`):
 
 ```
