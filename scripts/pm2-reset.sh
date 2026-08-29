@@ -6,10 +6,7 @@ cd "$(dirname "$0")/.."
 echo "==> Stopping all PM2 apps..."
 pm2 delete tidysync 2>/dev/null || true
 pm2 delete tidySync 2>/dev/null || true
-pm2 delete tidysync-embedded 2>/dev/null || true
-pm2 delete tidysync-admin 2>/dev/null || true
-pm2 delete tidysync-api 2>/dev/null || true
-pm2 delete tidysync-worker 2>/dev/null || true
+pm2 delete all 2>/dev/null || true
 
 echo "==> Building..."
 npm run build
