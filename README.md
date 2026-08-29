@@ -79,15 +79,15 @@ Set `NEXT_PUBLIC_SHOPIFY_API_KEY` = your Shopify API key (embedded App Bridge).
 ```bash
 docker compose up -d          # Postgres + Redis
 cp .env.example .env
-pnpm install
-pnpm db:generate
-pnpm db:migrate
-pnpm db:seed
+npm install
+npm run db:generate
+npm run db:migrate
+npm run db:seed
 
-pnpm --filter @tidysync/api dev
-pnpm --filter @tidysync/worker dev
-pnpm --filter @tidysync/embedded dev
-pnpm --filter @tidysync/admin dev
+npm run dev -w @tidysync/api
+npm run dev -w @tidysync/worker
+npm run dev -w @tidysync/embedded
+npm run dev -w @tidysync/admin
 ```
 
 | Service | URL |
@@ -101,9 +101,9 @@ pnpm --filter @tidysync/admin dev
 ## Database (Prisma)
 
 ```bash
-pnpm db:migrate        # dev
-pnpm db:migrate:deploy # production VPS
-pnpm db:seed           # plans, platforms, feature flags, admin user
+npm run db:migrate        # dev
+npm run db:migrate:deploy # production VPS
+npm run db:seed           # plans, platforms, feature flags, admin user
 ```
 
 ## Public API

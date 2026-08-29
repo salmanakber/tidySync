@@ -1,14 +1,13 @@
 # TidySync production deployment — sync.tidyflowapp.com
 
 FROM node:22-alpine AS base
-RUN corepack enable && corepack prepare pnpm@10.10.0 --activate
 WORKDIR /app
 
 FROM base AS deps
-COPY package.json pnpm-workspace.yaml turbo.json tsconfig.base.json ./
+COPY package.json package-lock.json turbo.json tsconfig.base.json ./
 COPY packages ./packages
 COPY apps ./apps
-RUN pnpm install
+RUN npm ci
 
 FROM deps AS build
 ARG SHOPIFY_API_KEY=""
@@ -17,14 +16,8 @@ ENV NEXT_PUBLIC_API_URL=/api/graphql
 ENV NEXT_PUBLIC_SHOPIFY_API_KEY=$SHOPIFY_API_KEY
 ENV NEXT_PUBLIC_UPLOAD_URL=/api/upload
 ENV NEXT_PUBLIC_DOWNLOAD_URL=/download
-RUN pnpm db:generate
-RUN pnpm --filter @tidysync/shared build
-RUN pnpm --filter @tidysync/ai build
-RUN pnpm --filter @tidysync/database build
-RUN pnpm --filter @tidysync/api build
-RUN pnpm --filter @tidysync/worker build
-RUN pnpm --filter @tidysync/embedded build
-RUN pnpm --filter @tidysync/admin build
+RUN npm run db:generate
+RUN npm run build
 
 FROM base AS runner
 WORKDIR /app

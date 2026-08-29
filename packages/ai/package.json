@@ -8,10 +8,11 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@tidysync/shared": "workspace:*",
+    "@tidysync/shared": "*",
     "openai": "^4.77.0"
   },
   "devDependencies": {
+    "@types/node": "^22.10.2",
     "typescript": "^5.7.2"
   }
 }

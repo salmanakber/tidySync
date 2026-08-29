@@ -8,9 +8,9 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@tidysync/ai": "workspace:*",
-    "@tidysync/database": "workspace:*",
-    "@tidysync/shared": "workspace:*",
+    "@tidysync/ai": "*",
+    "@tidysync/database": "*",
+    "@tidysync/shared": "*",
     "@shopify/shopify-api": "^11.6.1",
     "csv-parse": "^5.6.0",
     "bullmq": "^5.34.5",

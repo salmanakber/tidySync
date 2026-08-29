@@ -2,19 +2,22 @@
   "name": "tidysync",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
     "lint": "turbo lint",
-    "db:generate": "pnpm --filter @tidysync/database generate",
-    "db:push": "pnpm --filter @tidysync/database push",
-    "db:migrate": "pnpm --filter @tidysync/database migrate",
-    "db:migrate:deploy": "pnpm --filter @tidysync/database migrate:deploy",
-    "db:seed": "pnpm --filter @tidysync/database seed"
+    "db:generate": "npm run generate -w @tidysync/database",
+    "db:push": "npm run push -w @tidysync/database",
+    "db:migrate": "npm run migrate -w @tidysync/database",
+    "db:migrate:deploy": "npm run migrate:deploy -w @tidysync/database",
+    "db:seed": "npm run seed -w @tidysync/database"
   },
   "devDependencies": {
     "turbo": "^2.3.3",
     "typescript": "^5.7.2"
-  },
-  "packageManager": "pnpm@10.10.0"
+  }
 }
