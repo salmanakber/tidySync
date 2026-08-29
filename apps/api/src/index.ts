@@ -331,6 +331,7 @@ const graphqlHandler = (req: express.Request, res: express.Response) => {
 
 app.all("/graphql", graphqlHandler);
 app.all("/api/graphql", graphqlHandler);
+app.all("/admin/api/graphql", graphqlHandler);
 
 async function main() {
   await attachUiApps(app);

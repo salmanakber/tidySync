@@ -6,7 +6,7 @@ const nextConfig = {
   basePath: "/admin",
   transpilePackages: ["@tidysync/shared"],
   async rewrites() {
-    const apiUrl = process.env.API_URL ?? "http://localhost:4000";
+    const apiUrl = process.env.API_URL ?? "http://127.0.0.1:4000";
     return [{ source: "/api/graphql", destination: `${apiUrl}/graphql` }];
   },
 };

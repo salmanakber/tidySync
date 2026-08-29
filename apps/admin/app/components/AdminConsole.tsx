@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/admin/api/graphql";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/graphql";
 
 async function adminGql<T>(
   query: string,

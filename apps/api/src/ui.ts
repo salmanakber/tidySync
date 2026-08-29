@@ -1,5 +1,6 @@
 import next from "next";
 import path from "node:path";
+import { parse as parseUrl } from "node:url";
 import type { Express, Request, Response } from "express";
 
 /** Serve embedded + admin inside the same HTTP server (no extra ports). */
@@ -19,12 +20,19 @@ export async function attachUiApps(app: Express) {
   const embeddedHandler = embedded.getRequestHandler();
   const adminHandler = admin.getRequestHandler();
 
+  const serveAdmin = (req: Request, res: Response) => {
+    adminHandler(req, res, parseUrl(req.url ?? "", true));
+  };
+
+  const serveEmbedded = (req: Request, res: Response) => {
+    embeddedHandler(req, res, parseUrl(req.url ?? "", true));
+  };
+
+  // Admin routes first — must not fall through to embedded (shows merchant UI)
+  app.all(/^\/admin(?:\/.*)?$/, serveAdmin);
+
+  // Everything else → Shopify embedded app
   app.use((req: Request, res: Response) => {
-    const p = req.path;
-    if (p === "/admin" || p.startsWith("/admin/")) {
-      adminHandler(req, res);
-      return;
-    }
-    embeddedHandler(req, res);
+    serveEmbedded(req, res);
   });
 }
