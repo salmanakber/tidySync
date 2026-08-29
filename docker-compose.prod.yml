@@ -44,9 +44,9 @@ services:
       EMBEDDED_APP_URL: ${EMBEDDED_APP_URL:-https://sync.tidyflowapp.com}
       ADMIN_APP_URL: ${ADMIN_APP_URL:-https://sync.tidyflowapp.com/admin}
       API_URL: ${API_URL:-https://sync.tidyflowapp.com}
+      EMBEDDED_INTERNAL_URL: http://127.0.0.1:3000
+      ADMIN_INTERNAL_URL: http://127.0.0.1:3001
     ports:
-      - "3000:3000"
-      - "3001:3001"
       - "4000:4000"
     volumes:
       - tidysync_uploads:/app/uploads

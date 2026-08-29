@@ -92,8 +92,8 @@ npm run dev -w @tidysync/admin
 
 | Service | URL |
 |---------|-----|
-| Embedded | http://localhost:3000?shop=your-store.myshopify.com |
-| Admin | http://localhost:3001/admin |
+| Embedded | http://localhost:4000?shop=your-store.myshopify.com |
+| Admin | http://localhost:4000/admin |
 | GraphQL | http://localhost:4000/graphql |
 
 **Admin login (after seed):** `admin@tidysync.local` / `changeme123`

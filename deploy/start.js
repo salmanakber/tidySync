@@ -1,27 +1,51 @@
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 
+const root = path.join(__dirname, "..");
+const nextBin = path.join(root, "node_modules/next/dist/bin/next");
+
 const procs = [
-  { name: "api", cmd: "node", args: [path.join("apps/api/dist/index.js")] },
-  { name: "worker", cmd: "node", args: [path.join("apps/worker/dist/index.js")] },
   {
     name: "embedded",
     cmd: "node",
-    args: [path.join("apps/embedded/node_modules/next/dist/bin/next"), "start", "-p", "3000"],
+    args: [nextBin, "start", "apps/embedded", "-p", "3000"],
+    cwd: root,
   },
   {
     name: "admin",
     cmd: "node",
-    args: [path.join("apps/admin/node_modules/next/dist/bin/next"), "start", "-p", "3001"],
+    args: [nextBin, "start", "apps/admin", "-p", "3001"],
+    cwd: root,
+  },
+  {
+    name: "api",
+    cmd: "node",
+    args: [path.join(root, "apps/api/dist/index.js")],
+    cwd: root,
+    env: {
+      ...process.env,
+      EMBEDDED_INTERNAL_URL: "http://127.0.0.1:3000",
+      ADMIN_INTERNAL_URL: "http://127.0.0.1:3001",
+    },
+  },
+  {
+    name: "worker",
+    cmd: "node",
+    args: [path.join(root, "apps/worker/dist/index.js")],
+    cwd: root,
   },
 ];
 
 for (const p of procs) {
-  const child = spawn(p.cmd, p.args, { stdio: "inherit", env: process.env });
+  const child = spawn(p.cmd, p.args, {
+    stdio: "inherit",
+    env: p.env ?? process.env,
+    cwd: p.cwd ?? root,
+  });
   child.on("exit", (code) => {
     console.error(`${p.name} exited with code ${code}`);
     process.exit(code ?? 1);
   });
 }
 
-console.log("TidySync all services started");
+console.log("TidySync started — public entry http://localhost:4000");

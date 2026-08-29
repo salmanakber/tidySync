@@ -41,6 +41,6 @@ COPY --from=build /app/deploy ./deploy
 
 RUN mkdir -p /app/uploads
 
-EXPOSE 3000 3001 4000
+EXPOSE 4000
 
 CMD ["node", "deploy/start.js"]

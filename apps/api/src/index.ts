@@ -13,8 +13,11 @@ import { shopify, sessionStorage } from "./shopify/client";
 import { ensureTenant } from "./services/tenant";
 import { apiKeyAuth } from "./middleware/api-key";
 import { prisma } from "@tidysync/database";
+import { registerUiProxies } from "./proxy";
 
 const PORT = Number(process.env.API_PORT ?? 4000);
+const publicAppUrl = process.env.APP_URL ?? `http://localhost:${PORT}`;
+const embeddedAppUrl = process.env.EMBEDDED_APP_URL ?? publicAppUrl;
 const uploadDir = process.env.UPLOAD_DIR ?? path.join(process.cwd(), "uploads");
 
 if (!fs.existsSync(uploadDir)) {
@@ -89,7 +92,10 @@ app.get("/health", async (_req, res) => {
   });
 });
 
-app.get("/auth", async (req, res) => {
+const beginAuth = async (
+  req: express.Request,
+  res: express.Response,
+) => {
   const shop = req.query.shop as string;
   if (!shop) {
     res.status(400).send("Missing shop parameter");
@@ -103,7 +109,10 @@ app.get("/auth", async (req, res) => {
     rawRequest: req,
     rawResponse: res,
   });
-});
+};
+
+app.get("/auth", beginAuth);
+app.get("/api/auth", beginAuth);
 
 app.get("/auth/callback", async (req, res) => {
   const callback = await shopify.auth.callback({
@@ -115,8 +124,7 @@ app.get("/auth/callback", async (req, res) => {
   await sessionStorage.storeSession(session);
   await ensureTenant(session.shop);
 
-  const embeddedUrl = process.env.EMBEDDED_APP_URL ?? "http://localhost:3000";
-  res.redirect(`${embeddedUrl}?shop=${session.shop}`);
+  res.redirect(`${embeddedAppUrl}?shop=${session.shop}`);
 });
 
 app.get("/billing/confirm", async (req, res) => {
@@ -149,15 +157,14 @@ app.get("/billing/confirm", async (req, res) => {
     }
 
     const result = await confirmBillingCharge(shop, chargeId, type, planSlug, credits);
-    const embeddedUrl = process.env.EMBEDDED_APP_URL ?? "http://localhost:3000";
     const status = result.ok ? "success" : "declined";
-    res.redirect(`${embeddedUrl}?shop=${encodeURIComponent(shop)}&billing=${status}&tab=settings`);
+    res.redirect(`${embeddedAppUrl}?shop=${encodeURIComponent(shop)}&billing=${status}&tab=settings`);
   } catch (err) {
     res.status(500).send(err instanceof Error ? err.message : "Billing confirmation failed");
   }
 });
 
-app.post("/upload", upload.single("file"), (req, res) => {
+const handleUpload = (req: express.Request, res: express.Response) => {
   if (!req.file) {
     res.status(400).json({ error: "No file uploaded" });
     return;
@@ -166,7 +173,10 @@ app.post("/upload", upload.single("file"), (req, res) => {
     filePath: req.file.path,
     fileName: req.file.originalname,
   });
-});
+};
+
+app.post("/upload", upload.single("file"), handleUpload);
+app.post("/api/upload", upload.single("file"), handleUpload);
 
 app.get("/audit/export/all", async (req, res) => {
   const shop = req.headers["x-tidysync-shop"] as string | undefined;
@@ -314,11 +324,18 @@ app.post("/internal/notify", async (req, res) => {
   res.json({ ok: true });
 });
 
-app.all("/graphql", (req, res) => {
+const graphqlHandler = (req: express.Request, res: express.Response) => {
   yoga(req, res);
-});
+};
+
+app.all("/graphql", graphqlHandler);
+app.all("/api/graphql", graphqlHandler);
+
+registerUiProxies(app);
 
 app.listen(PORT, () => {
-  console.log(`TidySync API listening on http://localhost:${PORT}`);
-  console.log(`GraphQL: http://localhost:${PORT}/graphql`);
+  console.log(`TidySync listening on http://localhost:${PORT}`);
+  console.log(`  Embedded app: ${embeddedAppUrl}`);
+  console.log(`  Admin:        ${process.env.ADMIN_APP_URL ?? `${publicAppUrl}/admin`}`);
+  console.log(`  GraphQL:      ${publicAppUrl}/graphql`);
 });
