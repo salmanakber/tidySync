@@ -41,11 +41,9 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-tidysync}:${POSTGRES_PASSWORD:-tidysync}@postgres:5432/${POSTGRES_DB:-tidysync}
       REDIS_URL: redis://redis:6379
       APP_URL: ${APP_URL:-https://sync.tidyflowapp.com}
-      EMBEDDED_APP_URL: ${EMBEDDED_APP_URL:-https://sync.tidyflowapp.com}
-      ADMIN_APP_URL: ${ADMIN_APP_URL:-https://sync.tidyflowapp.com/admin}
-      API_URL: ${API_URL:-https://sync.tidyflowapp.com}
+      PORT: ${PORT:-4000}
     ports:
-      - "4000:4000"
+      - "${PORT:-4000}:${PORT:-4000}"
     volumes:
       - tidysync_uploads:/app/uploads
 

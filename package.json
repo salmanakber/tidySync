@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
+    "start": "node server/start.js",
     "lint": "turbo lint",
     "pm2:start": "pm2 start ecosystem.config.js",
     "pm2:restart": "pm2 restart tidysync",
@@ -18,6 +19,9 @@
     "db:migrate": "npm run migrate -w @tidysync/database",
     "db:migrate:deploy": "npm run migrate:deploy -w @tidysync/database",
     "db:seed": "npm run seed -w @tidysync/database"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7"
   },
   "devDependencies": {
     "turbo": "^2.3.3",

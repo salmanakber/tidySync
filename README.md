@@ -64,25 +64,28 @@ docker compose -f docker-compose.prod.yml exec tidysync \
 
 Point DNS `sync.tidyflowapp.com` → VPS. Add TLS with Certbot on Nginx.
 
-## PM2 on VPS (one process, one port)
-
-Everything — embedded app, admin, GraphQL API — runs on **one port** (`API_PORT`, default **4000**). No separate 3000/3001 servers.
+## Production start (one command)
 
 ```bash
-npm install && npm run build
-
-pm2 delete tidysync-embedded tidysync-admin tidysync-api tidysync-worker 2>/dev/null || true
-pm2 delete tidysync 2>/dev/null || true
-
-npm run pm2:start
-pm2 save
+npm install
+npm run build
+npm start
 ```
 
-| URL | |
-|-----|---|
-| Embedded | `http://YOUR_SERVER:4000` |
-| Admin | `http://YOUR_SERVER:4000/admin` |
-| GraphQL | `http://YOUR_SERVER:4000/graphql` |
+Set **one URL** in `.env`:
+
+```env
+APP_URL=https://sync.tidyflowapp.com
+PORT=4000
+```
+
+| What | URL |
+|------|-----|
+| Shopify app | `https://sync.tidyflowapp.com` |
+| Admin | `https://sync.tidyflowapp.com/admin` |
+| GraphQL | `https://sync.tidyflowapp.com/graphql` |
+
+PM2 (optional): `npm run pm2:start` then `npm run pm2:restart`
 
 ## Shopify Partner setup
 

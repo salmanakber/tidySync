@@ -15,9 +15,9 @@ import { apiKeyAuth } from "./middleware/api-key";
 import { prisma } from "@tidysync/database";
 import { attachUiApps } from "./ui";
 
-const PORT = Number(process.env.API_PORT ?? 4000);
-const API_HOST = process.env.API_HOST ?? "0.0.0.0";
-const publicAppUrl = process.env.APP_URL ?? `http://localhost:${PORT}`;
+const PORT = Number(process.env.PORT ?? process.env.API_PORT ?? 4000);
+const API_HOST = process.env.HOST ?? process.env.API_HOST ?? "0.0.0.0";
+const publicAppUrl = (process.env.APP_URL ?? `http://localhost:${PORT}`).replace(/\/$/, "");
 const embeddedAppUrl = process.env.EMBEDDED_APP_URL ?? publicAppUrl;
 const uploadDir = process.env.UPLOAD_DIR ?? path.join(process.cwd(), "uploads");
 

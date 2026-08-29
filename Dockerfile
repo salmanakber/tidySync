@@ -5,6 +5,7 @@ WORKDIR /app
 
 FROM base AS deps
 COPY package.json package-lock.json .npmrc turbo.json tsconfig.base.json ./
+COPY server ./server
 COPY packages ./packages
 COPY apps ./apps
 RUN npm ci
@@ -37,10 +38,11 @@ COPY --from=build /app/apps/admin/.next ./apps/admin/.next
 COPY --from=build /app/apps/admin/package.json ./apps/admin/
 COPY --from=build /app/apps/admin/public ./apps/admin/public
 COPY --from=build /app/ecosystem.config.js ./
+COPY --from=build /app/server ./server
 COPY --from=build /app/deploy ./deploy
 
 RUN mkdir -p /app/uploads
 
 EXPOSE 4000
 
-CMD ["node", "deploy/start.js"]
+CMD ["node", "server/start.js"]
