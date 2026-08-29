@@ -8,8 +8,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-tidysync}
     volumes:
       - tidysync_pgdata:/var/lib/postgresql/data
-    ports:
-      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U tidysync"]
       interval: 10s
@@ -21,8 +19,6 @@ services:
     restart: unless-stopped
     volumes:
       - tidysync_redis:/data
-    ports:
-      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
