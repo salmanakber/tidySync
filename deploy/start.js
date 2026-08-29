@@ -1,51 +1,24 @@
+/**
+ * One PM2 process: worker (background) + unified HTTP server on API_PORT (default 4000).
+ * Embedded, admin, and API share a single port — no 3000/3001 servers.
+ */
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 
 const root = path.join(__dirname, "..");
-const nextBin = path.join(root, "node_modules/next/dist/bin/next");
+const port = process.env.API_PORT ?? "4000";
 
-const procs = [
-  {
-    name: "embedded",
-    cmd: "node",
-    args: [nextBin, "start", "apps/embedded", "-p", "3000"],
-    cwd: root,
-  },
-  {
-    name: "admin",
-    cmd: "node",
-    args: [nextBin, "start", "apps/admin", "-p", "3001"],
-    cwd: root,
-  },
-  {
-    name: "api",
-    cmd: "node",
-    args: [path.join(root, "apps/api/dist/index.js")],
-    cwd: root,
-    env: {
-      ...process.env,
-      EMBEDDED_INTERNAL_URL: "http://127.0.0.1:3000",
-      ADMIN_INTERNAL_URL: "http://127.0.0.1:3001",
-    },
-  },
-  {
-    name: "worker",
-    cmd: "node",
-    args: [path.join(root, "apps/worker/dist/index.js")],
-    cwd: root,
-  },
-];
+const worker = spawn("node", [path.join(root, "apps/worker/dist/index.js")], {
+  stdio: "inherit",
+  cwd: root,
+  env: process.env,
+});
 
-for (const p of procs) {
-  const child = spawn(p.cmd, p.args, {
-    stdio: "inherit",
-    env: p.env ?? process.env,
-    cwd: p.cwd ?? root,
-  });
-  child.on("exit", (code) => {
-    console.error(`${p.name} exited with code ${code}`);
-    process.exit(code ?? 1);
-  });
-}
+worker.on("exit", (code) => {
+  console.error(`worker exited with code ${code}`);
+  process.exit(code ?? 1);
+});
 
-console.log("TidySync started — public entry http://localhost:4000");
+require(path.join(root, "apps/api/dist/index.js"));
+
+console.log(`TidySync starting on port ${port} (embedded + admin + API)`);

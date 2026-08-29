@@ -13,9 +13,10 @@ import { shopify, sessionStorage } from "./shopify/client";
 import { ensureTenant } from "./services/tenant";
 import { apiKeyAuth } from "./middleware/api-key";
 import { prisma } from "@tidysync/database";
-import { registerUiProxies } from "./proxy";
+import { attachUiApps } from "./ui";
 
 const PORT = Number(process.env.API_PORT ?? 4000);
+const API_HOST = process.env.API_HOST ?? "0.0.0.0";
 const publicAppUrl = process.env.APP_URL ?? `http://localhost:${PORT}`;
 const embeddedAppUrl = process.env.EMBEDDED_APP_URL ?? publicAppUrl;
 const uploadDir = process.env.UPLOAD_DIR ?? path.join(process.cwd(), "uploads");
@@ -331,11 +332,18 @@ const graphqlHandler = (req: express.Request, res: express.Response) => {
 app.all("/graphql", graphqlHandler);
 app.all("/api/graphql", graphqlHandler);
 
-registerUiProxies(app);
+async function main() {
+  await attachUiApps(app);
 
-app.listen(PORT, () => {
-  console.log(`TidySync listening on http://localhost:${PORT}`);
-  console.log(`  Embedded app: ${embeddedAppUrl}`);
-  console.log(`  Admin:        ${process.env.ADMIN_APP_URL ?? `${publicAppUrl}/admin`}`);
-  console.log(`  GraphQL:      ${publicAppUrl}/graphql`);
+  app.listen(PORT, API_HOST, () => {
+    console.log(`TidySync listening on http://${API_HOST}:${PORT}`);
+    console.log(`  Embedded:  ${embeddedAppUrl}`);
+    console.log(`  Admin:     ${process.env.ADMIN_APP_URL ?? `${publicAppUrl}/admin`}`);
+    console.log(`  GraphQL:   ${publicAppUrl}/graphql`);
+  });
+}
+
+main().catch((err) => {
+  console.error("Failed to start TidySync:", err);
+  process.exit(1);
 });
