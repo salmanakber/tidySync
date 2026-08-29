@@ -1,4 +1,5 @@
 import { prisma } from "../src/index";
+import bcrypt from "bcryptjs";
 
 const PLANS = [
   {
@@ -239,7 +240,6 @@ async function main() {
 
   const adminEmail = process.env.SEED_ADMIN_EMAIL ?? "admin@tidysync.local";
   const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? "changeme123";
-  const bcrypt = await import("bcryptjs");
   const passwordHash = await bcrypt.hash(adminPassword, 12);
 
   await prisma.user.upsert({
