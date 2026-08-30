@@ -11,8 +11,8 @@
     "bcryptjs": "^2.4.3"
   },
   "scripts": {
-    "build": "tsc",
-    "generate": "dotenv -e ../../.env -- prisma generate",
+    "build": "prisma generate && tsc",
+    "generate": "prisma generate",
     "push": "dotenv -e ../../.env -- prisma db push",
     "migrate": "dotenv -e ../../.env -- prisma migrate dev",
     "migrate:deploy": "dotenv -e ../../.env -- prisma migrate deploy",

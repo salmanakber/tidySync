@@ -51,30 +51,10 @@ export const tenantRepository = {
     });
   },
 
-  update(id: string, data: {
-    shopName?: string;
-    planId?: string;
-    status?: "ACTIVE" | "SUSPENDED" | "UNINSTALLED";
-    billingStatus?: "ACTIVE" | "PENDING_APPROVAL" | "DECLINED" | "FROZEN";
-    shopifySubscriptionId?: string | null;
-    billingBypass?: boolean;
-    installApproved?: boolean;
-    adminNotes?: string | null;
-    extraAiCredits?: number;
-  }) {
+  update(id: string, data: Prisma.TenantUncheckedUpdateInput) {
     return prisma.tenant.update({
       where: { id },
-      data: {
-        shopName: data.shopName,
-        planId: data.planId,
-        status: data.status,
-        billingStatus: data.billingStatus,
-        shopifySubscriptionId: data.shopifySubscriptionId,
-        billingBypass: data.billingBypass,
-        installApproved: data.installApproved,
-        adminNotes: data.adminNotes,
-        extraAiCredits: data.extraAiCredits,
-      },
+      data,
       include: { plan: true },
     });
   },
