@@ -116,7 +116,13 @@ const RESOURCE_OPTIONS = [
 ];
 
 export function Dashboard() {
-  const { shop: urlShop, ready: shopReady } = useShop();
+  const {
+    shop: urlShop,
+    ready: shopReady,
+    authenticated,
+    authError,
+    beginInstall,
+  } = useShop();
   const [sessionShop, setSessionShop] = useState("");
   const shop = urlShop || sessionShop;
 
@@ -152,32 +158,13 @@ export function Dashboard() {
   const [undoingId, setUndoingId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
-    if (!shop && !sessionShop) {
-      try {
-        const tenantData = await gqlRequest<{ meTenant: Tenant | null }>(QUERIES.meTenant, {});
-        if (tenantData.meTenant) {
-          setSessionShop(tenantData.meTenant.shopDomain);
-          setTenant(tenantData.meTenant);
-          const jobsData = await gqlRequest<{ jobs: Job[] }>(QUERIES.jobs, { limit: 20 });
-          setJobs(jobsData.jobs);
-          const plansData = await gqlRequest<{ availablePlans: PlanOption[] }>(QUERIES.availablePlans, {});
-          setPlans(plansData.availablePlans);
-          const templatesData = await gqlRequest<{ mappingTemplates: typeof mappingTemplates }>(
-            QUERIES.mappingTemplates,
-            {},
-          );
-          setMappingTemplates(templatesData.mappingTemplates);
-        }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to load");
-      }
-      return;
-    }
-
     if (!shop) return;
     try {
       const tenantData = await gqlRequest<{ meTenant: Tenant }>(QUERIES.meTenant, {}, shop);
       setTenant(tenantData.meTenant);
+      if (tenantData.meTenant?.shopDomain) {
+        setSessionShop(tenantData.meTenant.shopDomain);
+      }
       const jobsData = await gqlRequest<{ jobs: Job[] }>(QUERIES.jobs, { limit: 20 }, shop);
       setJobs(jobsData.jobs);
       const plansData = await gqlRequest<{ availablePlans: PlanOption[] }>(QUERIES.availablePlans, {}, shop);
@@ -192,19 +179,28 @@ export function Dashboard() {
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to load";
       setError(message);
-      if (message.includes("not installed") && shop) {
-        window.open(`/auth?shop=${encodeURIComponent(shop)}`, "_top");
+      if (
+        message.includes("Unauthorized") ||
+        message.includes("not installed") ||
+        message.includes("merchant session")
+      ) {
+        // Let user reconnect rather than spam OAuth loops from the poller
+        setError("Shopify session missing. Click Connect to install / re-authorize TidySync.");
       }
     }
-  }, [shop, sessionShop]);
+  }, [shop]);
 
   useEffect(() => {
     if (!shopReady) return;
+    if (!shop || !authenticated) {
+      setBootstrapping(false);
+      return;
+    }
     setBootstrapping(true);
     loadData().finally(() => setBootstrapping(false));
-    const interval = setInterval(loadData, 4000);
+    const interval = setInterval(loadData, 5000);
     return () => clearInterval(interval);
-  }, [loadData, shopReady]);
+  }, [loadData, shopReady, shop, authenticated]);
 
   const handleExport = async () => {
     setLoading(true);
@@ -368,19 +364,30 @@ export function Dashboard() {
         <BlockStack gap="400" inlineAlign="center">
           <Spinner accessibilityLabel="Loading TidySync" size="large" />
           <Text as="p" variant="bodyMd" tone="subdued">
-            Loading your store workspace…
+            {authError === "Connecting to Shopify…"
+              ? "Connecting to Shopify…"
+              : "Loading your store workspace…"}
           </Text>
         </BlockStack>
       </div>
     );
   }
 
-  if (!shop && !tenant) {
+  if (!authenticated || !shop) {
     return (
       <Page title="TidySync">
-        <Banner tone="warning">
-          Open this app from Shopify Admin. If you just installed, complete OAuth from your store apps list.
-        </Banner>
+        <Layout>
+          <Layout.Section>
+            <Banner
+              tone="warning"
+              title="Connect your Shopify store"
+              action={{ content: "Connect / install", onAction: beginInstall }}
+            >
+              {authError ??
+                "Open TidySync from Shopify Admin, or click Connect to complete OAuth so App Bridge can issue a session token."}
+            </Banner>
+          </Layout.Section>
+        </Layout>
       </Page>
     );
   }

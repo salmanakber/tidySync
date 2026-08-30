@@ -4,18 +4,27 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/graphql";
 const UPLOAD_URL = process.env.NEXT_PUBLIC_UPLOAD_URL ?? "/api/upload";
 const DOWNLOAD_BASE = process.env.NEXT_PUBLIC_DOWNLOAD_URL ?? "/download";
 
+async function authHeaders(shop?: string): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {};
+  const token = await getSessionToken(6);
+  if (token) headers.Authorization = `Bearer ${token}`;
+  // Always send shop when known — backend uses it with offline session / tenant lookup
+  if (shop) {
+    headers["x-tidysync-shop"] = shop;
+    headers["x-shopify-shop"] = shop;
+  }
+  return headers;
+}
+
 export async function gqlRequest<T>(
   query: string,
   variables?: Record<string, unknown>,
   shop?: string,
 ): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  const token = await getSessionToken();
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  } else if (shop) {
-    headers["x-tidysync-shop"] = shop;
-  }
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(await authHeaders(shop)),
+  };
 
   const res = await fetch(API_URL, {
     method: "POST",
@@ -33,10 +42,7 @@ export async function gqlRequest<T>(
 export async function uploadFile(file: File, shop: string) {
   const form = new FormData();
   form.append("file", file);
-  const headers: Record<string, string> = {};
-  const token = await getSessionToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
-  else headers["x-tidysync-shop"] = shop;
+  const headers = await authHeaders(shop);
 
   const res = await fetch(UPLOAD_URL, { method: "POST", headers, body: form });
   if (!res.ok) throw new Error("Upload failed");
@@ -68,9 +74,7 @@ export function pollJobProgress(
 }
 
 export async function downloadAuditExport(shop: string) {
-  const headers: Record<string, string> = { "x-tidysync-shop": shop };
-  const token = await getSessionToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
+  const headers = await authHeaders(shop);
   const base = process.env.NEXT_PUBLIC_API_URL?.replace("/graphql", "") ?? "";
   const res = await fetch(`${base}/audit/export/all`, { headers });
   if (!res.ok) throw new Error("Audit export failed");
@@ -82,9 +86,7 @@ export async function downloadAuditExport(shop: string) {
 }
 
 export async function downloadExport(jobId: string, shop: string) {
-  const headers: Record<string, string> = { "x-tidysync-shop": shop };
-  const token = await getSessionToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
+  const headers = await authHeaders(shop);
 
   const res = await fetch(`${DOWNLOAD_BASE}/${jobId}`, { headers });
   if (!res.ok) throw new Error("Download failed");

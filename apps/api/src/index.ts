@@ -12,7 +12,7 @@ import { buildContext } from "./context";
 import { shopify, sessionStorage } from "./shopify/client";
 import { ensureTenant } from "./services/tenant";
 import { apiKeyAuth } from "./middleware/api-key";
-import { prisma } from "@tidysync/database";
+import { prisma, sessionRepository } from "@tidysync/database";
 import { attachUiApps } from "./ui";
 
 const PORT = Number(process.env.PORT ?? process.env.API_PORT ?? 4000);
@@ -125,7 +125,43 @@ app.get("/auth/callback", async (req, res) => {
   await sessionStorage.storeSession(session);
   await ensureTenant(session.shop);
 
-  res.redirect(`${embeddedAppUrl}?shop=${session.shop}`);
+  // Return into Shopify Admin so App Bridge gets host + can mint idToken
+  const apiKey = process.env.SHOPIFY_API_KEY ?? "";
+  const host = typeof req.query.host === "string" ? req.query.host : "";
+  if (host) {
+    const params = new URLSearchParams({
+      shop: session.shop,
+      host,
+      embedded: "1",
+    });
+    res.redirect(`${embeddedAppUrl}/?${params.toString()}`);
+    return;
+  }
+
+  if (apiKey) {
+    const storeHandle = session.shop.replace(/\.myshopify\.com$/i, "");
+    res.redirect(`https://admin.shopify.com/store/${storeHandle}/apps/${apiKey}`);
+    return;
+  }
+
+  res.redirect(`${embeddedAppUrl}/?shop=${encodeURIComponent(session.shop)}&embedded=1`);
+});
+
+app.get("/auth/session", async (req, res) => {
+  const shopParam = (req.query.shop as string) ?? "";
+  const shop = shopParam ? shopify.utils.sanitizeShop(shopParam, true) : null;
+  if (!shop) {
+    res.status(400).json({ ok: false, error: "Missing shop" });
+    return;
+  }
+  const offline = await sessionRepository.findOfflineForShop(shop);
+  const tenant = await prisma.tenant.findUnique({ where: { shopDomain: shop } });
+  res.json({
+    ok: Boolean(offline?.accessToken && tenant),
+    shop,
+    hasOfflineSession: Boolean(offline?.accessToken),
+    hasTenant: Boolean(tenant),
+  });
 });
 
 app.get("/billing/confirm", async (req, res) => {

@@ -21,7 +21,6 @@ In **App setup**:
 
 ## 3. API scopes
 
-
 Enable these scopes (match `.env` / `shopify.app.toml`):
 
 ```
@@ -38,42 +37,55 @@ Product/customer metafields use the parent resource scopes (`read_products`, etc
 
 ## 4. Copy credentials to `.env`
 
-```bash
-SHOPIFY_API_KEY=          # Client ID from Partner dashboard
-SHOPIFY_API_SECRET=       # Client secret
-NEXT_PUBLIC_SHOPIFY_API_KEY=  # Same as SHOPIFY_API_KEY (for App Bridge)
+```env
+SHOPIFY_API_KEY=your_client_id_here
+SHOPIFY_API_SECRET=your_client_secret_here
+NEXT_PUBLIC_SHOPIFY_API_KEY=your_client_id_here
+APP_URL=https://sync.tidyflowapp.com
 ```
 
-Restart the stack after updating:
+`SHOPIFY_API_KEY` **must** match the Partner app Client ID. If it is missing/empty, App Bridge cannot mint `idToken` and GraphQL returns `Unauthorized — merchant session required`.
+
+After deploy, view page source of `https://sync.tidyflowapp.com` and confirm:
+
+```html
+<meta name="shopify-api-key" content="YOUR_CLIENT_ID">
+```
+
+The `content` must **not** be empty. Then restart:
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d --build tidysync
+npm run deploy:pm2
 ```
 
 ## 5. Install on a development store
 
 1. In Partners → your app → **Select store** → pick a dev store
 2. Or visit: `https://sync.tidyflowapp.com/auth?shop=YOUR-STORE.myshopify.com`
-3. Approve permissions — you'll be redirected into the embedded app
+3. Approve permissions — you'll be redirected into Shopify Admin so App Bridge can issue a session token
 
 ## 6. Verify
 
 ```bash
 curl https://sync.tidyflowapp.com/health
-# {"status":"ok","app":"TidySync","version":"0.1.0"}
+# {"status":"ok","app":"TidySync",...}
+
+curl "https://sync.tidyflowapp.com/auth/session?shop=YOUR-STORE.myshopify.com"
+# {"ok":true,"hasOfflineSession":true,"hasTenant":true}
 ```
 
 Open Shopify Admin → Apps → TidySync. The dashboard should load inside Admin.
 
 ## 7. `shopify.app.toml` (optional CLI)
 
-The repo includes `shopify.app.toml` — replace `YOUR_SHOPIFY_API_KEY` with your Client ID if you use Shopify CLI later.
+The repo includes `shopify.app.toml` — Client ID should match `SHOPIFY_API_KEY`.
 
 ## Troubleshooting
 
 | Issue | Fix |
 |-------|-----|
-| Blank iframe | Check `NEXT_PUBLIC_SHOPIFY_API_KEY` matches Partner Client ID |
+| `idToken unavailable` | Empty/wrong `shopify-api-key` meta — set `SHOPIFY_API_KEY` and redeploy (`force-dynamic` layout) |
+| `Unauthorized — merchant session required` | Complete OAuth once; confirm `/auth/session?shop=...` returns `ok:true` |
+| Blank iframe | Client ID mismatch vs Partner dashboard |
 | OAuth redirect error | Redirect URL must exactly match `/auth/callback` on your domain |
-| 401 on GraphQL | Install app on store first (OAuth creates session in Postgres) |
-| App not loading | Ensure TLS is valid — Shopify requires HTTPS for production apps |
+| App not loading | Shopify requires valid HTTPS for production apps |

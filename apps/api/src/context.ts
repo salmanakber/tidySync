@@ -1,7 +1,8 @@
 import type { YogaInitialContext } from "graphql-yoga";
 import jwt from "jsonwebtoken";
-import { tenantRepository } from "@tidysync/database";
+import { sessionRepository, tenantRepository } from "@tidysync/database";
 import { shopify } from "./shopify/client";
+import { ensureTenant } from "./services/tenant";
 
 export type AuthRole = "merchant" | "admin" | "api";
 
@@ -24,6 +25,22 @@ async function resolveShopFromSessionToken(token: string): Promise<string | null
   } catch {
     return null;
   }
+}
+
+async function merchantContextForShop(shop: string): Promise<GraphQLContext | null> {
+  let tenant = await tenantRepository.findByShopDomain(shop);
+  if (!tenant) {
+    await ensureTenant(shop);
+    tenant = await tenantRepository.findByShopDomain(shop);
+  }
+  if (!tenant) return null;
+  return {
+    role: "merchant",
+    shop,
+    tenantId: tenant.id,
+    tenantStatus: tenant.status,
+    tenantInstallApproved: tenant.installApproved,
+  };
 }
 
 export async function buildContext(
@@ -55,33 +72,23 @@ export async function buildContext(
     if (!bearer.startsWith("tidysync_")) {
       const shop = await resolveShopFromSessionToken(bearer);
       if (shop) {
-        const tenant = await tenantRepository.findByShopDomain(shop);
-        if (tenant) {
-          return {
-            role: "merchant",
-            shop,
-            tenantId: tenant.id,
-            tenantStatus: tenant.status,
-            tenantInstallApproved: tenant.installApproved,
-          };
-        }
+        const ctx = await merchantContextForShop(shop);
+        if (ctx) return ctx;
       }
     }
   }
 
-  const shop =
+  const shopHeader =
     request.headers.get("x-shopify-shop") ??
     request.headers.get("x-tidysync-shop");
-  if (shop) {
-    const tenant = await tenantRepository.findByShopDomain(shop);
-    if (tenant) {
-      return {
-        role: "merchant",
-        shop,
-        tenantId: tenant.id,
-        tenantStatus: tenant.status,
-        tenantInstallApproved: tenant.installApproved,
-      };
+
+  if (shopHeader) {
+    const shop = shopify.utils.sanitizeShop(shopHeader, true) ?? shopHeader;
+    // Only trust shop header when an offline OAuth session exists for that shop
+    const offline = await sessionRepository.findOfflineForShop(shop);
+    if (offline?.accessToken) {
+      const ctx = await merchantContextForShop(shop);
+      if (ctx) return ctx;
     }
   }
 
