@@ -1,5 +1,5 @@
 import { prisma, auditRepository, scheduledJobRepository, featureFlagRepository, jobRepository, type JobType } from "@tidysync/database";
-import { getShopifyFieldsForResource, type ResourceType } from "@tidysync/shared";
+import { getShopifyFieldsForResource, parseNlBulkEdit, type ResourceType } from "@tidysync/shared";
 import { inferColumnMappingsWithAi, parseNlBulkEditWithAi, generateImpactSummary } from "@tidysync/ai";
 import { consumeAiCredit } from "../services/tenant";
 import { catalogScanQueue, bulkEditQueue } from "../queues";
@@ -227,7 +227,9 @@ export async function suggestMappingsWithAi(
   const job = await prisma.job.findFirst({ where: { id: jobId, tenantId } });
   if (!job?.filePath) throw new Error("Job or file not found");
 
-  const headers = await parseFileHeaders(job.filePath);
+  const diffPreview = job.diffPreview as { headers?: string[] } | null;
+  const headers =
+    diffPreview?.headers?.length ? diffPreview.headers : await parseFileHeaders(job.filePath);
   const resourceType = (job.resourceType ?? "products") as ResourceType;
   const targetFields = getShopifyFieldsForResource(resourceType);
   const profile = await prisma.platformFieldMap.findFirst({
@@ -289,8 +291,24 @@ export async function generateNlBulkEditWithAi(
   shop: string,
   prompt: string,
 ) {
-  await consumeAiCredit(tenantId, 1);
-  const { plan, modelUsed } = await parseNlBulkEditWithAi(prompt);
+  const { plan: initialPlan, modelUsed: initialModel } = await parseNlBulkEditWithAi(prompt);
+  let plan = initialPlan;
+  let modelUsed = initialModel;
+
+  if (initialModel !== "rule-based" && !initialModel.includes("rule-based")) {
+    try {
+      await consumeAiCredit(tenantId, 1);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "AI credits unavailable";
+      if (message.includes("credit")) {
+        plan = parseNlBulkEdit(prompt);
+        modelUsed = "rule-based-credits";
+      } else {
+        throw err;
+      }
+    }
+  }
+
   const { buildDiffFromMutationPlan } = await import("../services/shopify-products");
   const { detectAnomalies, buildImpactSummary } = await import("@tidysync/shared");
 
@@ -305,38 +323,80 @@ export async function generateNlBulkEditWithAi(
     },
   });
 
-  const diff = await buildDiffFromMutationPlan(shop, plan);
+  let diff: { rows: unknown[]; totalChanges: number };
+  try {
+    diff = await buildDiffFromMutationPlan(shop, plan);
+  } catch (err) {
+    await prisma.job.update({
+      where: { id: job.id },
+      data: {
+        status: "FAILED",
+        errorSummary: err instanceof Error ? err.message : "Could not load products for preview",
+      },
+    });
+    throw err;
+  }
+
+  if (diff.totalChanges === 0) {
+    await prisma.job.update({
+      where: { id: job.id },
+      data: {
+        status: "PREVIEW",
+        diffPreview: { rows: [], totalChanges: 0 },
+        impactSummary:
+          "No matching products or variants were found for this prompt. Try a broader phrase (e.g. increase all prices by 10%).",
+        rowCount: 0,
+      },
+      include: { lineItems: { take: 0 } },
+    });
+    return {
+      ...(await prisma.job.findUnique({ where: { id: job.id }, include: { lineItems: { take: 0 } } }))!,
+      lineItems: [],
+    };
+  }
+
   const anomalies = detectAnomalies(
-    diff.rows.map((r) => ({ field: r.field, before: r.before, after: r.after })),
+    diff.rows.map((r) => ({
+      field: (r as { field: string }).field,
+      before: (r as { before: unknown }).before,
+      after: (r as { after: unknown }).after,
+    })),
   );
-  const fallbackSummary = buildImpactSummary(diff.totalChanges, diff.rows);
-  const impactSummary = await generateImpactSummary({
-    totalChanges: diff.totalChanges,
-    anomalies,
-    fallback: fallbackSummary,
-  });
+  const fallbackSummary = buildImpactSummary(diff.totalChanges, diff.rows as import("@tidysync/shared").DiffRow[]);
+  let impactSummary = fallbackSummary;
+  try {
+    impactSummary = await generateImpactSummary({
+      totalChanges: diff.totalChanges,
+      anomalies,
+      fallback: fallbackSummary,
+    });
+  } catch {
+    impactSummary = fallbackSummary;
+  }
 
   const updated = await prisma.job.update({
     where: { id: job.id },
     data: {
-      diffPreview: { ...diff, anomalies },
+      diffPreview: { ...diff, anomalies } as object,
       impactSummary,
       rowCount: diff.totalChanges,
     },
     include: { lineItems: { take: 0 } },
   });
 
-  await prisma.aiOperation.create({
-    data: {
-      tenantId,
-      jobId: job.id,
-      operationType: "NL_BULK_EDIT",
-      prompt,
-      generatedPlan: plan as object,
-      creditsConsumed: 1,
-      modelUsed,
-    },
-  });
+  if (modelUsed !== "rule-based-credits") {
+    await prisma.aiOperation.create({
+      data: {
+        tenantId,
+        jobId: job.id,
+        operationType: "NL_BULK_EDIT",
+        prompt,
+        generatedPlan: plan as object,
+        creditsConsumed: modelUsed.startsWith("rule-based") ? 0 : 1,
+        modelUsed,
+      },
+    });
+  }
 
   return { ...updated, lineItems: [] };
 }

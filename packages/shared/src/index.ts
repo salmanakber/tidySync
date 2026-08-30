@@ -1,5 +1,13 @@
 export const TIDYSYNC_APP_NAME = "TidySync";
 
+export {
+  buildDiffFromProducts,
+  productMatchesFilter,
+  computeAfterValue,
+  type ProductForMutation,
+  type ExtendedDiffRow,
+} from "./mutation-plan-apply";
+
 export const QUEUE_NAMES = {
   IMPORT: "tidysync-import",
   EXPORT: "tidysync-export",

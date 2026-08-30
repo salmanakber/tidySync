@@ -38,6 +38,8 @@ import {
   downloadAuditExport,
   QUERIES,
   MUTATIONS,
+  waitForJobStatus,
+  pollJobProgress,
 } from "../lib/graphql";
 import { MappingEditor } from "./MappingEditor";
 import { FileDropzone } from "./FileDropzone";
@@ -45,6 +47,7 @@ import { AiStudio } from "./AiStudio";
 import { DiffPreviewPanel } from "./DiffPreviewPanel";
 import { DashboardSkeleton } from "./DashboardSkeleton";
 import { PlatformPicker } from "./PlatformPicker";
+import { ImportProgressLoader, type ImportProgressState } from "./ImportProgressLoader";
 import { useShop } from "../providers";
 
 const IMPORT_PLATFORMS = [
@@ -171,6 +174,7 @@ export function Dashboard() {
   >([]);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [mappingOpen, setMappingOpen] = useState(false);
+  const [importProgress, setImportProgress] = useState<ImportProgressState | null>(null);
   const [mappingJobId, setMappingJobId] = useState("");
   const [mappingRows, setMappingRows] = useState<
     Array<{
@@ -259,16 +263,17 @@ export function Dashboard() {
   const handleImport = async (file: File) => {
     setLoading(true);
     setError(null);
+    setImportProgress({ phase: "uploading", fileName: file.name, message: "Securely uploading your catalog…" });
     try {
       const uploaded = await uploadFile(file, shop);
+      setImportProgress({
+        phase: "analyzing",
+        fileName: file.name,
+        message: "Streaming rows and detecting platform…",
+      });
+
       const result = await gqlRequest<{
-        uploadImportFile: {
-          id: string;
-          sourcePlatform?: string;
-          diffPreview?: {
-            detection?: { platformKey?: string; confidence?: number };
-          };
-        };
+        uploadImportFile: { id: string };
       }>(
         MUTATIONS.uploadImport,
         {
@@ -279,11 +284,42 @@ export function Dashboard() {
         shop,
       );
 
+      const jobId = result.uploadImportFile.id;
+      setImportProgress({
+        phase: "analyzing",
+        fileName: file.name,
+        jobId,
+        message: "Counting products and reading column headers…",
+      });
+
+      const analyzed = await waitForJobStatus(
+        jobId,
+        shop,
+        ["MAPPING"],
+        (job) => {
+          setImportProgress({
+            phase: "analyzing",
+            fileName: file.name,
+            jobId,
+            rowCount: (job.rowCount as number) ?? 0,
+            message:
+              job.status === "RUNNING"
+                ? "Scanning every row in your file…"
+                : "Preparing column mapping…",
+          });
+        },
+      );
+
+      if (analyzed.status === "FAILED") {
+        throw new Error((analyzed.errorSummary as string) ?? "File analysis failed");
+      }
+
+      const diffPreview = analyzed.diffPreview as {
+        detection?: { platformKey?: string; confidence?: number };
+      } | null;
       const detected =
-        result.uploadImportFile.diffPreview?.detection?.platformKey ??
-        result.uploadImportFile.sourcePlatform ??
-        null;
-      const confidence = result.uploadImportFile.diffPreview?.detection?.confidence;
+        diffPreview?.detection?.platformKey ?? (analyzed.sourcePlatform as string) ?? null;
+      const confidence = diffPreview?.detection?.confidence;
       if (detected && detected !== "unknown") {
         setDetectedPlatform(detected);
         setDetectedConfidence(confidence);
@@ -292,6 +328,14 @@ export function Dashboard() {
 
       const platformForMapping =
         detected && detected !== "unknown" ? detected : importPlatform || "csv";
+
+      setImportProgress({
+        phase: "mapping",
+        fileName: file.name,
+        jobId,
+        rowCount: (analyzed.rowCount as number) ?? 0,
+        message: "AI is matching columns to Shopify fields…",
+      });
 
       const mappings = await gqlRequest<{
         suggestFieldMappings: Array<{
@@ -303,15 +347,24 @@ export function Dashboard() {
         }>;
       }>(
         MUTATIONS.suggestMappings,
-        { jobId: result.uploadImportFile.id, platformKey: platformForMapping },
+        { jobId, platformKey: platformForMapping },
         shop,
       );
-      setMappingJobId(result.uploadImportFile.id);
+
+      setMappingJobId(jobId);
       setMappingRows(mappings.suggestFieldMappings);
+      setImportProgress(null);
       setMappingOpen(true);
       await loadData();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Import failed");
+      const message = e instanceof Error ? e.message : "Import failed";
+      setImportProgress({
+        phase: "failed",
+        fileName: file.name,
+        message,
+      });
+      setError(message);
+      setTimeout(() => setImportProgress(null), 4500);
     } finally {
       setLoading(false);
     }
@@ -358,6 +411,45 @@ export function Dashboard() {
       await gqlRequest(MUTATIONS.approveJob, { jobId }, shop);
       setPreviewOpen(false);
       setTab(0);
+
+      const jobDetail = await gqlRequest<{ job: Job }>(QUERIES.job, { id: jobId }, shop);
+      setImportProgress({
+        phase: "importing",
+        jobId,
+        fileName: jobDetail.job.fileName,
+        rowCount: jobDetail.job.rowCount,
+        processedCount: 0,
+        successCount: 0,
+        failedCount: 0,
+        message: "Writing products to your Shopify catalog…",
+      });
+
+      pollJobProgress(jobId, shop, (job) => {
+        const status = job.status as string;
+        const done = ["COMPLETED", "FAILED", "CANCELLED"].includes(status);
+        setImportProgress({
+          phase: done ? (status === "COMPLETED" ? "complete" : "failed") : "importing",
+          jobId,
+          fileName: job.fileName as string | undefined,
+          rowCount: job.rowCount as number,
+          processedCount: job.processedCount as number,
+          successCount: job.successCount as number,
+          failedCount: job.failedCount as number,
+          message:
+            status === "COMPLETED"
+              ? "Import finished — your catalog is updated"
+              : status === "FAILED"
+                ? ((job.errorSummary as string) ?? "Some rows could not be imported")
+                : "Syncing products live to Shopify…",
+        });
+        if (done) {
+          setTimeout(() => {
+            setImportProgress(null);
+            loadData();
+          }, 2800);
+        }
+      });
+
       await loadData();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Approve failed");
@@ -894,6 +986,7 @@ export function Dashboard() {
                     onSubmit={handleNlBulkEdit}
                     loading={loading}
                     creditsRemaining={tenant?.plan?.aiCreditsRemaining}
+                    error={tab === 4 ? error : null}
                   />
                 )}
 
@@ -1368,6 +1461,14 @@ export function Dashboard() {
           />
         </Modal.Section>
       </Modal>
+
+      {importProgress && (
+        <div className="tidysync-import-overlay" aria-modal="true">
+          <div className="tidysync-import-overlay-card">
+            <ImportProgressLoader state={importProgress} />
+          </div>
+        </div>
+      )}
     </Page>
     </div>
   );

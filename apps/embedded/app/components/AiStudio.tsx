@@ -15,6 +15,7 @@ interface AiStudioProps {
   onSubmit: () => void;
   loading?: boolean;
   creditsRemaining?: number | string;
+  error?: string | null;
 }
 
 export function AiStudio({
@@ -23,6 +24,7 @@ export function AiStudio({
   onSubmit,
   loading = false,
   creditsRemaining,
+  error,
 }: AiStudioProps) {
   return (
     <div className={`tidysync-ai-studio${loading ? " is-generating" : ""}`}>
@@ -47,6 +49,7 @@ export function AiStudio({
         autoComplete="off"
         multiline={4}
         disabled={loading}
+        error={error ?? undefined}
       />
 
       <div className="tidysync-prompt-chips">

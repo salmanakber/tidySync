@@ -2,6 +2,7 @@ import { Worker } from "bullmq";
 import IORedis from "ioredis";
 import { QUEUE_NAMES } from "@tidysync/shared";
 import { processImportJob } from "./processors/import";
+import { processAnalyzeImportJob } from "./processors/import-analyze";
 import { processExportJob } from "./processors/export";
 import { processBulkEditJob } from "./processors/bulk-edit";
 import { processUndoJob } from "./processors/undo";
@@ -40,8 +41,22 @@ function createWorker(queueName: string, processor: (data: JobPayload) => Promis
   return worker;
 }
 
-createWorker(QUEUE_NAMES.IMPORT, async (data) => {
-  await processImportJob(data.jobId, data.tenantId, data.shop);
+const importWorker = new Worker<JobPayload>(
+  QUEUE_NAMES.IMPORT,
+  async (bullJob) => {
+    console.log(`[${QUEUE_NAMES.IMPORT}] Processing ${bullJob.name ?? "import"} ${bullJob.data.jobId}`);
+    if (bullJob.name === "analyze") {
+      await processAnalyzeImportJob(bullJob.data.jobId, bullJob.data.tenantId);
+    } else {
+      await processImportJob(bullJob.data.jobId, bullJob.data.tenantId, bullJob.data.shop);
+    }
+    console.log(`[${QUEUE_NAMES.IMPORT}] Completed ${bullJob.data.jobId}`);
+  },
+  { connection, concurrency: 2 },
+);
+
+importWorker.on("failed", (job, err) => {
+  console.error(`[${QUEUE_NAMES.IMPORT}] Job ${job?.id} failed:`, err.message);
 });
 
 createWorker(QUEUE_NAMES.EXPORT, async (data) => {

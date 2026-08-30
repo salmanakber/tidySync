@@ -5,9 +5,9 @@ import { getShopGraphqlClient } from "../shopify";
 import { notifyJobComplete } from "./notify";
 
 const PRODUCT_UPDATE = `#graphql
-  mutation productUpdate($input: ProductInput!) {
-    productUpdate(input: $input) {
-      product { id title }
+  mutation productUpdate($product: ProductUpdateInput!) {
+    productUpdate(product: $product) {
+      product { id title descriptionHtml }
       userErrors { field message }
     }
   }
@@ -51,7 +51,7 @@ export async function processContentRewrite(jobId: string, tenantId: string, sho
 
       const response = await client.request(PRODUCT_UPDATE, {
         variables: {
-          input: {
+          product: {
             id: product.id,
             title: newContent.title,
             descriptionHtml: newContent.description,

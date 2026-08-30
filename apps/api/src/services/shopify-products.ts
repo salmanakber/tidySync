@@ -1,4 +1,5 @@
 import type { MutationPlan } from "@tidysync/shared";
+import { buildDiffFromProducts, type ProductForMutation } from "@tidysync/shared";
 import { getShopGraphqlClient } from "../shopify/client";
 
 const PRODUCTS_QUERY = `#graphql
@@ -61,48 +62,31 @@ export async function fetchProductsForExport(shop: string, limit = 250) {
   return products;
 }
 
+function normalizeProduct(raw: Record<string, unknown>): ProductForMutation {
+  const variantsRaw = raw.variants as { edges?: Array<{ node: Record<string, unknown> }> };
+  return {
+    id: String(raw.id),
+    title: String(raw.title ?? ""),
+    descriptionHtml: raw.descriptionHtml ? String(raw.descriptionHtml) : undefined,
+    vendor: raw.vendor ? String(raw.vendor) : undefined,
+    productType: raw.productType ? String(raw.productType) : undefined,
+    tags: Array.isArray(raw.tags) ? (raw.tags as string[]) : [],
+    status: raw.status ? String(raw.status) : undefined,
+    variants: (variantsRaw?.edges ?? []).map(({ node }) => ({
+      id: String(node.id),
+      sku: node.sku ? String(node.sku) : undefined,
+      price: node.price as string | number | undefined,
+      compareAtPrice: node.compareAtPrice as string | number | null | undefined,
+      inventoryQuantity:
+        typeof node.inventoryQuantity === "number" ? node.inventoryQuantity : undefined,
+      weight: typeof node.weight === "number" ? node.weight : undefined,
+      barcode: node.barcode ? String(node.barcode) : undefined,
+    })),
+  };
+}
+
 export async function buildDiffFromMutationPlan(shop: string, plan: MutationPlan) {
-  const products = await fetchProductsForExport(shop, 100);
-  const rows: Array<{
-    resourceType: string;
-    resourceId: string;
-    resourceTitle?: string;
-    field: string;
-    before: string | number | null;
-    after: string | number | null;
-  }> = [];
-
-  for (const product of products as Array<{
-    id: string;
-    title: string;
-    variants: { edges: Array<{ node: Record<string, unknown> }> };
-  }>) {
-    for (const step of plan.steps) {
-      if (step.field.startsWith("variants.")) {
-        const variantField = step.field.replace("variants.", "");
-        for (const { node: variant } of product.variants.edges) {
-          const before = variant[variantField];
-          let after: number | string | null = before as number | string | null;
-
-          if (step.action === "multiply" && typeof before === "string") {
-            const num = parseFloat(before);
-            after = (num * (step.value as number)).toFixed(2);
-          } else if (step.action === "set") {
-            after = step.value as string | number;
-          }
-
-          rows.push({
-            resourceType: "variant",
-            resourceId: variant.id as string,
-            resourceTitle: product.title,
-            field: step.field,
-            before: before as string | number | null,
-            after,
-          });
-        }
-      }
-    }
-  }
-
-  return { rows, totalChanges: rows.length };
+  const products = await fetchProductsForExport(shop, 250);
+  const normalized = products.map((p) => normalizeProduct(p as Record<string, unknown>));
+  return buildDiffFromProducts(normalized, plan);
 }

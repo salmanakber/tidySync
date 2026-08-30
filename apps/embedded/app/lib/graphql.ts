@@ -53,6 +53,7 @@ export function pollJobProgress(
   jobId: string,
   shop: string,
   onUpdate: (data: Record<string, unknown>) => void,
+  untilStatuses = ["COMPLETED", "FAILED", "CANCELLED"],
 ) {
   const interval = setInterval(async () => {
     try {
@@ -63,14 +64,34 @@ export function pollJobProgress(
       );
       onUpdate(data.job);
       const status = data.job.status as string;
-      if (["COMPLETED", "FAILED", "CANCELLED"].includes(status)) {
+      if (untilStatuses.includes(status)) {
         clearInterval(interval);
       }
     } catch {
       clearInterval(interval);
     }
-  }, 1500);
+  }, 1200);
   return () => clearInterval(interval);
+}
+
+export async function waitForJobStatus(
+  jobId: string,
+  shop: string,
+  targetStatuses: string[],
+  onUpdate?: (job: Record<string, unknown>) => void,
+  timeoutMs = 600000,
+): Promise<Record<string, unknown>> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const data = await gqlRequest<{ job: Record<string, unknown> }>(QUERIES.job, { id: jobId }, shop);
+    const job = data.job;
+    onUpdate?.(job);
+    const status = job.status as string;
+    if (targetStatuses.includes(status)) return job;
+    if (["FAILED", "CANCELLED"].includes(status)) return job;
+    await new Promise((r) => setTimeout(r, 1200));
+  }
+  throw new Error("Timed out waiting for file analysis. Try a smaller file or CSV format.");
 }
 
 export async function downloadAuditExport(shop: string) {

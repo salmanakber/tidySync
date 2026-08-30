@@ -1,7 +1,5 @@
 import { prisma, tenantRepository, jobRepository, type Job, type JobStatus } from "@tidysync/database";
 import {
-  detectPlatformFromHeaders,
-  detectPlatformWithConfidence,
   parseNlBulkEdit,
   detectAnomalies,
   buildImpactSummary,
@@ -20,7 +18,7 @@ import {
   undoQueue,
 } from "../queues";
 import { getShopGraphqlClient } from "../shopify/client";
-import { parseFileHeaders, parseFilePreview } from "../services/file-parser";
+import { parseFilePreview } from "../services/file-parser";
 import { fetchProductsForExport, buildDiffFromMutationPlan } from "../services/shopify-products";
 import {
   type GraphQLContext,
@@ -472,53 +470,34 @@ export const resolvers = {
       const { tenantId } = requireActiveMerchant(ctx);
       const resourceType = args.resourceType ?? "products";
 
-      const headers = await parseFileHeaders(args.filePath);
-      const detection = detectPlatformWithConfidence(headers);
-      const detected = detection.platformKey ?? detectPlatformFromHeaders(headers);
-
       const job = await prisma.job.create({
         data: {
           tenantId,
           type: "IMPORT",
-          status: "MAPPING",
+          status: "PENDING",
           fileName: args.fileName,
           filePath: args.filePath,
-          sourcePlatform: detected ?? "csv",
+          sourcePlatform: "csv",
           resourceType,
           rowCount: 0,
         },
       });
 
-      const preview = await parseFilePreview(args.filePath, 5);
+      await importQueue.add("analyze", { jobId: job.id, tenantId });
+
       await prisma.auditLog.create({
         data: {
           tenantId,
           action: "import.uploaded",
           resourceType: "job",
           resourceId: job.id,
-          metadata: {
-            fileName: args.fileName,
-            detectedPlatform: detected,
-            detectionConfidence: detection.confidence,
-            detectionScores: detection.scores,
-          },
+          metadata: { fileName: args.fileName },
         },
       });
 
       return {
-        ...mapJob({
-          ...job,
-          lineItems: [],
-          diffPreview: {
-            previewRows: preview,
-            detection: {
-              platformKey: detected,
-              confidence: detection.confidence,
-              scores: detection.scores,
-            },
-          } as unknown as Job["diffPreview"],
-        }),
-        sourcePlatform: detected ?? "csv",
+        ...mapJob({ ...job, lineItems: [] }),
+        sourcePlatform: "csv",
       };
     },
     suggestFieldMappings: async (
@@ -546,6 +525,7 @@ export const resolvers = {
       if (mappedCount === 0) {
         throw new Error("Map at least one column to a Shopify field before previewing.");
       }
+      const totalRows = job.rowCount > 0 ? job.rowCount : previewRows.length;
       const resType = job.resourceType ?? "products";
 
       const diffRows: Array<{
@@ -587,7 +567,7 @@ export const resolvers = {
           mutationPlan: { mappings },
           diffPreview: { rows: diffRows, totalChanges: diffRows.length, anomalies },
           impactSummary,
-          rowCount: previewRows.length,
+          rowCount: totalRows,
         },
         include: { lineItems: { take: 0 } },
       });

@@ -261,17 +261,27 @@ export function parseNlBulkEdit(prompt: string): MutationPlan {
   const lower = prompt.toLowerCase();
   const steps: MutationPlan["steps"] = [];
 
-  const percentMatch = lower.match(/(?:by|increase|decrease)\s+(\d+(?:\.\d+)?)\s*%/);
-  const percent = percentMatch ? parseFloat(percentMatch[1]) : null;
+  const percentMatch = lower.match(/(?:by|increase|decrease|raise|lower)\s+(\d+(?:\.\d+)?)\s*%|(\d+(?:\.\d+)?)\s*%\s+above/);
+  const percent = percentMatch
+    ? parseFloat(percentMatch[1] ?? percentMatch[2] ?? "0")
+    : null;
   const isIncrease = lower.includes("increase") || lower.includes("raise");
   const isDecrease = lower.includes("decrease") || lower.includes("reduce") || lower.includes("lower");
 
   let field = "variants.price";
-  if (lower.includes("inventory") || lower.includes("stock")) {
+  if (lower.includes("compare-at") || lower.includes("compare at")) {
+    field = "variants.compareAtPrice";
+  } else if (lower.includes("inventory") || lower.includes("stock")) {
     field = "variants.inventoryQuantity";
+  } else if (lower.includes("tag")) {
+    field = "tags";
+  } else if (lower.includes("description") || lower.includes("content")) {
+    field = "descriptionHtml";
+  } else if (lower.includes("title")) {
+    field = "title";
   }
 
-  const collectionMatch = prompt.match(/(?:collection|tag)\s+["']?([^"']+)["']?/i);
+  const collectionMatch = prompt.match(/(?:collection|tagged?)\s+["']?([^"']+)["']?/i);
   const filter: Record<string, unknown> = {};
   if (collectionMatch) {
     if (lower.includes("collection")) {
@@ -279,6 +289,31 @@ export function parseNlBulkEdit(prompt: string): MutationPlan {
     } else {
       filter.tag = collectionMatch[1].trim();
     }
+  }
+
+  const skuMatch = prompt.match(/sku[s]?\s+(?:containing|with|like)\s+["']?([^"']+)["']?/i);
+  if (skuMatch) filter.skuContains = skuMatch[1].trim();
+
+  const addTagMatch = prompt.match(/add\s+tag\s+['"]?([^'"]+)['"]?/i);
+  if (addTagMatch) {
+    steps.push({
+      action: "add",
+      field: "tags",
+      value: addTagMatch[1].trim(),
+      filter,
+      description: `Add tag "${addTagMatch[1].trim()}"`,
+    });
+    return { steps, estimatedAffectedCount: undefined };
+  }
+
+  if (field === "variants.compareAtPrice" && (lower.includes("above") || lower.includes("%"))) {
+    steps.push({
+      action: "custom",
+      field,
+      filter,
+      description: prompt,
+    });
+    return { steps, estimatedAffectedCount: undefined };
   }
 
   if (percent !== null && (isIncrease || isDecrease)) {

@@ -107,6 +107,13 @@ export function DiffPreviewPanel({
           {item.autoFixSuggestion ? ` — Suggestion: ${item.autoFixSuggestion}` : ""}
         </Banner>
       ))}
+
+      {steps.length === 0 && rows.length === 0 && (
+        <Banner tone="warning">
+          No changes were generated for this prompt. Try something like &quot;Increase all prices by
+          10%&quot; or &quot;Add tag needs-review to products tagged Sale&quot;.
+        </Banner>
+      )}
     </BlockStack>
   );
 }

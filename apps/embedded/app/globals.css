@@ -835,3 +835,197 @@ body {
   }
 }
 
+/* Premium import progress overlay */
+.tidysync-import-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 520;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(17, 24, 39, 0.45);
+  backdrop-filter: blur(6px);
+  animation: tidysync-fade-in 0.25s ease;
+}
+
+.tidysync-import-overlay-card {
+  width: min(440px, 100%);
+  background: #fff;
+  border-radius: 20px;
+  padding: 32px 28px 28px;
+  box-shadow:
+    0 24px 48px rgba(0, 0, 0, 0.16),
+    0 0 0 1px rgba(0, 0, 0, 0.04);
+  animation: tidysync-slide-up 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.tidysync-import-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.tidysync-import-loader-orbit {
+  position: relative;
+  width: 112px;
+  height: 112px;
+}
+
+.tidysync-import-loader-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  border-top-color: #008060;
+  border-right-color: rgba(0, 128, 96, 0.35);
+  animation: tidysync-spin 1.1s linear infinite;
+}
+
+.tidysync-import-loader-ring--delay {
+  inset: 10px;
+  border-top-color: #5c6ac4;
+  border-right-color: rgba(92, 106, 196, 0.3);
+  animation-duration: 1.6s;
+  animation-direction: reverse;
+}
+
+.tidysync-import-loader-core {
+  position: absolute;
+  inset: 22px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #f6f6f7, #fff);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tidysync-import-loader-pct {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #202223;
+  font-variant-numeric: tabular-nums;
+}
+
+.tidysync-import-loader-copy {
+  width: 100%;
+}
+
+.tidysync-import-loader-stats {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+}
+
+.tidysync-import-stat {
+  flex: 1;
+  border-radius: 12px;
+  padding: 10px 12px;
+  text-align: center;
+  border: 1px solid #e1e3e5;
+}
+
+.tidysync-import-stat.is-success {
+  background: rgba(0, 128, 96, 0.06);
+  border-color: rgba(0, 128, 96, 0.25);
+}
+
+.tidysync-import-stat.is-failed {
+  background: rgba(215, 44, 13, 0.05);
+  border-color: rgba(215, 44, 13, 0.2);
+}
+
+.tidysync-import-stat-value {
+  display: block;
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #202223;
+}
+
+.tidysync-import-stat-label {
+  font-size: 0.75rem;
+  color: #6d7175;
+}
+
+.tidysync-import-loader-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: #edeeef;
+  overflow: hidden;
+}
+
+.tidysync-import-loader-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #008060, #47c1bf, #008060);
+  background-size: 200% 100%;
+  animation: tidysync-shimmer-move 1.8s ease infinite;
+  transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.tidysync-import-loader-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+}
+
+.tidysync-import-step {
+  font-size: 0.6875rem;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #f1f2f3;
+  color: #6d7175;
+  transition: all 0.2s ease;
+}
+
+.tidysync-import-step.is-active {
+  background: rgba(0, 128, 96, 0.12);
+  color: #008060;
+  font-weight: 600;
+}
+
+.tidysync-import-step.is-done {
+  background: rgba(0, 128, 96, 0.08);
+  color: #454f5b;
+}
+
+@keyframes tidysync-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes tidysync-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes tidysync-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes tidysync-shimmer-move {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
