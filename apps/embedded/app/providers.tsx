@@ -14,6 +14,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { clearSessionTokenCache, getAuthSessionToken, renewSessionTokenOnLoad } from "./lib/session-token";
 
 interface ShopifyConfig {
   shop?: string;
@@ -149,7 +150,7 @@ function PolarisWrapper({ children }: { children: React.ReactNode }) {
       setShop(resolvedShop);
       setHost(resolvedHost);
 
-      const token = await getSessionToken(10);
+      const token = await renewSessionTokenOnLoad();
       if (cancelled) return;
 
       if (token) {
@@ -200,6 +201,26 @@ function PolarisWrapper({ children }: { children: React.ReactNode }) {
       cancelled = true;
     };
   }, [searchParams]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      void getAuthSessionToken(false);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
+
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        clearSessionTokenCache();
+        void renewSessionTokenOnLoad();
+      }
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
 
   const ctx = useMemo(
     () => ({

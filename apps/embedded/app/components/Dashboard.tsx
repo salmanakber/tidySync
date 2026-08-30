@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Page,
   Layout,
@@ -38,7 +38,6 @@ import {
   downloadAuditExport,
   QUERIES,
   MUTATIONS,
-  pollJobProgress,
 } from "../lib/graphql";
 import { MappingEditor } from "./MappingEditor";
 import { FileDropzone } from "./FileDropzone";
@@ -161,6 +160,7 @@ export function Dashboard() {
   const [loading, setLoading] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [exportPlatform, setExportPlatform] = useState("shopify");
   const [importPlatform, setImportPlatform] = useState("csv");
   const [detectedPlatform, setDetectedPlatform] = useState<string | null>(null);
@@ -192,13 +192,6 @@ export function Dashboard() {
   const [notifyEmail, setNotifyEmail] = useState("");
   const [creditTopUp, setCreditTopUp] = useState("10");
   const [undoingId, setUndoingId] = useState<string | null>(null);
-  const jobPollCleanupRef = useRef<(() => void) | null>(null);
-
-  useEffect(() => {
-    return () => {
-      jobPollCleanupRef.current?.();
-    };
-  }, []);
 
   const loadData = useCallback(async () => {
     if (!shop) return;
@@ -241,15 +234,7 @@ export function Dashboard() {
     }
     setBootstrapping(true);
     loadData().finally(() => setBootstrapping(false));
-
-    const interval = setInterval(() => {
-      if (importProgress) return;
-      const hasActive = jobs.some((j) => j.status === "RUNNING" || j.status === "QUEUED");
-      if (hasActive) loadData();
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [loadData, shopReady, shop, authenticated, jobs, importProgress]);
+  }, [loadData, shopReady, shop, authenticated]);
 
   const handleExport = async () => {
     setLoading(true);
@@ -385,72 +370,21 @@ export function Dashboard() {
   const handleApprove = async (jobId: string) => {
     setLoading(true);
     setError(null);
+    setNotice(null);
     try {
       await gqlRequest(MUTATIONS.approveJob, { jobId }, shop);
       setPreviewOpen(false);
       setSelectedJob(null);
       setTab(0);
+      setImportProgress(null);
 
       const jobDetail = await gqlRequest<{ job: Job }>(QUERIES.job, { id: jobId }, shop);
-      const jobType = jobDetail.job.type;
-      const isImport = jobType === "IMPORT";
-      const progressMessage =
-        jobDetail.job.status === "QUEUED"
-          ? "Queued — starting shortly…"
-          : isImport
-            ? "Importing products to Shopify…"
-            : "Applying changes to your Shopify catalog…";
-
-      setImportProgress({
-        phase: "importing",
-        jobId,
-        fileName: jobDetail.job.fileName ?? jobDetail.job.nlPrompt,
-        rowCount: jobDetail.job.rowCount,
-        processedCount: jobDetail.job.processedCount ?? 0,
-        successCount: jobDetail.job.successCount ?? 0,
-        failedCount: jobDetail.job.failedCount ?? 0,
-        message: progressMessage,
-      });
-
-      jobPollCleanupRef.current?.();
-      jobPollCleanupRef.current = pollJobProgress(jobId, shop, (job) => {
-        const status = job.status as string;
-        const done = ["COMPLETED", "FAILED", "CANCELLED"].includes(status);
-        const queued = status === "QUEUED";
-        const running = status === "RUNNING";
-
-        setImportProgress({
-          phase: done ? (status === "COMPLETED" ? "complete" : "failed") : "importing",
-          jobId,
-          fileName: (job.fileName as string | undefined) ?? jobDetail.job.nlPrompt,
-          rowCount: job.rowCount as number,
-          processedCount: job.processedCount as number,
-          successCount: job.successCount as number,
-          failedCount: job.failedCount as number,
-          message: done
-            ? status === "COMPLETED"
-              ? isImport
-                ? "Import finished — your catalog is updated"
-                : "Changes applied successfully"
-              : ((job.errorSummary as string) ?? "Some updates could not be applied")
-            : queued
-              ? "Queued — waiting for worker…"
-              : running
-                ? isImport
-                  ? "Importing products live to Shopify…"
-                  : "Applying changes live to Shopify…"
-                : "Processing…",
-        });
-
-        if (done) {
-          jobPollCleanupRef.current = null;
-          window.setTimeout(() => {
-            setImportProgress(null);
-            loadData();
-          }, 2200);
-        }
-      });
-
+      const isImport = jobDetail.job.type === "IMPORT";
+      setNotice(
+        isImport
+          ? "Import approved. Open the Jobs tab and use Refresh to see progress."
+          : "Changes approved. Open the Jobs tab and use Refresh to see when they finish applying.",
+      );
       await loadData();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Approve failed");
@@ -589,6 +523,14 @@ export function Dashboard() {
           <Layout.Section>
             <Banner tone="critical" onDismiss={() => setError(null)}>
               {error}
+            </Banner>
+          </Layout.Section>
+        )}
+
+        {notice && (
+          <Layout.Section>
+            <Banner tone="success" onDismiss={() => setNotice(null)}>
+              {notice}
             </Banner>
           </Layout.Section>
         )}

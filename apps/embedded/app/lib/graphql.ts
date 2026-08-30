@@ -1,24 +1,13 @@
-import { getSessionToken } from "../providers";
+import { clearSessionTokenCache, getAuthSessionToken } from "./session-token";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/graphql";
 const UPLOAD_URL = process.env.NEXT_PUBLIC_UPLOAD_URL ?? "/api/upload";
 const DOWNLOAD_BASE = process.env.NEXT_PUBLIC_DOWNLOAD_URL ?? "/download";
 
-/** Reuse App Bridge session token between GraphQL calls (avoids spamming idToken). */
-let cachedSessionToken: { value: string; expiresAt: number } | null = null;
-
-async function authHeaders(shop?: string): Promise<Record<string, string>> {
+async function authHeaders(shop?: string, forceRefresh = false): Promise<Record<string, string>> {
   const headers: Record<string, string> = {};
-  const now = Date.now();
-  if (cachedSessionToken && cachedSessionToken.expiresAt > now) {
-    headers.Authorization = `Bearer ${cachedSessionToken.value}`;
-  } else {
-    const token = await getSessionToken(4);
-    if (token) {
-      cachedSessionToken = { value: token, expiresAt: now + 50_000 };
-      headers.Authorization = `Bearer ${token}`;
-    }
-  }
+  const token = await getAuthSessionToken(forceRefresh);
+  if (token) headers.Authorization = `Bearer ${token}`;
   if (shop) {
     headers["x-tidysync-shop"] = shop;
     headers["x-shopify-shop"] = shop;
@@ -31,20 +20,37 @@ export async function gqlRequest<T>(
   variables?: Record<string, unknown>,
   shop?: string,
 ): Promise<T> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(await authHeaders(shop)),
+  const body = JSON.stringify({ query, variables });
+
+  const send = async (forceRefresh = false) => {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(await authHeaders(shop, forceRefresh)),
+    };
+    return fetch(API_URL, { method: "POST", headers, body });
   };
 
-  const res = await fetch(API_URL, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ query, variables }),
-  });
+  let res = await send();
+  if (res.status === 401) {
+    clearSessionTokenCache();
+    res = await send(true);
+  }
 
   const json = await res.json();
   if (json.errors?.length) {
-    throw new Error(json.errors[0].message);
+    const message = json.errors[0].message as string;
+    if (
+      res.status === 401 ||
+      message.includes("Unauthorized") ||
+      message.includes("session token")
+    ) {
+      clearSessionTokenCache();
+      const retryRes = await send(true);
+      const retryJson = await retryRes.json();
+      if (retryJson.errors?.length) throw new Error(retryJson.errors[0].message);
+      return retryJson.data as T;
+    }
+    throw new Error(message);
   }
   return json.data as T;
 }
@@ -57,79 +63,6 @@ export async function uploadFile(file: File, shop: string) {
   const res = await fetch(UPLOAD_URL, { method: "POST", headers, body: form });
   if (!res.ok) throw new Error("Upload failed");
   return res.json() as Promise<{ filePath: string; fileName: string }>;
-}
-
-export function pollJobProgress(
-  jobId: string,
-  shop: string,
-  onUpdate: (data: Record<string, unknown>) => void,
-  untilStatuses = ["COMPLETED", "FAILED", "CANCELLED"],
-  options?: { intervalMs?: number; maxPolls?: number },
-) {
-  const intervalMs = options?.intervalMs ?? 2500;
-  const maxPolls = options?.maxPolls ?? 180;
-  let cancelled = false;
-  let pollCount = 0;
-  let intervalId: ReturnType<typeof setInterval> | null = null;
-
-  const cleanup = () => {
-    cancelled = true;
-    if (intervalId) clearInterval(intervalId);
-    intervalId = null;
-  };
-
-  const poll = async () => {
-    if (cancelled) return;
-    pollCount += 1;
-    try {
-      const data = await gqlRequest<{ job: Record<string, unknown> }>(
-        QUERIES.job,
-        { id: jobId },
-        shop,
-      );
-      if (cancelled) return;
-      onUpdate(data.job);
-      const status = data.job.status as string;
-      if (untilStatuses.includes(status)) {
-        cleanup();
-        return;
-      }
-      if (pollCount >= maxPolls) {
-        onUpdate({
-          ...data.job,
-          status: "FAILED",
-          errorSummary: "Timed out waiting for the job to finish. Check the Jobs tab for status.",
-        });
-        cleanup();
-      }
-    } catch {
-      cleanup();
-    }
-  };
-
-  void poll();
-  intervalId = setInterval(poll, intervalMs);
-  return cleanup;
-}
-
-export async function waitForJobStatus(
-  jobId: string,
-  shop: string,
-  targetStatuses: string[],
-  onUpdate?: (job: Record<string, unknown>) => void,
-  timeoutMs = 600000,
-): Promise<Record<string, unknown>> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const data = await gqlRequest<{ job: Record<string, unknown> }>(QUERIES.job, { id: jobId }, shop);
-    const job = data.job;
-    onUpdate?.(job);
-    const status = job.status as string;
-    if (targetStatuses.includes(status)) return job;
-    if (["FAILED", "CANCELLED"].includes(status)) return job;
-    await new Promise((r) => setTimeout(r, 1200));
-  }
-  throw new Error("Timed out waiting for file analysis. Try a smaller file or CSV format.");
 }
 
 export async function downloadAuditExport(shop: string) {
