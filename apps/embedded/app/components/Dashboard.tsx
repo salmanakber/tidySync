@@ -10,7 +10,6 @@ import {
   Banner,
   IndexTable,
   Badge,
-  Tabs,
   TextField,
   BlockStack,
   InlineStack,
@@ -29,6 +28,9 @@ import {
   ProductIcon,
   ClockIcon,
   RefreshIcon,
+  CalendarIcon,
+  CashDollarIcon,
+  AlertTriangleIcon,
 } from "@shopify/polaris-icons";
 import {
   gqlRequest,
@@ -332,6 +334,12 @@ export function Dashboard() {
     { id: "settings", content: "Billing" },
   ];
 
+  useEffect(() => {
+    if (!shop) return;
+    if (tab === 6) void loadAudit();
+    if (tab === 7) void loadSchedules();
+  }, [tab, shop]);
+
   const loadAudit = async () => {
     const data = await gqlRequest<{ auditLogs: typeof auditLogs }>(QUERIES.auditLogs, { limit: 50 }, shop);
     setAuditLogs(data.auditLogs);
@@ -388,6 +396,7 @@ export function Dashboard() {
   }
 
   return (
+    <div className="tidysync-page-shell">
     <Page
       title="TidySync"
       subtitle={tenant?.shopName ?? tenant?.shopDomain ?? shop}
@@ -454,9 +463,20 @@ export function Dashboard() {
         )}
 
         <Layout.Section>
-          <Card padding="200">
-            <Tabs tabs={tabs} selected={tab} onSelect={setTab}>
-              <div className="tidysync-tab-panel" style={{ padding: "0 16px 16px" }}>
+          <div className="tidysync-workspace">
+            <nav className="tidysync-nav" aria-label="TidySync sections">
+              {tabs.map((t, index) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`tidysync-nav-btn${tab === index ? " is-active" : ""}`}
+                  onClick={() => setTab(index)}
+                >
+                  {t.content}
+                </button>
+              ))}
+            </nav>
+            <div className="tidysync-panel">
                 {tab === 0 && (
                   <BlockStack gap="500">
                     <div>
@@ -725,40 +745,101 @@ export function Dashboard() {
                 )}
 
                 {tab === 3 && (
-                  <BlockStack gap="400">
+                  <BlockStack gap="500">
                     <div>
-                      <p className="tidysync-section-title">Export</p>
+                      <p className="tidysync-section-title">Export catalog data</p>
                       <p className="tidysync-section-sub">
-                        Generate a downloadable file in Shopify or cross-platform format.
+                        Choose what to export and the destination format. Your file appears in Jobs when ready.
                       </p>
                     </div>
-                    <InlineStack gap="400" wrap={false}>
-                      <div style={{ flex: 1, minWidth: 180 }}>
-                        <Select
-                          label="Resource type"
-                          options={RESOURCE_OPTIONS}
-                          value={exportResourceType}
-                          onChange={setExportResourceType}
-                        />
+
+                    <div>
+                      <Text as="h3" variant="headingSm">
+                        Resource
+                      </Text>
+                      <div className="tidysync-feature-grid" style={{ marginTop: 12 }}>
+                        {RESOURCE_OPTIONS.map((opt) => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            className={`tidysync-feature-card is-clickable${
+                              exportResourceType === opt.value ? " is-selected" : ""
+                            }`}
+                            onClick={() => setExportResourceType(opt.value)}
+                          >
+                            <div className="tidysync-feature-icon">
+                              <Icon source={ProductIcon} />
+                            </div>
+                            <Text as="p" variant="bodyMd" fontWeight="semibold">
+                              {opt.label}
+                            </Text>
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              Export {opt.label.toLowerCase()} from this store
+                            </Text>
+                          </button>
+                        ))}
                       </div>
-                      <div style={{ flex: 1, minWidth: 180 }}>
-                        <Select
-                          label="Export format"
-                          options={[
-                            { label: "Shopify CSV", value: "shopify" },
-                            { label: "WooCommerce", value: "woocommerce" },
-                            { label: "BigCommerce", value: "bigcommerce" },
-                          ]}
-                          value={exportPlatform}
-                          onChange={setExportPlatform}
-                        />
+                    </div>
+
+                    <div>
+                      <Text as="h3" variant="headingSm">
+                        Format
+                      </Text>
+                      <div className="tidysync-feature-grid" style={{ marginTop: 12 }}>
+                        {[
+                          {
+                            value: "shopify",
+                            title: "Shopify CSV",
+                            desc: "Native Shopify Admin import format",
+                          },
+                          {
+                            value: "woocommerce",
+                            title: "WooCommerce",
+                            desc: "Cross-platform product spreadsheet",
+                          },
+                          {
+                            value: "bigcommerce",
+                            title: "BigCommerce",
+                            desc: "BigCommerce catalog-ready export",
+                          },
+                        ].map((fmt) => (
+                          <button
+                            key={fmt.value}
+                            type="button"
+                            className={`tidysync-feature-card is-clickable${
+                              exportPlatform === fmt.value ? " is-selected" : ""
+                            }`}
+                            onClick={() => setExportPlatform(fmt.value)}
+                          >
+                            <div className="tidysync-feature-icon">
+                              <Icon source={ExportIcon} />
+                            </div>
+                            <Text as="p" variant="bodyMd" fontWeight="semibold">
+                              {fmt.title}
+                            </Text>
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              {fmt.desc}
+                            </Text>
+                          </button>
+                        ))}
                       </div>
-                    </InlineStack>
-                    <InlineStack align="end">
-                      <Button variant="primary" onClick={handleExport} loading={loading}>
-                        Start export
-                      </Button>
-                    </InlineStack>
+                    </div>
+
+                    <div className="tidysync-soft-panel">
+                      <InlineStack align="space-between" blockAlign="center" wrap={false}>
+                        <BlockStack gap="100">
+                          <Text as="p" variant="bodyMd" fontWeight="semibold">
+                            Ready to export {exportResourceType} → {exportPlatform}
+                          </Text>
+                          <Text as="p" variant="bodySm" tone="subdued">
+                            Large catalogs run in the background with live progress on Jobs.
+                          </Text>
+                        </BlockStack>
+                        <Button variant="primary" icon={ExportIcon} onClick={handleExport} loading={loading}>
+                          Start export
+                        </Button>
+                      </InlineStack>
+                    </div>
                   </BlockStack>
                 )}
 
@@ -773,73 +854,93 @@ export function Dashboard() {
                 )}
 
                 {tab === 5 && (
-                  <BlockStack gap="400">
+                  <BlockStack gap="500">
                     <div>
                       <p className="tidysync-section-title">Catalog health</p>
                       <p className="tidysync-section-sub">
-                        Find missing images, weak descriptions, and pricing issues — then rewrite with AI.
+                        Scan for catalog issues, then optionally rewrite thin content with your brand voice.
                       </p>
                     </div>
-                    <Card>
-                      <BlockStack gap="300">
+
+                    <div className="tidysync-feature-grid">
+                      <div className="tidysync-feature-card">
+                        <div className="tidysync-feature-icon is-warn">
+                          <Icon source={AlertTriangleIcon} />
+                        </div>
                         <Text as="h3" variant="headingSm">
                           Health scan
                         </Text>
                         <Text as="p" variant="bodySm" tone="subdued">
-                          Issues stream into Jobs as they are found.
+                          Detect missing images, empty descriptions, and pricing anomalies.
                         </Text>
-                        <Button
-                          onClick={async () => {
-                            setLoading(true);
-                            try {
-                              await gqlRequest(MUTATIONS.catalogScan, {}, shop);
-                              setTab(1);
-                              await loadData();
-                            } catch (e) {
-                              setError(e instanceof Error ? e.message : "Scan failed");
-                            } finally {
-                              setLoading(false);
-                            }
-                          }}
-                          loading={loading}
-                        >
-                          Run catalog health scan
-                        </Button>
-                      </BlockStack>
-                    </Card>
-                    <div className="tidysync-ai-studio">
-                      <div className="tidysync-ai-header">
-                        <span className="tidysync-ai-badge">AI</span>
-                        <Text as="h3" variant="headingSm">
-                          Content rewrite
-                        </Text>
+                        <ul className="tidysync-checklist">
+                          <li>Missing media & thin SEO content</li>
+                          <li>Price / compare-at mismatches</li>
+                          <li>Results land in Jobs with severity tags</li>
+                        </ul>
+                        <div style={{ marginTop: 16 }}>
+                          <Button
+                            fullWidth
+                            onClick={async () => {
+                              setLoading(true);
+                              try {
+                                await gqlRequest(MUTATIONS.catalogScan, {}, shop);
+                                setTab(1);
+                                await loadData();
+                              } catch (e) {
+                                setError(e instanceof Error ? e.message : "Scan failed");
+                              } finally {
+                                setLoading(false);
+                              }
+                            }}
+                            loading={loading}
+                          >
+                            Run catalog health scan
+                          </Button>
+                        </div>
                       </div>
-                      <TextField
-                        label="Brand voice"
-                        value={brandVoice}
-                        onChange={setBrandVoice}
-                        autoComplete="off"
-                        helpText="Applied to up to 50 products per run"
-                      />
-                      <div style={{ marginTop: 12 }}>
-                        <Button
-                          variant="primary"
-                          onClick={async () => {
-                            setLoading(true);
-                            try {
-                              await gqlRequest(MUTATIONS.contentRewrite, { brandVoice }, shop);
-                              setTab(1);
-                              await loadData();
-                            } catch (e) {
-                              setError(e instanceof Error ? e.message : "Rewrite failed");
-                            } finally {
-                              setLoading(false);
-                            }
-                          }}
-                          loading={loading}
-                        >
-                          Rewrite product content
-                        </Button>
+
+                      <div className="tidysync-feature-card">
+                        <div className="tidysync-feature-icon is-ai">
+                          <Icon source={MagicIcon} />
+                        </div>
+                        <Text as="h3" variant="headingSm">
+                          AI content rewrite
+                        </Text>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          Rewrite up to 50 product descriptions using your brand voice.
+                        </Text>
+                        <div style={{ marginTop: 12 }}>
+                          <TextField
+                            label="Brand voice"
+                            value={brandVoice}
+                            onChange={setBrandVoice}
+                            autoComplete="off"
+                            multiline={2}
+                            helpText="Example: warm, concise, premium lifestyle"
+                          />
+                        </div>
+                        <div style={{ marginTop: 12 }}>
+                          <Button
+                            fullWidth
+                            variant="primary"
+                            onClick={async () => {
+                              setLoading(true);
+                              try {
+                                await gqlRequest(MUTATIONS.contentRewrite, { brandVoice }, shop);
+                                setTab(1);
+                                await loadData();
+                              } catch (e) {
+                                setError(e instanceof Error ? e.message : "Rewrite failed");
+                              } finally {
+                                setLoading(false);
+                              }
+                            }}
+                            loading={loading}
+                          >
+                            Rewrite product content
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </BlockStack>
@@ -847,20 +948,41 @@ export function Dashboard() {
 
                 {tab === 6 && (
                   <BlockStack gap="400">
+                    <div>
+                      <p className="tidysync-section-title">Audit log</p>
+                      <p className="tidysync-section-sub">
+                        Every import, export, AI edit, and undo is recorded for support and compliance.
+                      </p>
+                    </div>
                     <InlineStack gap="200">
-                      <Button onClick={loadAudit}>Refresh audit log</Button>
+                      <Button icon={RefreshIcon} onClick={loadAudit}>
+                        Refresh
+                      </Button>
                       <Button onClick={() => downloadAuditExport(shop)}>Export CSV</Button>
                     </InlineStack>
                     {auditLogs.length === 0 ? (
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        No audit events loaded yet.
-                      </Text>
+                      <div className="tidysync-empty-block">
+                        <Text as="p" variant="bodyMd" fontWeight="semibold">
+                          No audit events yet
+                        </Text>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          Run an import, export, or AI edit and activity will appear here.
+                        </Text>
+                      </div>
                     ) : (
                       auditLogs.map((log) => (
                         <div key={log.id} className="tidysync-job-live">
-                          <Text as="p" variant="bodySm">
-                            <strong>{new Date(log.createdAt).toLocaleString()}</strong> — {log.action}
-                          </Text>
+                          <InlineStack align="space-between" blockAlign="center">
+                            <BlockStack gap="100">
+                              <Text as="p" variant="bodyMd" fontWeight="semibold">
+                                {log.action}
+                              </Text>
+                              <Text as="p" variant="bodySm" tone="subdued">
+                                {new Date(log.createdAt).toLocaleString()}
+                              </Text>
+                            </BlockStack>
+                            <Badge>Event</Badge>
+                          </InlineStack>
                         </div>
                       ))
                     )}
@@ -868,10 +990,18 @@ export function Dashboard() {
                 )}
 
                 {tab === 7 && (
-                  <BlockStack gap="400">
-                    <InlineStack gap="200">
-                      <Button onClick={loadSchedules}>Refresh</Button>
-                      <Button
+                  <BlockStack gap="500">
+                    <div>
+                      <p className="tidysync-section-title">Schedules</p>
+                      <p className="tidysync-section-sub">
+                        Automate recurring exports and scans so catalog work runs without babysitting.
+                      </p>
+                    </div>
+
+                    <div className="tidysync-feature-grid">
+                      <button
+                        type="button"
+                        className="tidysync-feature-card is-clickable"
                         onClick={async () => {
                           await gqlRequest(
                             MUTATIONS.createSchedule,
@@ -886,27 +1016,120 @@ export function Dashboard() {
                           await loadSchedules();
                         }}
                       >
-                        Add daily export
-                      </Button>
-                    </InlineStack>
-                    {schedules.map((s) => (
-                      <div key={s.id} className="tidysync-job-live">
-                        <Text as="p" variant="bodySm">
-                          <strong>{s.name}</strong> · {s.jobType} · {s.schedule}
+                        <div className="tidysync-feature-icon">
+                          <Icon source={ExportIcon} />
+                        </div>
+                        <Text as="p" variant="bodyMd" fontWeight="semibold">
+                          Daily export
+                        </Text>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          Export products every day into Jobs downloads.
+                        </Text>
+                      </button>
+                      <button
+                        type="button"
+                        className="tidysync-feature-card is-clickable"
+                        onClick={async () => {
+                          await gqlRequest(
+                            MUTATIONS.createSchedule,
+                            {
+                              name: "Weekly health scan",
+                              jobType: "CATALOG_HEALTH_SCAN",
+                              schedule: "weekly",
+                              config: {},
+                            },
+                            shop,
+                          );
+                          await loadSchedules();
+                        }}
+                      >
+                        <div className="tidysync-feature-icon is-warn">
+                          <Icon source={AlertTriangleIcon} />
+                        </div>
+                        <Text as="p" variant="bodyMd" fontWeight="semibold">
+                          Weekly health scan
+                        </Text>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          Catch missing images and thin content every week.
+                        </Text>
+                      </button>
+                    </div>
+
+                    <div className="tidysync-soft-panel">
+                      <InlineStack align="space-between" blockAlign="center">
+                        <InlineStack gap="200" blockAlign="center">
+                          <Icon source={CalendarIcon} />
+                          <Text as="p" variant="headingSm">
+                            Active schedules
+                          </Text>
+                        </InlineStack>
+                        <Button icon={RefreshIcon} onClick={loadSchedules}>
+                          Refresh
+                        </Button>
+                      </InlineStack>
+                    </div>
+
+                    {schedules.length === 0 ? (
+                      <div className="tidysync-empty-block">
+                        <Text as="p" variant="bodyMd" fontWeight="semibold">
+                          No schedules yet
+                        </Text>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          Pick a template above to create your first automated job.
                         </Text>
                       </div>
-                    ))}
+                    ) : (
+                      schedules.map((s) => (
+                        <div key={s.id} className="tidysync-schedule-card">
+                          <InlineStack gap="300" blockAlign="center">
+                            <div className="tidysync-feature-icon" style={{ marginBottom: 0 }}>
+                              <Icon source={CalendarIcon} />
+                            </div>
+                            <BlockStack gap="100">
+                              <Text as="p" variant="bodyMd" fontWeight="semibold">
+                                {s.name}
+                              </Text>
+                              <Text as="p" variant="bodySm" tone="subdued">
+                                {s.jobType} · {s.schedule}
+                              </Text>
+                            </BlockStack>
+                          </InlineStack>
+                          <Badge tone="success">Enabled</Badge>
+                        </div>
+                      ))
+                    )}
                   </BlockStack>
                 )}
 
                 {tab === 8 && (
-                  <BlockStack gap="400">
+                  <BlockStack gap="500">
+                    <div className="tidysync-billing-hero">
+                      <InlineStack align="space-between" blockAlign="start" wrap>
+                        <div>
+                          <Text as="h2" variant="headingMd">
+                            <span style={{ color: "#fff" }}>
+                              {tenant?.plan?.name ?? "Free"} plan
+                            </span>
+                          </Text>
+                          <div className="meta">
+                            {tenant?.productCount?.toLocaleString() ?? 0} products ·{" "}
+                            {tenant?.plan?.aiCreditsRemaining ?? "—"} AI credits left
+                            {tenant?.billingBypass ? " · Testing mode on" : ""}
+                          </div>
+                        </div>
+                        <div className="tidysync-feature-icon" style={{ background: "rgba(255,255,255,0.12)", color: "#fff", marginBottom: 0 }}>
+                          <Icon source={CashDollarIcon} />
+                        </div>
+                      </InlineStack>
+                    </div>
+
                     <div>
-                      <p className="tidysync-section-title">Plans & billing</p>
+                      <p className="tidysync-section-title">Choose a plan</p>
                       <p className="tidysync-section-sub">
-                        Upgrade for higher product limits and more AI credits.
+                        Upgrade for higher product limits and more AI credits. Billing runs through Shopify.
                       </p>
                     </div>
+
                     <div className="tidysync-plan-cards">
                       {plans.map((plan) => {
                         const isCurrent = tenant?.plan?.slug === plan.slug;
@@ -921,23 +1144,32 @@ export function Dashboard() {
                               </Text>
                               {isCurrent && <Badge tone="success">Current</Badge>}
                             </InlineStack>
-                            <Text as="p" variant="headingLg">
-                              {plan.isFree
-                                ? "Free"
-                                : `$${(plan.priceMonthlyCents / 100).toFixed(0)}/mo`}
-                            </Text>
-                            <BlockStack gap="100">
-                              <Text as="span" variant="bodySm" tone="subdued">
-                                {plan.maxProducts.toLocaleString()} products
-                              </Text>
-                              <Text as="span" variant="bodySm" tone="subdued">
-                                {plan.aiCreditsPerMonth} AI credits/mo
-                              </Text>
-                            </BlockStack>
-                            {!isCurrent && !plan.isFree && (
-                              <div style={{ marginTop: 12 }}>
+                            <div className="tidysync-plan-price">
+                              {plan.isFree ? "Free" : `$${(plan.priceMonthlyCents / 100).toFixed(0)}`}
+                              {!plan.isFree && (
+                                <span style={{ fontSize: 14, fontWeight: 500, color: "#6d7175" }}>
+                                  /mo
+                                </span>
+                              )}
+                            </div>
+                            <ul className="tidysync-checklist">
+                              <li>{plan.maxProducts.toLocaleString()} products</li>
+                              <li>{plan.aiCreditsPerMonth} AI credits / month</li>
+                              <li>{plan.isFree ? "Core import & export" : "Priority AI + scheduled jobs"}</li>
+                            </ul>
+                            <div style={{ marginTop: "auto", paddingTop: 8 }}>
+                              {isCurrent ? (
+                                <Button fullWidth disabled>
+                                  Current plan
+                                </Button>
+                              ) : plan.isFree ? (
+                                <Button fullWidth disabled={tenant?.plan?.isFree}>
+                                  Included
+                                </Button>
+                              ) : (
                                 <Button
                                   fullWidth
+                                  variant="primary"
                                   onClick={async () => {
                                     const result = await gqlRequest<{
                                       createPlanSubscription: { confirmationUrl: string };
@@ -945,56 +1177,90 @@ export function Dashboard() {
                                     window.open(result.createPlanSubscription.confirmationUrl, "_top");
                                   }}
                                 >
-                                  Upgrade
+                                  Upgrade to {plan.name}
                                 </Button>
-                              </div>
-                            )}
+                              )}
+                            </div>
                           </div>
                         );
                       })}
                     </div>
-                    <Divider />
-                    <TextField
-                      label="AI credit top-up"
-                      value={creditTopUp}
-                      onChange={setCreditTopUp}
-                      autoComplete="off"
-                      helpText="$1 per credit — billed via Shopify"
-                    />
-                    <Button
-                      onClick={async () => {
-                        const credits = Number(creditTopUp) || 10;
-                        const result = await gqlRequest<{
-                          purchaseCreditTopUp: { confirmationUrl: string };
-                        }>(MUTATIONS.purchaseCredits, { credits }, shop);
-                        window.open(result.purchaseCreditTopUp.confirmationUrl, "_top");
-                      }}
-                      disabled={tenant?.plan?.isFree}
-                    >
-                      Purchase AI credits
-                    </Button>
-                    <TextField
-                      label="Notification email"
-                      value={notifyEmail}
-                      onChange={setNotifyEmail}
-                      autoComplete="email"
-                    />
-                    <Button
-                      onClick={async () => {
-                        await gqlRequest(
-                          MUTATIONS.updateNotifications,
-                          { email: notifyEmail, emailOnComplete: true, emailOnFailure: true },
-                          shop,
-                        );
-                      }}
-                    >
-                      Save notification settings
-                    </Button>
+
+                    <div className="tidysync-feature-grid">
+                      <div className="tidysync-feature-card">
+                        <div className="tidysync-feature-icon is-ai">
+                          <Icon source={MagicIcon} />
+                        </div>
+                        <Text as="h3" variant="headingSm">
+                          Buy AI credits
+                        </Text>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          $1 per credit · one-time Shopify charge
+                        </Text>
+                        <div style={{ marginTop: 12 }}>
+                          <TextField
+                            label="Credits"
+                            value={creditTopUp}
+                            onChange={setCreditTopUp}
+                            autoComplete="off"
+                            type="number"
+                          />
+                        </div>
+                        <div style={{ marginTop: 12 }}>
+                          <Button
+                            fullWidth
+                            onClick={async () => {
+                              const credits = Number(creditTopUp) || 10;
+                              const result = await gqlRequest<{
+                                purchaseCreditTopUp: { confirmationUrl: string };
+                              }>(MUTATIONS.purchaseCredits, { credits }, shop);
+                              window.open(result.purchaseCreditTopUp.confirmationUrl, "_top");
+                            }}
+                            disabled={tenant?.plan?.isFree}
+                          >
+                            Purchase credits
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="tidysync-feature-card">
+                        <div className="tidysync-feature-icon">
+                          <Icon source={ClockIcon} />
+                        </div>
+                        <Text as="h3" variant="headingSm">
+                          Job notifications
+                        </Text>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          Get emailed when large jobs finish or fail.
+                        </Text>
+                        <div style={{ marginTop: 12 }}>
+                          <TextField
+                            label="Notification email"
+                            value={notifyEmail}
+                            onChange={setNotifyEmail}
+                            autoComplete="email"
+                          />
+                        </div>
+                        <div style={{ marginTop: 12 }}>
+                          <Button
+                            fullWidth
+                            onClick={async () => {
+                              await gqlRequest(
+                                MUTATIONS.updateNotifications,
+                                { email: notifyEmail, emailOnComplete: true, emailOnFailure: true },
+                                shop,
+                              );
+                            }}
+                          >
+                            Save notifications
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
                   </BlockStack>
                 )}
-              </div>
-            </Tabs>
-          </Card>
+            </div>
+          </div>
         </Layout.Section>
       </Layout>
 
@@ -1057,5 +1323,6 @@ export function Dashboard() {
         </Modal.Section>
       </Modal>
     </Page>
+    </div>
   );
 }

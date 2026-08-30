@@ -1,4 +1,3 @@
-import Script from "next/script";
 import type { Metadata } from "next";
 import "./globals.css";
 
@@ -14,12 +13,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <head>
+        {/* App Bridge must be the first script — no async/defer/module (Shopify CDN requirement) */}
         <meta name="shopify-api-key" content={apiKey} />
+        {/* eslint-disable-next-line @next/next/no-sync-scripts */}
+        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" />
       </head>
-      <body>
-        <Script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" strategy="beforeInteractive" />
-        {children}
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

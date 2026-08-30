@@ -90,7 +90,7 @@ function PolarisWrapper({ children }: { children: React.ReactNode }) {
         <div
           data-shop={shop}
           data-host={host}
-          style={{ minHeight: "100vh", background: "#f6f6f7" }}
+          style={{ minHeight: "100vh", background: "#f6f6f7", paddingBottom: 80 }}
         >
           {children}
         </div>
