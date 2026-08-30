@@ -134,7 +134,7 @@ async function onlineSessionForShop(shop: string): Promise<Session | null> {
 
 /**
  * Resolve a Shopify Admin API session for merchant-initiated requests.
- * Prefers a fresh token from the App Bridge session token, then online/offline DB sessions.
+ * When an App Bridge session token is present, always exchange it — never use stale DB tokens.
  */
 export async function resolveMerchantSession(
   shop: string,
@@ -147,7 +147,9 @@ export async function resolveMerchantSession(
       try {
         return await exchangeSessionToken(shop, sessionToken, "offline");
       } catch {
-        /* fall through to stored sessions */
+        throw new Error(
+          "Shopify session token exchange failed. Re-open TidySync from Shopify Admin and click Connect if prompted.",
+        );
       }
     }
   }
@@ -183,39 +185,51 @@ export async function merchantGraphqlRequest<T = unknown>(
   query: string,
   variables?: Record<string, unknown>,
 ): Promise<T> {
-  let session = await resolveMerchantSession(shop, sessionToken);
-  let client = new shopify.clients.Graphql({ session });
-
-  try {
+  const runWithSession = async (session: Session): Promise<T> => {
+    const client = new shopify.clients.Graphql({ session });
     const response = await client.request(query, { variables });
     const errors = (response as { errors?: Array<{ message: string }> }).errors;
     if (errors?.length) {
       throw new Error(errors.map((e) => e.message).join("; "));
     }
     return response as T;
+  };
+
+  let session = await resolveMerchantSession(shop, sessionToken);
+
+  try {
+    return await runWithSession(session);
   } catch (err) {
     if (!isShopifyUnauthorized(err)) throw err;
 
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes("token exchange") || message.includes("401")) {
+    if (!sessionToken) {
       throw new Error(
-        "Shopify connection expired. Open TidySync from Shopify Admin, click Connect if prompted, then try again.",
+        "Shopify rejected our API credentials (401). Open TidySync from Shopify Admin and complete Connect / install.",
       );
     }
 
-    if (sessionToken) {
-      session = await exchangeSessionToken(shop, sessionToken, "offline");
-      client = new shopify.clients.Graphql({ session });
-      const response = await client.request(query, { variables });
-      const errors = (response as { errors?: Array<{ message: string }> }).errors;
-      if (errors?.length) {
-        throw new Error(errors.map((e) => e.message).join("; "));
+    // 401 with a live session token — exchange fresh tokens and retry (online, then offline).
+    try {
+      session = await exchangeSessionToken(shop, sessionToken, "online");
+      return await runWithSession(session);
+    } catch (retryErr) {
+      if (!isShopifyUnauthorized(retryErr)) throw retryErr;
+      try {
+        session = await exchangeSessionToken(shop, sessionToken, "offline");
+        return await runWithSession(session);
+      } catch {
+        throw new Error(
+          "Shopify connection expired. Open TidySync from Shopify Admin, click Connect if prompted, then try again.",
+        );
       }
-      return response as T;
     }
-
-    throw new Error(
-      "Shopify rejected our API credentials (401). Click Connect in TidySync to re-authorize the app.",
-    );
   }
+}
+
+/** Refresh stored offline token so background workers can call Shopify after merchant approves. */
+export async function refreshOfflineTokenFromSession(
+  shop: string,
+  sessionToken: string,
+): Promise<void> {
+  await exchangeSessionToken(shop, sessionToken, "offline");
 }

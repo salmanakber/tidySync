@@ -87,6 +87,8 @@ The repo includes `shopify.app.toml` — Client ID should match `SHOPIFY_API_KEY
 |-------|-----|
 | `idToken unavailable` | Empty/wrong `shopify-api-key` meta — set `SHOPIFY_API_KEY` and redeploy (`force-dynamic` layout) |
 | `Unauthorized — merchant session required` | Complete OAuth once; confirm `/auth/session?shop=...` returns `ok:true` |
+| `Shopify connection expired` | Re-open app from Shopify Admin; code now re-exchanges App Bridge token on 401. If it persists, click Connect / reinstall OAuth |
+| `getaddrinfo EAI_AGAIN redis` | PM2 on VPS cannot resolve hostname `redis`. Set `REDIS_URL=redis://127.0.0.1:6379` in `.env`, expose Redis `6379` in Docker (`ports: ["6379:6379"]`), run `docker compose up -d redis`, then `pm2 restart tidysync` |
 | Blank iframe | Client ID mismatch vs Partner dashboard |
 | OAuth redirect error | Redirect URL must exactly match `/auth/callback` on your domain |
 | App not loading | Shopify requires valid HTTPS for production apps |

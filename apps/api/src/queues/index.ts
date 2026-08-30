@@ -1,13 +1,8 @@
 import { Queue } from "bullmq";
-import IORedis from "ioredis";
 import { QUEUE_NAMES } from "@tidysync/shared";
+import { createRedisConnection } from "../lib/redis-connection";
 
-const connection = new IORedis(process.env.REDIS_URL ?? "redis://localhost:6379", {
-  maxRetriesPerRequest: null,
-  connectTimeout: 8_000,
-  commandTimeout: 8_000,
-  retryStrategy: (times) => (times > 4 ? null : Math.min(times * 250, 2_000)),
-});
+const connection = createRedisConnection();
 
 export const importQueue = new Queue(QUEUE_NAMES.IMPORT, { connection });
 export const exportQueue = new Queue(QUEUE_NAMES.EXPORT, { connection });

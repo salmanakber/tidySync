@@ -4,6 +4,7 @@ import {
   buildImpactSummary,
   detectPlatformFromHeaders,
   detectPlatformWithConfidence,
+  resolveRedisUrl,
 } from "@tidysync/shared";
 import { consumeAiCredit } from "../services/tenant";
 import {
@@ -18,7 +19,7 @@ import {
   bulkEditQueue,
   undoQueue,
 } from "../queues";
-import { getShopGraphqlClient } from "../shopify/client";
+import { getShopGraphqlClient, refreshOfflineTokenFromSession } from "../shopify/client";
 import { parseFileHeaders, parseFilePreview } from "../services/file-parser";
 import { fetchProductsForExport, buildDiffFromMutationPlan } from "../services/shopify-products";
 import {
@@ -610,6 +611,14 @@ export const resolvers = {
       if (!job) throw new Error("Job not found");
       if (job.status !== "PREVIEW") throw new Error("Job must be in PREVIEW status to approve");
 
+      if (ctx.sessionToken) {
+        try {
+          await refreshOfflineTokenFromSession(shop, ctx.sessionToken);
+        } catch {
+          /* enqueue may still work if a stored offline token is valid */
+        }
+      }
+
       const updated = await prisma.job.update({
         where: { id: job.id },
         data: { status: "QUEUED", approvedAt: new Date() },
@@ -631,17 +640,22 @@ export const resolvers = {
       try {
         await enqueue();
       } catch (err) {
+        const base = err instanceof Error ? err.message : "Failed to queue job for processing";
+        const redisUnreachable =
+          base.includes("redis") ||
+          base.includes("EAI_AGAIN") ||
+          base.includes("ECONNREFUSED");
+        const hint = redisUnreachable
+          ? ` Redis is not reachable at ${resolveRedisUrl()}. On VPS with PM2, set REDIS_URL=redis://127.0.0.1:6379 in .env and expose Redis port 6379 from Docker (or install Redis on the host).`
+          : "";
         await prisma.job.update({
           where: { id: job.id },
           data: {
             status: "FAILED",
-            errorSummary:
-              "Could not queue job — Redis or worker may be offline. Check server logs and pm2 status.",
+            errorSummary: `Could not queue job.${hint}`,
           },
         });
-        throw new Error(
-          err instanceof Error ? err.message : "Failed to queue job for processing",
-        );
+        throw new Error(`${base}${hint}`);
       }
 
       await prisma.auditLog.create({

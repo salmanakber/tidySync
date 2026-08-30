@@ -1,8 +1,8 @@
 import { Queue } from "bullmq";
+import { QUEUE_NAMES, resolveRedisUrl } from "@tidysync/shared";
 import IORedis from "ioredis";
-import { QUEUE_NAMES } from "@tidysync/shared";
 
-const connection = new IORedis(process.env.REDIS_URL ?? "redis://localhost:6379", {
+const connection = new IORedis(resolveRedisUrl(), {
   maxRetriesPerRequest: null,
   connectTimeout: 8_000,
   commandTimeout: 8_000,

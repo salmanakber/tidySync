@@ -1,5 +1,7 @@
 export const TIDYSYNC_APP_NAME = "TidySync";
 
+export { resolveRedisUrl } from "./redis-url";
+
 export {
   buildDiffFromProducts,
   productMatchesFilter,

@@ -1,6 +1,6 @@
 import { Worker } from "bullmq";
 import IORedis from "ioredis";
-import { QUEUE_NAMES } from "@tidysync/shared";
+import { QUEUE_NAMES, resolveRedisUrl } from "@tidysync/shared";
 import { processImportJob } from "./processors/import";
 import { processAnalyzeImportJob } from "./processors/import-analyze";
 import { processExportJob } from "./processors/export";
@@ -10,8 +10,11 @@ import { processCatalogHealthScan } from "./processors/catalog-health";
 import { processContentRewrite } from "./processors/content-rewrite";
 import { runScheduler } from "./scheduler";
 
-const connection = new IORedis(process.env.REDIS_URL ?? "redis://localhost:6379", {
+const connection = new IORedis(resolveRedisUrl(), {
   maxRetriesPerRequest: null,
+  connectTimeout: 8_000,
+  commandTimeout: 8_000,
+  retryStrategy: (times) => (times > 4 ? null : Math.min(times * 250, 2_000)),
 });
 
 interface JobPayload {
