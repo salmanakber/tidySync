@@ -56,6 +56,7 @@ interface ProductSeoInsight {
 interface ProductSeoStudioProps {
   shop: string;
   creditsRemaining?: number | string;
+  onCreditsRefresh?: () => void;
 }
 
 function scoreTone(score: number): "success" | "warning" | "critical" {
@@ -103,13 +104,15 @@ function ScoreRing({ score }: { score: number }) {
   );
 }
 
-export function ProductSeoStudio({ shop, creditsRemaining }: ProductSeoStudioProps) {
+export function ProductSeoStudio({ shop, creditsRemaining, onCreditsRefresh }: ProductSeoStudioProps) {
   const [search, setSearch] = useState("");
   const [products, setProducts] = useState<CatalogProduct[]>([]);
   const [loadingList, setLoadingList] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [insight, setInsight] = useState<ProductSeoInsight | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [applySuccess, setApplySuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadProducts = useCallback(async (query?: string) => {
@@ -141,6 +144,7 @@ export function ProductSeoStudio({ shop, creditsRemaining }: ProductSeoStudioPro
   const analyze = async (productId: string) => {
     setAnalyzing(true);
     setError(null);
+    setApplySuccess(null);
     setSelectedId(productId);
     try {
       const data = await gqlRequest<{ analyzeProductSeo: ProductSeoInsight }>(
@@ -149,11 +153,33 @@ export function ProductSeoStudio({ shop, creditsRemaining }: ProductSeoStudioPro
         shop,
       );
       setInsight(data.analyzeProductSeo);
+      onCreditsRefresh?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : "SEO analysis failed");
       setInsight(null);
     } finally {
       setAnalyzing(false);
+    }
+  };
+
+  const applySeo = async () => {
+    if (!insight?.productId) return;
+    setApplying(true);
+    setError(null);
+    setApplySuccess(null);
+    try {
+      const data = await gqlRequest<{ applyProductSeo: ProductSeoInsight & { applied?: Record<string, string> } }>(
+        MUTATIONS.applyProductSeo,
+        { productId: insight.productId },
+        shop,
+      );
+      setInsight(data.applyProductSeo);
+      setApplySuccess("AI SEO improvements applied to Shopify.");
+      onCreditsRefresh?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not apply SEO improvements");
+    } finally {
+      setApplying(false);
     }
   };
 
@@ -206,7 +232,7 @@ export function ProductSeoStudio({ shop, creditsRemaining }: ProductSeoStudioPro
                 type="button"
                 className={`tidysync-seo-product-card${selectedId === p.id ? " is-selected" : ""}`}
                 onClick={() => analyze(p.id)}
-                disabled={analyzing}
+                disabled={analyzing || applying}
               >
                 {p.featuredImageUrl ? (
                   <img src={p.featuredImageUrl} alt="" className="tidysync-seo-product-thumb" />
@@ -251,10 +277,23 @@ export function ProductSeoStudio({ shop, creditsRemaining }: ProductSeoStudioPro
                     className="tidysync-seo-insight-image"
                   />
                 )}
-                <BlockStack gap="100">
+                <BlockStack gap="200">
                   <Text as="h3" variant="headingMd">{insight.title}</Text>
                   {insight.handle && (
                     <Text as="p" variant="bodySm" tone="subdued">/{insight.handle}</Text>
+                  )}
+                  <InlineStack gap="200" wrap>
+                    <Button
+                      variant="primary"
+                      onClick={() => applySeo()}
+                      loading={applying}
+                      disabled={analyzing || applying}
+                    >
+                      Apply AI SEO improvements (1 credit)
+                    </Button>
+                  </InlineStack>
+                  {applySuccess && (
+                    <Text as="p" variant="bodySm" tone="success">{applySuccess}</Text>
                   )}
                 </BlockStack>
               </InlineStack>

@@ -262,6 +262,20 @@ export const MUTATIONS = {
       }
     }
   `,
+  applyProductSeo: `
+    mutation ApplyProductSeo($productId: ID!) {
+      applyProductSeo(productId: $productId) {
+        productId title handle featuredImageUrl creditsUsed aiExplanation
+        applied
+        metrics {
+          overallScore titleScore descriptionScore metaScore mediaScore readabilityScore
+          titleLength metaDescriptionLength descriptionWordCount imageCount imagesWithAlt
+          hasCustomSeoTitle hasCustomSeoDescription
+          checks { id label status detail score }
+        }
+      }
+    }
+  `,
   polishImportSample: `
     mutation PolishImportSample($jobId: ID!, $brandVoice: String) {
       polishImportSample(jobId: $jobId, brandVoice: $brandVoice) {

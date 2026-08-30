@@ -1,13 +1,18 @@
 import { prisma, auditRepository, scheduledJobRepository, featureFlagRepository, jobRepository, type JobType } from "@tidysync/database";
 import { getShopifyFieldsForResource, parseNlBulkEdit, type ResourceType } from "@tidysync/shared";
-import { inferColumnMappingsWithAi, parseNlBulkEditWithAi, generateImpactSummary, generateProductSeoInsight, rewriteProductContent } from "@tidysync/ai";
+import { inferColumnMappingsWithAi, parseNlBulkEditWithAi, generateImpactSummary, generateProductSeoInsight, generateProductSeoImprovements, rewriteProductContent } from "@tidysync/ai";
 import { consumeAiCredit } from "../services/tenant";
 import { catalogScanQueue, bulkEditQueue } from "../queues";
 import { type GraphQLContext, requireMerchant, requireActiveMerchant, requireAdmin } from "../context";
 import { parseFileHeaders } from "../services/file-parser";
 import { parseFilePreview } from "../services/file-parser";
 import { merchantGraphqlRequest } from "../shopify/client";
-import { analyzeProductSeoMetrics } from "../services/product-seo";
+import {
+  analyzeProductSeoMetrics,
+  applyProductSeoToShopify,
+  fetchProductSeoSource,
+  productSeoMetricsInput,
+} from "../services/product-seo";
 
 export const extensionTypeDefs = `#graphql
   type AuditLog {
@@ -94,6 +99,17 @@ export const extensionTypeDefs = `#graphql
     creditsUsed: Int!
   }
 
+  type ProductSeoApplyResult {
+    productId: ID!
+    title: String!
+    handle: String
+    featuredImageUrl: String
+    metrics: ProductSeoMetrics!
+    aiExplanation: String!
+    applied: JSON!
+    creditsUsed: Int!
+  }
+
   type ImportPolishRow {
     rowIndex: Int!
     field: String!
@@ -120,6 +136,7 @@ export const extensionTypeDefs = `#graphql
     runContentRewrite(brandVoice: String!): Job!
     polishImportSample(jobId: ID!, brandVoice: String): ImportPolishSample!
     analyzeProductSeo(productId: ID!): ProductSeoInsight!
+    applyProductSeo(productId: ID!): ProductSeoApplyResult!
     createScheduledJob(name: String!, jobType: JobType!, schedule: String!, config: JSON): ScheduledJob!
     deleteScheduledJob(id: ID!): Boolean!
     updateNotificationSettings(
@@ -369,6 +386,67 @@ export const extensionResolvers = {
         featuredImageUrl: product.featuredImage?.url ?? null,
         metrics,
         aiExplanation,
+        creditsUsed: 1,
+      };
+    },
+    applyProductSeo: async (_: unknown, args: { productId: string }, ctx: GraphQLContext) => {
+      const { tenantId, shop } = requireActiveMerchant(ctx);
+      await consumeAiCredit(tenantId, 1);
+
+      const source = await fetchProductSeoSource(shop, ctx.sessionToken, args.productId);
+      const beforeMetrics = analyzeProductSeoMetrics(productSeoMetricsInput(source));
+
+      const improvements = await generateProductSeoImprovements(
+        {
+          title: source.title,
+          handle: source.handle,
+          descriptionHtml: source.descriptionHtml,
+          seo: source.seo,
+        },
+        beforeMetrics as unknown as Record<string, unknown>,
+      );
+
+      await applyProductSeoToShopify(shop, ctx.sessionToken, args.productId, improvements);
+
+      const updated = await fetchProductSeoSource(shop, ctx.sessionToken, args.productId);
+      const metrics = analyzeProductSeoMetrics(productSeoMetricsInput(updated));
+
+      const aiExplanation = await generateProductSeoInsight(
+        {
+          title: updated.title,
+          handle: updated.handle,
+          seo: updated.seo,
+          descriptionWordCount: metrics.descriptionWordCount,
+        },
+        metrics as unknown as Record<string, unknown>,
+      );
+
+      await prisma.aiOperation.create({
+        data: {
+          tenantId,
+          operationType: "PRODUCT_SEO_INSIGHT",
+          prompt: `apply:${updated.id}`,
+          generatedPlan: {
+            applied: improvements,
+            metrics,
+          } as object,
+          creditsConsumed: 1,
+          modelUsed: improvements.modelUsed ?? "seo-apply",
+        },
+      });
+
+      return {
+        productId: updated.id,
+        title: updated.title,
+        handle: updated.handle,
+        featuredImageUrl: updated.featuredImageUrl,
+        metrics,
+        aiExplanation,
+        applied: {
+          seoTitle: improvements.seoTitle,
+          seoDescription: improvements.seoDescription,
+          descriptionPreview: improvements.descriptionHtml.slice(0, 400),
+        },
         creditsUsed: 1,
       };
     },

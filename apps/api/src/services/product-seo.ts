@@ -328,3 +328,135 @@ export function analyzeProductSeoMetrics(product: {
     checks,
   };
 }
+
+export const PRODUCT_SEO_GRAPHQL = `
+  query ProductSeo($id: ID!) {
+    product(id: $id) {
+      id
+      title
+      handle
+      descriptionHtml
+      seo { title description }
+      featuredImage { url }
+      images(first: 20) { nodes { url altText } }
+    }
+  }
+`;
+
+export interface ProductSeoSource {
+  id: string;
+  title: string;
+  handle: string | null;
+  descriptionHtml: string;
+  seo: { title: string | null; description: string | null };
+  featuredImageUrl: string | null;
+  images: Array<{ url: string; altText: string | null }>;
+}
+
+export function mapProductSeoGraphql(product: {
+  id: string;
+  title: string;
+  handle?: string | null;
+  descriptionHtml?: string | null;
+  seo?: { title?: string | null; description?: string | null } | null;
+  featuredImage?: { url?: string | null } | null;
+  images?: { nodes?: Array<{ url?: string | null; altText?: string | null }> } | null;
+}): ProductSeoSource {
+  return {
+    id: product.id,
+    title: product.title,
+    handle: product.handle ?? null,
+    descriptionHtml: product.descriptionHtml ?? "",
+    seo: {
+      title: product.seo?.title ?? null,
+      description: product.seo?.description ?? null,
+    },
+    featuredImageUrl: product.featuredImage?.url ?? null,
+    images: (product.images?.nodes ?? []).map((img) => ({
+      url: img.url ?? "",
+      altText: img.altText ?? null,
+    })),
+  };
+}
+
+export async function fetchProductSeoSource(
+  shop: string,
+  sessionToken: string | undefined,
+  productId: string,
+): Promise<ProductSeoSource> {
+  const { merchantGraphqlRequest } = await import("../shopify/client");
+  const response = await merchantGraphqlRequest<{
+    data?: {
+      product?: {
+        id: string;
+        title: string;
+        handle?: string | null;
+        descriptionHtml?: string | null;
+        seo?: { title?: string | null; description?: string | null } | null;
+        featuredImage?: { url?: string | null } | null;
+        images?: { nodes?: Array<{ url?: string | null; altText?: string | null }> } | null;
+      };
+    };
+  }>(shop, sessionToken, PRODUCT_SEO_GRAPHQL, { id: productId });
+
+  const product = response.data?.product;
+  if (!product) {
+    throw new Error("Product not found");
+  }
+  return mapProductSeoGraphql(product);
+}
+
+export function productSeoMetricsInput(source: ProductSeoSource) {
+  return {
+    title: source.title,
+    descriptionHtml: source.descriptionHtml,
+    seo: source.seo,
+    featuredImage: source.featuredImageUrl ? { url: source.featuredImageUrl } : null,
+    images: source.images,
+  };
+}
+
+export async function applyProductSeoToShopify(
+  shop: string,
+  sessionToken: string | undefined,
+  productId: string,
+  improvements: {
+    seoTitle?: string;
+    seoDescription?: string;
+    descriptionHtml?: string;
+  },
+): Promise<void> {
+  const { merchantGraphqlRequest } = await import("../shopify/client");
+  const product: Record<string, unknown> = { id: productId };
+  if (improvements.descriptionHtml) {
+    product.descriptionHtml = improvements.descriptionHtml;
+  }
+  const seo: Record<string, string> = {};
+  if (improvements.seoTitle) seo.title = improvements.seoTitle;
+  if (improvements.seoDescription) seo.description = improvements.seoDescription;
+  if (Object.keys(seo).length > 0) product.seo = seo;
+
+  const response = await merchantGraphqlRequest<{
+    data?: {
+      productUpdate?: {
+        userErrors?: Array<{ message: string }>;
+      };
+    };
+  }>(
+    shop,
+    sessionToken,
+    `
+      mutation ProductSeoApply($product: ProductUpdateInput!) {
+        productUpdate(product: $product) {
+          userErrors { message }
+        }
+      }
+    `,
+    { product },
+  );
+
+  const errors = response.data?.productUpdate?.userErrors ?? [];
+  if (errors.length > 0) {
+    throw new Error(errors.map((e) => e.message).join("; "));
+  }
+}

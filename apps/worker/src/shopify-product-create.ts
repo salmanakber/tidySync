@@ -23,7 +23,12 @@ const PRODUCT_CREATE = `#graphql
 const VARIANTS_BULK_UPDATE = `#graphql
   mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
     productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-      productVariants { id sku price compareAtPrice }
+      productVariants {
+        id
+        price
+        compareAtPrice
+        inventoryItem { sku }
+      }
       userErrors { field message }
     }
   }
@@ -84,6 +89,31 @@ function mediaInput(imageUrls?: string[]): Array<{ originalSource: string; media
   }));
 }
 
+export function buildVariantBulkInput(
+  variantId: string,
+  fields: {
+    sku?: string;
+    price?: string | number;
+    compareAtPrice?: string | number | null;
+    barcode?: string;
+  },
+): Record<string, unknown> {
+  const input: Record<string, unknown> = { id: variantId };
+  if (fields.price != null && fields.price !== "") {
+    input.price = String(fields.price);
+  }
+  if (fields.compareAtPrice != null && fields.compareAtPrice !== "") {
+    input.compareAtPrice = String(fields.compareAtPrice);
+  }
+  const inventoryItem: Record<string, unknown> = {};
+  if (fields.sku) inventoryItem.sku = String(fields.sku);
+  if (fields.barcode) inventoryItem.barcode = String(fields.barcode);
+  if (Object.keys(inventoryItem).length > 0) {
+    input.inventoryItem = inventoryItem;
+  }
+  return input;
+}
+
 export async function createProductFromMappedRow(
   client: AdminGraphqlClient,
   mapped: MappedProductRow,
@@ -121,15 +151,12 @@ export async function createProductFromMappedRow(
   const variantFields = mapped.variants;
 
   if (variantId && variantFields) {
-    const variantInput: Record<string, unknown> = { id: variantId };
-    if (variantFields.sku) variantInput.sku = String(variantFields.sku);
-    if (variantFields.price != null && variantFields.price !== "") {
-      variantInput.price = String(variantFields.price);
-    }
-    if (variantFields.compareAtPrice != null && variantFields.compareAtPrice !== "") {
-      variantInput.compareAtPrice = String(variantFields.compareAtPrice);
-    }
-    if (variantFields.barcode) variantInput.barcode = String(variantFields.barcode);
+    const variantInput = buildVariantBulkInput(variantId, {
+      sku: variantFields.sku,
+      price: variantFields.price,
+      compareAtPrice: variantFields.compareAtPrice,
+      barcode: variantFields.barcode,
+    });
 
     if (Object.keys(variantInput).length > 1) {
       const updateRes = (await client.request(VARIANTS_BULK_UPDATE, {

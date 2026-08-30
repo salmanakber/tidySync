@@ -1031,6 +1031,7 @@ export function Dashboard() {
                   <ProductSeoStudio
                     shop={shop}
                     creditsRemaining={tenant?.plan?.aiCreditsRemaining}
+                    onCreditsRefresh={() => loadData()}
                   />
                 )}
 

@@ -2,6 +2,7 @@ import { prisma } from "@tidysync/database";
 import type { ExtendedDiffRow } from "@tidysync/shared";
 import { getShopGraphqlClient } from "../shopify";
 import { buildDiffFromMutationPlan } from "../shopify-products";
+import { buildVariantBulkInput } from "../shopify-product-create";
 
 const VARIANTS_BULK_UPDATE = `#graphql
   mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
@@ -22,14 +23,19 @@ const PRODUCT_UPDATE = `#graphql
 `;
 
 function variantBulkInput(row: ExtendedDiffRow): Record<string, unknown> {
-  const input: Record<string, unknown> = { id: row.resourceId };
-  if (row.field === "variants.price") input.price = String(row.after);
+  const fields: {
+    sku?: string;
+    price?: string | number;
+    compareAtPrice?: string | number | null;
+    barcode?: string;
+  } = {};
+  if (row.field === "variants.price") fields.price = String(row.after);
   if (row.field === "variants.compareAtPrice") {
-    input.compareAtPrice = row.after == null ? null : String(row.after);
+    fields.compareAtPrice = row.after == null ? null : String(row.after);
   }
-  if (row.field === "variants.sku") input.sku = String(row.after ?? "");
-  if (row.field === "variants.barcode") input.barcode = String(row.after ?? "");
-  return input;
+  if (row.field === "variants.sku") fields.sku = String(row.after ?? "");
+  if (row.field === "variants.barcode") fields.barcode = String(row.after ?? "");
+  return buildVariantBulkInput(row.resourceId, fields);
 }
 
 function productUpdateInput(row: ExtendedDiffRow): Record<string, unknown> {

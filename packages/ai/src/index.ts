@@ -107,6 +107,60 @@ export async function generateProductSeoInsight(
   return result.text.trim();
 }
 
+export async function generateProductSeoImprovements(
+  product: Record<string, unknown>,
+  metrics: Record<string, unknown>,
+): Promise<{
+  seoTitle: string;
+  seoDescription: string;
+  descriptionHtml: string;
+  modelUsed: string;
+}> {
+  const title = String(product.title ?? "Product");
+  const desc = String(product.descriptionHtml ?? "").replace(/<[^>]+>/g, " ").trim();
+  const fallback = {
+    seoTitle: title.slice(0, 60),
+    seoDescription: desc.slice(0, 155) || `Shop ${title} — premium quality and fast delivery.`,
+    descriptionHtml:
+      desc.length >= 120
+        ? `<p>${desc}</p>`
+        : `<p>${title} — crafted for quality and discoverability. Add rich details about materials, benefits, and use cases.</p>`,
+    modelUsed: "rule-based",
+  };
+
+  const result = await chatCompletion(
+    [
+      {
+        role: "system",
+        content:
+          "You optimize Shopify product SEO. Return JSON only: { seoTitle (40-60 chars), seoDescription (120-160 chars), descriptionHtml (HTML, 150+ words, keyword-rich, scannable headings/bullets) }. Be truthful to the product. No markdown fences.",
+      },
+      { role: "user", content: JSON.stringify({ product, metrics }) },
+    ],
+    { jsonMode: true },
+  );
+
+  if (result.provider === "rule-based" || !result.text) {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(result.text) as {
+      seoTitle?: string;
+      seoDescription?: string;
+      descriptionHtml?: string;
+    };
+    return {
+      seoTitle: (parsed.seoTitle ?? fallback.seoTitle).slice(0, 70),
+      seoDescription: (parsed.seoDescription ?? fallback.seoDescription).slice(0, 320),
+      descriptionHtml: parsed.descriptionHtml ?? fallback.descriptionHtml,
+      modelUsed: result.modelUsed,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 export async function rewriteProductContent(
   products: Array<{ title: string; description?: string }>,
   brandVoice: string,
