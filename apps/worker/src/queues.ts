@@ -4,6 +4,9 @@ import { QUEUE_NAMES } from "@tidysync/shared";
 
 const connection = new IORedis(process.env.REDIS_URL ?? "redis://localhost:6379", {
   maxRetriesPerRequest: null,
+  connectTimeout: 8_000,
+  commandTimeout: 8_000,
+  retryStrategy: (times) => (times > 4 ? null : Math.min(times * 250, 2_000)),
 });
 
 export const importQueue = new Queue(QUEUE_NAMES.IMPORT, { connection });

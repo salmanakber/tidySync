@@ -618,12 +618,30 @@ export const resolvers = {
 
       const queuePayload = { jobId: job.id, tenantId, shop };
 
-      if (job.type === "IMPORT") {
-        await importQueue.add("import", queuePayload);
-      } else if (job.type === "EXPORT") {
-        await exportQueue.add("export", queuePayload);
-      } else if (job.type === "BULK_EDIT") {
-        await bulkEditQueue.add("bulk-edit", queuePayload);
+      const enqueue = async () => {
+        if (job.type === "IMPORT") {
+          await importQueue.add("import", queuePayload);
+        } else if (job.type === "EXPORT") {
+          await exportQueue.add("export", queuePayload);
+        } else if (job.type === "BULK_EDIT") {
+          await bulkEditQueue.add("bulk-edit", queuePayload);
+        }
+      };
+
+      try {
+        await enqueue();
+      } catch (err) {
+        await prisma.job.update({
+          where: { id: job.id },
+          data: {
+            status: "FAILED",
+            errorSummary:
+              "Could not queue job — Redis or worker may be offline. Check server logs and pm2 status.",
+          },
+        });
+        throw new Error(
+          err instanceof Error ? err.message : "Failed to queue job for processing",
+        );
       }
 
       await prisma.auditLog.create({

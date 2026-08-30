@@ -26,3 +26,7 @@ api_version = "2025-01"
 
 [pos]
 embedded = false
+
+[access.admin]
+direct_api_mode = "online"
+embedded_app_direct_api_access = true

@@ -15,6 +15,27 @@ async function authHeaders(shop?: string, forceRefresh = false): Promise<Record<
   return headers;
 }
 
+const REQUEST_TIMEOUT_MS = 90_000;
+
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new Error("Request timed out. Check your connection and try again.");
+    }
+    throw e;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 export async function gqlRequest<T>(
   query: string,
   variables?: Record<string, unknown>,
@@ -27,7 +48,7 @@ export async function gqlRequest<T>(
       "Content-Type": "application/json",
       ...(await authHeaders(shop, forceRefresh)),
     };
-    return fetch(API_URL, { method: "POST", headers, body });
+    return fetchWithTimeout(API_URL, { method: "POST", headers, body });
   };
 
   let res = await send();

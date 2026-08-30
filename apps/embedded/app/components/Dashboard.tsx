@@ -158,6 +158,8 @@ export function Dashboard() {
   const [tab, setTab] = useState(0);
   const [nlPrompt, setNlPrompt] = useState("");
   const [loading, setLoading] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [approveLoading, setApproveLoading] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -348,7 +350,7 @@ export function Dashboard() {
 
   const handleNlBulkEdit = async () => {
     if (!nlPrompt.trim()) return;
-    setLoading(true);
+    setAiLoading(true);
     setError(null);
     try {
       const result = await gqlRequest<{ generateNlBulkEdit: Job }>(
@@ -359,38 +361,32 @@ export function Dashboard() {
       setSelectedJob(result.generateNlBulkEdit);
       setPreviewOpen(true);
       setNlPrompt("");
-      await loadData();
+      void loadData();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Bulk edit failed");
     } finally {
-      setLoading(false);
+      setAiLoading(false);
     }
   };
 
   const handleApprove = async (jobId: string) => {
-    setLoading(true);
+    setApproveLoading(true);
     setError(null);
     setNotice(null);
+    setPreviewOpen(false);
+    setSelectedJob(null);
+    setTab(0);
+
     try {
       await gqlRequest(MUTATIONS.approveJob, { jobId }, shop);
-      setPreviewOpen(false);
-      setSelectedJob(null);
-      setTab(0);
-      setImportProgress(null);
-
-      const jobDetail = await gqlRequest<{ job: Job }>(QUERIES.job, { id: jobId }, shop);
-      const isImport = jobDetail.job.type === "IMPORT";
       setNotice(
-        isImport
-          ? "Import approved. Open the Jobs tab and use Refresh to see progress."
-          : "Changes approved. Open the Jobs tab and use Refresh to see when they finish applying.",
+        "Changes approved and queued. Open the Jobs tab and tap Refresh to see progress.",
       );
-      await loadData();
+      void loadData();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Approve failed");
-      setImportProgress(null);
     } finally {
-      setLoading(false);
+      setApproveLoading(false);
     }
   };
 
@@ -532,6 +528,12 @@ export function Dashboard() {
             <Banner tone="success" onDismiss={() => setNotice(null)}>
               {notice}
             </Banner>
+          </Layout.Section>
+        )}
+
+        {approveLoading && (
+          <Layout.Section>
+            <Banner tone="info">Queuing your approved changes…</Banner>
           </Layout.Section>
         )}
 
@@ -928,7 +930,7 @@ export function Dashboard() {
                     value={nlPrompt}
                     onChange={setNlPrompt}
                     onSubmit={handleNlBulkEdit}
-                    loading={loading}
+                    loading={aiLoading}
                     creditsRemaining={tenant?.plan?.aiCreditsRemaining}
                     error={tab === 4 ? error : null}
                   />
@@ -1354,11 +1356,18 @@ export function Dashboard() {
             ? {
                 content: "Confirm & apply changes",
                 onAction: () => selectedJob && handleApprove(selectedJob.id),
-                loading,
+                loading: approveLoading,
+                disabled: approveLoading,
               }
             : undefined
         }
-        secondaryActions={[{ content: "Cancel", onAction: () => setPreviewOpen(false) }]}
+        secondaryActions={[
+          {
+            content: "Cancel",
+            onAction: () => setPreviewOpen(false),
+            disabled: approveLoading,
+          },
+        ]}
         size="large"
       >
         <Modal.Section>
@@ -1373,7 +1382,7 @@ export function Dashboard() {
               steps={selectedJob?.mutationPlan?.steps}
               rows={selectedJob?.diffPreview?.rows}
               failedItems={selectedJob?.lineItems?.filter((l) => l.status === "FAILED")}
-              streamPlan={selectedJob?.status === "PREVIEW"}
+              streamPlan={false}
             />
           </BlockStack>
         </Modal.Section>
