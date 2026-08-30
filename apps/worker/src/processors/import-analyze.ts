@@ -9,16 +9,13 @@ import {
   parseFilePreview,
 } from "../file-parser";
 
+/**
+ * Background enrichment after a fast sync upload.
+ * Prefer updating rowCount / detection without blocking the merchant UI.
+ */
 export async function processAnalyzeImportJob(jobId: string, tenantId: string) {
   const job = await prisma.job.findFirst({ where: { id: jobId, tenantId } });
   if (!job?.filePath) throw new Error("Import analyze job missing file");
-
-  await prisma.job.update({
-    where: { id: jobId },
-    data: {
-      errorSummary: null,
-    },
-  });
 
   try {
     const headers = await parseFileHeaders(job.filePath);
@@ -27,12 +24,18 @@ export async function processAnalyzeImportJob(jobId: string, tenantId: string) {
     const detected = detection.platformKey ?? detectPlatformFromHeaders(headers);
     const preview = await parseFilePreview(job.filePath, 5);
 
+    const keepStatus =
+      job.status === "MAPPING" || job.status === "PREVIEW" || job.status === "QUEUED"
+        ? job.status
+        : "MAPPING";
+
     await prisma.job.update({
       where: { id: jobId },
       data: {
-        status: "MAPPING",
-        sourcePlatform: detected ?? "csv",
+        status: keepStatus,
+        sourcePlatform: detected ?? job.sourcePlatform ?? "csv",
         rowCount,
+        errorSummary: null,
         diffPreview: {
           headers,
           previewRows: preview,
@@ -59,6 +62,11 @@ export async function processAnalyzeImportJob(jobId: string, tenantId: string) {
       },
     });
   } catch (err) {
+    // Don't fail the job if merchant already has MAPPING from sync path
+    if (job.status === "MAPPING" || job.status === "PREVIEW") {
+      console.error(`[import-analyze] enrichment failed for ${jobId}:`, err);
+      return;
+    }
     await prisma.job.update({
       where: { id: jobId },
       data: {

@@ -1,8 +1,9 @@
 import { prisma, tenantRepository, jobRepository, type Job, type JobStatus } from "@tidysync/database";
 import {
-  parseNlBulkEdit,
   detectAnomalies,
   buildImpactSummary,
+  detectPlatformFromHeaders,
+  detectPlatformWithConfidence,
 } from "@tidysync/shared";
 import { consumeAiCredit } from "../services/tenant";
 import {
@@ -18,7 +19,7 @@ import {
   undoQueue,
 } from "../queues";
 import { getShopGraphqlClient } from "../shopify/client";
-import { parseFilePreview } from "../services/file-parser";
+import { parseFileHeaders, parseFilePreview } from "../services/file-parser";
 import { fetchProductsForExport, buildDiffFromMutationPlan } from "../services/shopify-products";
 import {
   type GraphQLContext,
@@ -470,20 +471,36 @@ export const resolvers = {
       const { tenantId } = requireActiveMerchant(ctx);
       const resourceType = args.resourceType ?? "products";
 
+      // Fast sync path: headers + platform detect + small preview (streaming — avoids 504 / worker hangs)
+      const headers = await parseFileHeaders(args.filePath);
+      const detection = detectPlatformWithConfidence(headers);
+      const detected = detection.platformKey ?? detectPlatformFromHeaders(headers);
+      const preview = await parseFilePreview(args.filePath, 5);
+
       const job = await prisma.job.create({
         data: {
           tenantId,
           type: "IMPORT",
-          status: "PENDING",
+          status: "MAPPING",
           fileName: args.fileName,
           filePath: args.filePath,
-          sourcePlatform: "csv",
+          sourcePlatform: detected ?? "csv",
           resourceType,
           rowCount: 0,
+          diffPreview: {
+            headers,
+            previewRows: preview,
+            detection: {
+              platformKey: detected,
+              confidence: detection.confidence,
+              scores: detection.scores,
+            },
+          },
         },
       });
 
-      await importQueue.add("analyze", { jobId: job.id, tenantId });
+      // Full row count in background — UI does not wait on this
+      await importQueue.add("analyze", { jobId: job.id, tenantId }).catch(() => undefined);
 
       await prisma.auditLog.create({
         data: {
@@ -491,13 +508,17 @@ export const resolvers = {
           action: "import.uploaded",
           resourceType: "job",
           resourceId: job.id,
-          metadata: { fileName: args.fileName },
+          metadata: {
+            fileName: args.fileName,
+            detectedPlatform: detected,
+            detectionConfidence: detection.confidence,
+          },
         },
       });
 
       return {
         ...mapJob({ ...job, lineItems: [] }),
-        sourcePlatform: "csv",
+        sourcePlatform: detected ?? "csv",
       };
     },
     suggestFieldMappings: async (

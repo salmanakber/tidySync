@@ -3,10 +3,10 @@
 import { BlockStack, Button, InlineStack, Text, TextField } from "@shopify/polaris";
 
 const PROMPT_CHIPS = [
-  "Increase all Summer Collection prices by 10%",
-  "Set compare-at price 20% above price for products tagged Sale",
-  "Add tag 'needs-review' to products missing images",
-  "Lower inventory to 0 for SKUs containing CLEARANCE",
+  "Increase all prices by 10%",
+  "Change name of abc to Premium Leather Wallet",
+  "Add tag needs-review to products tagged Sale",
+  "Set compare-at price 20% above price",
 ];
 
 interface AiStudioProps {

@@ -260,8 +260,46 @@ export function applyMappingsToRow(
 export function parseNlBulkEdit(prompt: string): MutationPlan {
   const lower = prompt.toLowerCase();
   const steps: MutationPlan["steps"] = [];
+  const filter: Record<string, unknown> = {};
 
-  const percentMatch = lower.match(/(?:by|increase|decrease|raise|lower)\s+(\d+(?:\.\d+)?)\s*%|(\d+(?:\.\d+)?)\s*%\s+above/);
+  // "change name/title of X to Y" (tolerates typo "yo" for "to")
+  const renameMatch = prompt.match(
+    /(?:change|rename|update)\s+(?:the\s+)?(?:name|title)\s+(?:of\s+)?["']?(.+?)["']?\s+(?:to|yo|into)\s+["']?(.+?)["']?\s*$/i,
+  );
+  if (renameMatch) {
+    const from = renameMatch[1].trim();
+    const to = renameMatch[2].trim();
+    if (from && to) {
+      filter.titleContains = from;
+      steps.push({
+        action: "set",
+        field: "title",
+        value: to,
+        filter,
+        description: `Rename products matching "${from}" → "${to}"`,
+      });
+      return { steps, estimatedAffectedCount: undefined };
+    }
+  }
+
+  const renameSimple = prompt.match(
+    /rename\s+["']?(.+?)["']?\s+(?:to|yo|into)\s+["']?(.+?)["']?\s*$/i,
+  );
+  if (renameSimple) {
+    filter.titleContains = renameSimple[1].trim();
+    steps.push({
+      action: "set",
+      field: "title",
+      value: renameSimple[2].trim(),
+      filter,
+      description: `Rename "${renameSimple[1].trim()}" → "${renameSimple[2].trim()}"`,
+    });
+    return { steps, estimatedAffectedCount: undefined };
+  }
+
+  const percentMatch = lower.match(
+    /(?:by|increase|decrease|raise|lower)\s+(\d+(?:\.\d+)?)\s*%|(\d+(?:\.\d+)?)\s*%\s+above/,
+  );
   const percent = percentMatch
     ? parseFloat(percentMatch[1] ?? percentMatch[2] ?? "0")
     : null;
@@ -277,12 +315,11 @@ export function parseNlBulkEdit(prompt: string): MutationPlan {
     field = "tags";
   } else if (lower.includes("description") || lower.includes("content")) {
     field = "descriptionHtml";
-  } else if (lower.includes("title")) {
+  } else if (lower.includes("title") || lower.includes("name") || lower.includes("rename")) {
     field = "title";
   }
 
   const collectionMatch = prompt.match(/(?:collection|tagged?)\s+["']?([^"']+)["']?/i);
-  const filter: Record<string, unknown> = {};
   if (collectionMatch) {
     if (lower.includes("collection")) {
       filter.collection = collectionMatch[1].trim();
@@ -325,8 +362,13 @@ export function parseNlBulkEdit(prompt: string): MutationPlan {
       filter,
       description: `${isIncrease ? "Increase" : "Decrease"} ${field} by ${percent}%`,
     });
-  } else if (lower.includes("set") || lower.includes("update")) {
-    const valueMatch = prompt.match(/to\s+["']?([^"']+)["']?/i);
+  } else if (
+    lower.includes("set") ||
+    lower.includes("update") ||
+    lower.includes("change") ||
+    field === "title"
+  ) {
+    const valueMatch = prompt.match(/\b(?:to|yo|into)\s+["']?(.+?)["']?\s*$/i);
     steps.push({
       action: "set",
       field,

@@ -38,7 +38,6 @@ import {
   downloadAuditExport,
   QUERIES,
   MUTATIONS,
-  waitForJobStatus,
   pollJobProgress,
 } from "../lib/graphql";
 import { MappingEditor } from "./MappingEditor";
@@ -269,11 +268,19 @@ export function Dashboard() {
       setImportProgress({
         phase: "analyzing",
         fileName: file.name,
-        message: "Streaming rows and detecting platform…",
+        message: "Detecting platform and reading columns…",
       });
 
       const result = await gqlRequest<{
-        uploadImportFile: { id: string };
+        uploadImportFile: {
+          id: string;
+          status: string;
+          sourcePlatform?: string;
+          rowCount?: number;
+          diffPreview?: {
+            detection?: { platformKey?: string; confidence?: number };
+          };
+        };
       }>(
         MUTATIONS.uploadImport,
         {
@@ -285,41 +292,15 @@ export function Dashboard() {
       );
 
       const jobId = result.uploadImportFile.id;
-      setImportProgress({
-        phase: "analyzing",
-        fileName: file.name,
-        jobId,
-        message: "Counting products and reading column headers…",
-      });
-
-      const analyzed = await waitForJobStatus(
-        jobId,
-        shop,
-        ["MAPPING"],
-        (job) => {
-          setImportProgress({
-            phase: "analyzing",
-            fileName: file.name,
-            jobId,
-            rowCount: (job.rowCount as number) ?? 0,
-            message:
-              job.status === "RUNNING"
-                ? "Scanning every row in your file…"
-                : "Preparing column mapping…",
-          });
-        },
-      );
-
-      if (analyzed.status === "FAILED") {
-        throw new Error((analyzed.errorSummary as string) ?? "File analysis failed");
+      if (result.uploadImportFile.status === "FAILED") {
+        throw new Error("File analysis failed");
       }
 
-      const diffPreview = analyzed.diffPreview as {
-        detection?: { platformKey?: string; confidence?: number };
-      } | null;
       const detected =
-        diffPreview?.detection?.platformKey ?? (analyzed.sourcePlatform as string) ?? null;
-      const confidence = diffPreview?.detection?.confidence;
+        result.uploadImportFile.diffPreview?.detection?.platformKey ??
+        result.uploadImportFile.sourcePlatform ??
+        null;
+      const confidence = result.uploadImportFile.diffPreview?.detection?.confidence;
       if (detected && detected !== "unknown") {
         setDetectedPlatform(detected);
         setDetectedConfidence(confidence);
@@ -333,8 +314,8 @@ export function Dashboard() {
         phase: "mapping",
         fileName: file.name,
         jobId,
-        rowCount: (analyzed.rowCount as number) ?? 0,
-        message: "AI is matching columns to Shopify fields…",
+        rowCount: result.uploadImportFile.rowCount ?? 0,
+        message: "Matching columns to Shopify fields…",
       });
 
       const mappings = await gqlRequest<{

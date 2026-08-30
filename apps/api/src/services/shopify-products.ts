@@ -23,7 +23,6 @@ const PRODUCTS_QUERY = `#graphql
                 price
                 compareAtPrice
                 inventoryQuantity
-                weight
                 barcode
               }
             }
@@ -44,12 +43,19 @@ export async function fetchProductsForExport(shop: string, limit = 250) {
     const response = await client.request(PRODUCTS_QUERY, {
       variables: { first: 50, after },
     });
+    const errors = (response as { errors?: Array<{ message: string }> }).errors;
+    if (errors?.length) {
+      throw new Error(errors.map((e) => e.message).join("; "));
+    }
     const data = response.data as {
       products: {
         pageInfo: { hasNextPage: boolean; endCursor: string };
         edges: Array<{ node: unknown }>;
       };
     };
+    if (!data?.products) {
+      throw new Error("Shopify returned no products — check app scopes (read_products).");
+    }
 
     for (const edge of data.products.edges) {
       products.push(edge.node);
@@ -79,7 +85,6 @@ function normalizeProduct(raw: Record<string, unknown>): ProductForMutation {
       compareAtPrice: node.compareAtPrice as string | number | null | undefined,
       inventoryQuantity:
         typeof node.inventoryQuantity === "number" ? node.inventoryQuantity : undefined,
-      weight: typeof node.weight === "number" ? node.weight : undefined,
       barcode: node.barcode ? String(node.barcode) : undefined,
     })),
   };

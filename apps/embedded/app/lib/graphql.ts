@@ -197,7 +197,7 @@ export const MUTATIONS = {
   uploadImport: `
     mutation UploadImport($filePath: String!, $fileName: String!, $resourceType: String) {
       uploadImportFile(filePath: $filePath, fileName: $fileName, resourceType: $resourceType) {
-        id status sourcePlatform resourceType
+        id status sourcePlatform resourceType rowCount
         diffPreview
       }
     }
