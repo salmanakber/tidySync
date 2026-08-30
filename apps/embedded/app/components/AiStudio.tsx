@@ -35,7 +35,7 @@ export function AiStudio({
             Natural language bulk edit
           </Text>
           <Text as="p" variant="bodySm" tone="subdued">
-            Describe the change. We build a plan, show a full diff, and wait for your approval.
+            Describe the change. We build a plan, show a full diff, and wait for your explicit confirmation before anything runs in Shopify.
           </Text>
         </BlockStack>
       </div>

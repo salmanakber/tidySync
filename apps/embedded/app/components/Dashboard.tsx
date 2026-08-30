@@ -307,33 +307,16 @@ export function Dashboard() {
         setImportPlatform(detected === "unknown" ? "csv" : detected);
       }
 
-      const platformForMapping =
-        detected && detected !== "unknown" ? detected : importPlatform || "csv";
-
       setImportProgress({
         phase: "mapping",
         fileName: file.name,
         jobId,
         rowCount: result.uploadImportFile.rowCount ?? 0,
-        message: "Matching columns to Shopify fields…",
+        message: "Opening column mapper…",
       });
 
-      const mappings = await gqlRequest<{
-        suggestFieldMappings: Array<{
-          sourceColumn: string;
-          targetField: string;
-          suggested: boolean;
-          confidence?: number;
-          matchReason?: string | null;
-        }>;
-      }>(
-        MUTATIONS.suggestMappings,
-        { jobId, platformKey: platformForMapping },
-        shop,
-      );
-
       setMappingJobId(jobId);
-      setMappingRows(mappings.suggestFieldMappings);
+      setMappingRows([]);
       setImportProgress(null);
       setMappingOpen(true);
       await loadData();
@@ -360,7 +343,7 @@ export function Dashboard() {
         confidence?: number;
         matchReason?: string | null;
       }>;
-    }>(MUTATIONS.suggestMappings, { jobId: mappingJobId, platformKey: importPlatform }, shop);
+    }>(MUTATIONS.suggestMappings, { jobId: mappingJobId, platformKey: importPlatform, useAi: true }, shop);
     setMappingRows(mappings.suggestFieldMappings);
     return mappings.suggestFieldMappings;
   };
@@ -1385,28 +1368,34 @@ export function Dashboard() {
       <Modal
         open={previewOpen}
         onClose={() => setPreviewOpen(false)}
-        title="Review before commit"
+        title="Review AI changes — confirmation required"
         primaryAction={
           selectedJob?.status === "PREVIEW"
             ? {
-                content: "Approve & run",
+                content: "Confirm & apply changes",
                 onAction: () => selectedJob && handleApprove(selectedJob.id),
                 loading,
               }
             : undefined
         }
-        secondaryActions={[{ content: "Close", onAction: () => setPreviewOpen(false) }]}
+        secondaryActions={[{ content: "Cancel", onAction: () => setPreviewOpen(false) }]}
         size="large"
       >
         <Modal.Section>
-          <DiffPreviewPanel
-            impactSummary={selectedJob?.impactSummary}
-            anomalies={selectedJob?.diffPreview?.anomalies}
-            steps={selectedJob?.mutationPlan?.steps}
-            rows={selectedJob?.diffPreview?.rows}
-            failedItems={selectedJob?.lineItems?.filter((l) => l.status === "FAILED")}
-            streamPlan={selectedJob?.status === "PREVIEW"}
-          />
+          <BlockStack gap="400">
+            <Banner tone="warning">
+              Nothing is changed in your Shopify store until you click <strong>Confirm & apply changes</strong>.
+              Review every row below before confirming.
+            </Banner>
+            <DiffPreviewPanel
+              impactSummary={selectedJob?.impactSummary}
+              anomalies={selectedJob?.diffPreview?.anomalies}
+              steps={selectedJob?.mutationPlan?.steps}
+              rows={selectedJob?.diffPreview?.rows}
+              failedItems={selectedJob?.lineItems?.filter((l) => l.status === "FAILED")}
+              streamPlan={selectedJob?.status === "PREVIEW"}
+            />
+          </BlockStack>
         </Modal.Section>
       </Modal>
 

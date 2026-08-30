@@ -231,7 +231,7 @@ export const typeDefs = `#graphql
     adminLogin(email: String!, password: String!): AuthPayload!
     createExportJob(format: String, platformKey: String, resourceType: String): Job!
     uploadImportFile(filePath: String!, fileName: String!, resourceType: String): Job!
-    suggestFieldMappings(jobId: ID!, platformKey: String): [FieldMappingSuggestion!]!
+    suggestFieldMappings(jobId: ID!, platformKey: String!, useAi: Boolean): [FieldMappingSuggestion!]!
     updateJobMappings(jobId: ID!, mappings: JSON!): Job!
     generateNlBulkEdit(prompt: String!): Job!
     approveJob(jobId: ID!): Job!
@@ -475,7 +475,6 @@ export const resolvers = {
       const headers = await parseFileHeaders(args.filePath);
       const detection = detectPlatformWithConfidence(headers);
       const detected = detection.platformKey ?? detectPlatformFromHeaders(headers);
-      const preview = await parseFilePreview(args.filePath, 5);
 
       const job = await prisma.job.create({
         data: {
@@ -489,7 +488,7 @@ export const resolvers = {
           rowCount: 0,
           diffPreview: {
             headers,
-            previewRows: preview,
+            previewRows: [],
             detection: {
               platformKey: detected,
               confidence: detection.confidence,
@@ -523,12 +522,12 @@ export const resolvers = {
     },
     suggestFieldMappings: async (
       _: unknown,
-      args: { jobId: string; platformKey: string },
+      args: { jobId: string; platformKey: string; useAi?: boolean },
       ctx: GraphQLContext,
     ) => {
       const { tenantId } = requireActiveMerchant(ctx);
       const { suggestMappingsWithAi } = await import("./extensions");
-      return suggestMappingsWithAi(tenantId, args.jobId, args.platformKey);
+      return suggestMappingsWithAi(tenantId, args.jobId, args.platformKey, args.useAi ?? false);
     },
     updateJobMappings: async (
       _: unknown,
@@ -602,7 +601,7 @@ export const resolvers = {
     ) => {
       const { tenantId, shop } = requireActiveMerchant(ctx);
       const { generateNlBulkEditWithAi } = await import("./extensions");
-      return generateNlBulkEditWithAi(tenantId, shop, args.prompt);
+      return generateNlBulkEditWithAi(tenantId, shop, args.prompt, ctx.sessionToken);
     },
     approveJob: async (_: unknown, args: { jobId: string }, ctx: GraphQLContext) => {
       const { tenantId, shop } = requireActiveMerchant(ctx);

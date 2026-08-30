@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   BlockStack,
   Select,
@@ -122,10 +122,42 @@ export function MappingEditor({
 }) {
   const [mappings, setMappings] = useState<MappingRow[]>(initialMappings);
   const [loading, setLoading] = useState(false);
+  const [loadingMappings, setLoadingMappings] = useState(initialMappings.length === 0);
   const [remapping, setRemapping] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [templateName, setTemplateName] = useState("");
   const targetOptions = targetsForResource(resourceType);
+
+  useEffect(() => {
+    if (initialMappings.length > 0) {
+      setMappings(initialMappings);
+      setLoadingMappings(false);
+      return;
+    }
+    let cancelled = false;
+    setLoadingMappings(true);
+    gqlRequest<{
+      suggestFieldMappings: MappingRow[];
+    }>(
+      MUTATIONS.suggestMappings,
+      { jobId, platformKey, useAi: false },
+      shop,
+    )
+      .then((data) => {
+        if (!cancelled) setMappings(data.suggestFieldMappings);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Could not load column mappings");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingMappings(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId, platformKey, shop, initialMappings.length]);
 
   const stats = useMemo(() => {
     const matched = mappings.filter((m) => m.targetField).length;
@@ -250,6 +282,15 @@ export function MappingEditor({
         </Banner>
       )}
 
+      {loadingMappings && (
+        <div style={{ marginTop: 8 }}>
+          <Text as="p" variant="bodySm" tone="subdued">
+            Matching columns…
+          </Text>
+          <div className="tidysync-shimmer-bar" style={{ marginTop: 10 }} />
+        </div>
+      )}
+
       <InlineStack gap="200" wrap>
         {onRemap && (
           <Button onClick={runRemap} loading={remapping}>
@@ -274,7 +315,8 @@ export function MappingEditor({
       </InlineStack>
 
       <div className="tidysync-mapping-list">
-        {mappings.map((row, index) => {
+        {!loadingMappings &&
+          mappings.map((row, index) => {
           const tone = matchTone(row.confidence, row.suggested && Boolean(row.targetField));
           return (
             <div

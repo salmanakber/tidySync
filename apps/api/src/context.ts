@@ -14,6 +14,7 @@ export interface GraphQLContext {
   tenantInstallApproved?: boolean;
   adminUserId?: string;
   adminRole?: string;
+  sessionToken?: string;
 }
 
 async function resolveShopFromSessionToken(token: string): Promise<string | null> {
@@ -73,7 +74,7 @@ export async function buildContext(
       const shop = await resolveShopFromSessionToken(bearer);
       if (shop) {
         const ctx = await merchantContextForShop(shop);
-        if (ctx) return ctx;
+        if (ctx) return { ...ctx, sessionToken: bearer };
       }
     }
   }

@@ -1,6 +1,6 @@
 import type { MutationPlan } from "@tidysync/shared";
 import { buildDiffFromProducts, type ProductForMutation } from "@tidysync/shared";
-import { getShopGraphqlClient } from "../shopify/client";
+import { merchantGraphqlRequest } from "../shopify/client";
 
 const PRODUCTS_QUERY = `#graphql
   query Products($first: Int!, $after: String) {
@@ -33,28 +33,33 @@ const PRODUCTS_QUERY = `#graphql
   }
 `;
 
-export async function fetchProductsForExport(shop: string, limit = 250) {
-  const client = await getShopGraphqlClient(shop);
+export async function fetchProductsForExport(
+  shop: string,
+  limit = 250,
+  sessionToken?: string,
+) {
   const products: unknown[] = [];
   let after: string | null = null;
   let hasNext = true;
 
   while (hasNext && products.length < limit) {
-    const response = await client.request(PRODUCTS_QUERY, {
-      variables: { first: 50, after },
-    });
-    const errors = (response as { errors?: Array<{ message: string }> }).errors;
-    if (errors?.length) {
-      throw new Error(errors.map((e) => e.message).join("; "));
-    }
-    const data = response.data as {
-      products: {
-        pageInfo: { hasNextPage: boolean; endCursor: string };
-        edges: Array<{ node: unknown }>;
+    const response = (await merchantGraphqlRequest(
+      shop,
+      sessionToken,
+      PRODUCTS_QUERY,
+      { first: 50, after },
+    )) as {
+      data?: {
+        products: {
+          pageInfo: { hasNextPage: boolean; endCursor: string };
+          edges: Array<{ node: unknown }>;
+        };
       };
     };
+
+    const data = response.data;
     if (!data?.products) {
-      throw new Error("Shopify returned no products — check app scopes (read_products).");
+      throw new Error("Shopify returned no products — check read_products scope.");
     }
 
     for (const edge of data.products.edges) {
@@ -90,8 +95,12 @@ function normalizeProduct(raw: Record<string, unknown>): ProductForMutation {
   };
 }
 
-export async function buildDiffFromMutationPlan(shop: string, plan: MutationPlan) {
-  const products = await fetchProductsForExport(shop, 250);
+export async function buildDiffFromMutationPlan(
+  shop: string,
+  plan: MutationPlan,
+  sessionToken?: string,
+) {
+  const products = await fetchProductsForExport(shop, 250, sessionToken);
   const normalized = products.map((p) => normalizeProduct(p as Record<string, unknown>));
   return buildDiffFromProducts(normalized, plan);
 }

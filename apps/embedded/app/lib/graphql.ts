@@ -203,8 +203,8 @@ export const MUTATIONS = {
     }
   `,
   suggestMappings: `
-    mutation SuggestMappings($jobId: ID!, $platformKey: String!) {
-      suggestFieldMappings(jobId: $jobId, platformKey: $platformKey) {
+    mutation SuggestMappings($jobId: ID!, $platformKey: String!, $useAi: Boolean) {
+      suggestFieldMappings(jobId: $jobId, platformKey: $platformKey, useAi: $useAi) {
         sourceColumn targetField suggested confidence matchReason
       }
     }

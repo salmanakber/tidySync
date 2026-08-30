@@ -223,6 +223,7 @@ export async function suggestMappingsWithAi(
   tenantId: string,
   jobId: string,
   platformKey: string,
+  useAi = false,
 ) {
   const job = await prisma.job.findFirst({ where: { id: jobId, tenantId } });
   if (!job?.filePath) throw new Error("Job or file not found");
@@ -244,7 +245,7 @@ export async function suggestMappingsWithAi(
   let suggestions = buildFieldMappingsWithConfidence(headers, profileMappings);
   const unrecognized = suggestions.filter((m) => !m.targetField);
 
-  if (unrecognized.length > 0) {
+  if (useAi && unrecognized.length > 0) {
     try {
       await consumeAiCredit(tenantId, 1);
       const ai = await inferColumnMappingsWithAi(headers, [...targetFields]);
@@ -290,6 +291,7 @@ export async function generateNlBulkEditWithAi(
   tenantId: string,
   shop: string,
   prompt: string,
+  sessionToken?: string,
 ) {
   const { plan: initialPlan, modelUsed: initialModel } = await parseNlBulkEditWithAi(prompt);
   let plan = initialPlan;
@@ -325,13 +327,18 @@ export async function generateNlBulkEditWithAi(
 
   let diff: { rows: unknown[]; totalChanges: number };
   try {
-    diff = await buildDiffFromMutationPlan(shop, plan);
+    diff = await buildDiffFromMutationPlan(shop, plan, sessionToken);
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
     await prisma.job.update({
       where: { id: job.id },
       data: {
         status: "FAILED",
-        errorSummary: err instanceof Error ? err.message : "Could not load products for preview",
+        errorSummary: msg.includes("Shopify") || msg.includes("connection")
+          ? msg
+          : err instanceof Error
+            ? err.message
+            : "Could not load products for preview",
       },
     });
     throw err;
