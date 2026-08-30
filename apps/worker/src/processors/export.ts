@@ -157,6 +157,63 @@ export async function processExportJob(
           Description: row.descriptionHtml,
           Category: row.productType,
         });
+      } else if (platformKey === "magento") {
+        rows.push({
+          name: row.title,
+          sku: row.sku,
+          price: row.price,
+          qty: row.inventoryQuantity,
+          description: row.descriptionHtml,
+          categories: row.productType,
+        });
+      } else if (platformKey === "etsy") {
+        rows.push({
+          TITLE: row.title,
+          DESCRIPTION: row.descriptionHtml,
+          SKU: row.sku,
+          PRICE: row.price,
+          QUANTITY: row.inventoryQuantity,
+          TAGS: row.tags,
+        });
+      } else if (platformKey === "amazon") {
+        rows.push({
+          "item-name": row.title,
+          "item-description": row.descriptionHtml,
+          "seller-sku": row.sku,
+          "standard-price": row.price,
+          quantity: row.inventoryQuantity,
+          "product-type": row.productType,
+        });
+      } else if (platformKey === "google_merchant" || platformKey === "facebook_catalog") {
+        rows.push({
+          id: row.sku || row.title,
+          title: row.title,
+          description: row.descriptionHtml,
+          price: row.price ? `${row.price} USD` : "",
+          availability: Number(row.inventoryQuantity) > 0 ? "in stock" : "out of stock",
+          brand: "",
+          "product type": row.productType,
+        });
+      } else if (platformKey === "ebay") {
+        rows.push({
+          "*Title": row.title,
+          Description: row.descriptionHtml,
+          CustomLabel: row.sku,
+          "*StartPrice": row.price,
+          "*Quantity": row.inventoryQuantity,
+        });
+      } else if (platformKey && platformKey !== "shopify") {
+        // Generic cross-platform row using common headers
+        rows.push({
+          title: row.title,
+          description: row.descriptionHtml,
+          sku: row.sku,
+          price: row.price,
+          compare_at_price: row.compareAtPrice,
+          inventory: row.inventoryQuantity,
+          product_type: row.productType,
+          tags: row.tags,
+        });
       } else {
         rows.push(row);
       }

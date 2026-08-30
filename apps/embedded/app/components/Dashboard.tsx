@@ -44,7 +44,32 @@ import { FileDropzone } from "./FileDropzone";
 import { AiStudio } from "./AiStudio";
 import { DiffPreviewPanel } from "./DiffPreviewPanel";
 import { DashboardSkeleton } from "./DashboardSkeleton";
+import { PlatformPicker } from "./PlatformPicker";
 import { useShop } from "../providers";
+
+const IMPORT_PLATFORMS = [
+  { key: "csv", name: "Generic CSV", blurb: "Custom / unknown spreadsheet" },
+  { key: "shopify", name: "Shopify", blurb: "Native Shopify CSV" },
+  { key: "woocommerce", name: "WooCommerce", blurb: "WordPress product export" },
+  { key: "bigcommerce", name: "BigCommerce", blurb: "BigCommerce catalog" },
+  { key: "magento", name: "Magento / Adobe", blurb: "Magento Commerce CSV" },
+  { key: "squarespace", name: "Squarespace", blurb: "Squarespace Commerce" },
+  { key: "etsy", name: "Etsy", blurb: "Etsy listing CSV" },
+  { key: "wix", name: "Wix", blurb: "Wix Stores export" },
+  { key: "amazon", name: "Amazon", blurb: "Amazon seller flat file" },
+  { key: "ebay", name: "eBay", blurb: "eBay File Exchange" },
+  { key: "prestashop", name: "PrestaShop", blurb: "PrestaShop product CSV" },
+  { key: "opencart", name: "OpenCart", blurb: "OpenCart export" },
+  { key: "google_merchant", name: "Google Merchant", blurb: "Merchant Center feed" },
+  { key: "square", name: "Square", blurb: "Square item library" },
+  { key: "lightspeed", name: "Lightspeed", blurb: "Lightspeed Retail / eCom" },
+  { key: "ecwid", name: "Ecwid", blurb: "Ecwid product CSV" },
+  { key: "tiktok_shop", name: "TikTok Shop", blurb: "TikTok product template" },
+  { key: "facebook_catalog", name: "Meta Catalog", blurb: "Facebook / Instagram catalog" },
+  { key: "shift4shop", name: "Shift4Shop", blurb: "Shift4Shop / 3dcart" },
+];
+
+const EXPORT_PLATFORMS = IMPORT_PLATFORMS.filter((p) => p.key !== "csv");
 
 interface Tenant {
   shopDomain: string;
@@ -135,7 +160,9 @@ export function Dashboard() {
   const [bootstrapping, setBootstrapping] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [exportPlatform, setExportPlatform] = useState("shopify");
-  const [importPlatform, setImportPlatform] = useState("woocommerce");
+  const [importPlatform, setImportPlatform] = useState("csv");
+  const [detectedPlatform, setDetectedPlatform] = useState<string | null>(null);
+  const [detectedConfidence, setDetectedConfidence] = useState<number | undefined>();
   const [importResourceType, setImportResourceType] = useState("products");
   const [exportResourceType, setExportResourceType] = useState("products");
   const [plans, setPlans] = useState<PlanOption[]>([]);
@@ -146,7 +173,13 @@ export function Dashboard() {
   const [mappingOpen, setMappingOpen] = useState(false);
   const [mappingJobId, setMappingJobId] = useState("");
   const [mappingRows, setMappingRows] = useState<
-    Array<{ sourceColumn: string; targetField: string; suggested?: boolean }>
+    Array<{
+      sourceColumn: string;
+      targetField: string;
+      suggested?: boolean;
+      confidence?: number;
+      matchReason?: string | null;
+    }>
   >([]);
   const [auditLogs, setAuditLogs] = useState<Array<{ id: string; action: string; createdAt: string }>>([]);
   const [schedules, setSchedules] = useState<
@@ -228,7 +261,15 @@ export function Dashboard() {
     setError(null);
     try {
       const uploaded = await uploadFile(file, shop);
-      const result = await gqlRequest<{ uploadImportFile: Job }>(
+      const result = await gqlRequest<{
+        uploadImportFile: {
+          id: string;
+          sourcePlatform?: string;
+          diffPreview?: {
+            detection?: { platformKey?: string; confidence?: number };
+          };
+        };
+      }>(
         MUTATIONS.uploadImport,
         {
           filePath: uploaded.filePath,
@@ -237,9 +278,34 @@ export function Dashboard() {
         },
         shop,
       );
+
+      const detected =
+        result.uploadImportFile.diffPreview?.detection?.platformKey ??
+        result.uploadImportFile.sourcePlatform ??
+        null;
+      const confidence = result.uploadImportFile.diffPreview?.detection?.confidence;
+      if (detected && detected !== "unknown") {
+        setDetectedPlatform(detected);
+        setDetectedConfidence(confidence);
+        setImportPlatform(detected === "unknown" ? "csv" : detected);
+      }
+
+      const platformForMapping =
+        detected && detected !== "unknown" ? detected : importPlatform || "csv";
+
       const mappings = await gqlRequest<{
-        suggestFieldMappings: Array<{ sourceColumn: string; targetField: string; suggested: boolean }>;
-      }>(MUTATIONS.suggestMappings, { jobId: result.uploadImportFile.id, platformKey: importPlatform }, shop);
+        suggestFieldMappings: Array<{
+          sourceColumn: string;
+          targetField: string;
+          suggested: boolean;
+          confidence?: number;
+          matchReason?: string | null;
+        }>;
+      }>(
+        MUTATIONS.suggestMappings,
+        { jobId: result.uploadImportFile.id, platformKey: platformForMapping },
+        shop,
+      );
       setMappingJobId(result.uploadImportFile.id);
       setMappingRows(mappings.suggestFieldMappings);
       setMappingOpen(true);
@@ -249,6 +315,20 @@ export function Dashboard() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const remapColumns = async () => {
+    const mappings = await gqlRequest<{
+      suggestFieldMappings: Array<{
+        sourceColumn: string;
+        targetField: string;
+        suggested: boolean;
+        confidence?: number;
+        matchReason?: string | null;
+      }>;
+    }>(MUTATIONS.suggestMappings, { jobId: mappingJobId, platformKey: importPlatform }, shop);
+    setMappingRows(mappings.suggestFieldMappings);
+    return mappings.suggestFieldMappings;
   };
 
   const handleNlBulkEdit = async () => {
@@ -714,32 +794,24 @@ export function Dashboard() {
                     <div>
                       <p className="tidysync-section-title">Import</p>
                       <p className="tidysync-section-sub">
-                        Upload a catalog export. We suggest field mappings, show a diff, then wait for
-                        your approval.
+                        Drop a CSV/XLSX — we auto-detect the platform when possible, map columns with
+                        AI + fuzzy matching, then show a diff before commit.
                       </p>
                     </div>
-                    <InlineStack gap="400" wrap={false}>
-                      <div style={{ flex: 1, minWidth: 180 }}>
-                        <Select
-                          label="Resource type"
-                          options={RESOURCE_OPTIONS}
-                          value={importResourceType}
-                          onChange={setImportResourceType}
-                        />
-                      </div>
-                      <div style={{ flex: 1, minWidth: 180 }}>
-                        <Select
-                          label="Source platform"
-                          options={[
-                            { label: "WooCommerce", value: "woocommerce" },
-                            { label: "BigCommerce", value: "bigcommerce" },
-                            { label: "Generic CSV", value: "unknown" },
-                          ]}
-                          value={importPlatform}
-                          onChange={setImportPlatform}
-                        />
-                      </div>
-                    </InlineStack>
+                    <Select
+                      label="Resource type"
+                      options={RESOURCE_OPTIONS}
+                      value={importResourceType}
+                      onChange={setImportResourceType}
+                    />
+                    <PlatformPicker
+                      label="Source platform"
+                      platforms={IMPORT_PLATFORMS}
+                      value={importPlatform}
+                      onChange={setImportPlatform}
+                      detectedKey={detectedPlatform}
+                      detectedConfidence={detectedConfidence}
+                    />
                     <FileDropzone loading={loading} onFile={handleImport} />
                   </BlockStack>
                 )}
@@ -785,43 +857,13 @@ export function Dashboard() {
                       <Text as="h3" variant="headingSm">
                         Format
                       </Text>
-                      <div className="tidysync-feature-grid" style={{ marginTop: 12 }}>
-                        {[
-                          {
-                            value: "shopify",
-                            title: "Shopify CSV",
-                            desc: "Native Shopify Admin import format",
-                          },
-                          {
-                            value: "woocommerce",
-                            title: "WooCommerce",
-                            desc: "Cross-platform product spreadsheet",
-                          },
-                          {
-                            value: "bigcommerce",
-                            title: "BigCommerce",
-                            desc: "BigCommerce catalog-ready export",
-                          },
-                        ].map((fmt) => (
-                          <button
-                            key={fmt.value}
-                            type="button"
-                            className={`tidysync-feature-card is-clickable${
-                              exportPlatform === fmt.value ? " is-selected" : ""
-                            }`}
-                            onClick={() => setExportPlatform(fmt.value)}
-                          >
-                            <div className="tidysync-feature-icon">
-                              <Icon source={ExportIcon} />
-                            </div>
-                            <Text as="p" variant="bodyMd" fontWeight="semibold">
-                              {fmt.title}
-                            </Text>
-                            <Text as="p" variant="bodySm" tone="subdued">
-                              {fmt.desc}
-                            </Text>
-                          </button>
-                        ))}
+                      <div style={{ marginTop: 12 }}>
+                        <PlatformPicker
+                          label=""
+                          platforms={EXPORT_PLATFORMS}
+                          value={exportPlatform}
+                          onChange={setExportPlatform}
+                        />
                       </div>
                     </div>
 
@@ -829,7 +871,9 @@ export function Dashboard() {
                       <InlineStack align="space-between" blockAlign="center" wrap={false}>
                         <BlockStack gap="100">
                           <Text as="p" variant="bodyMd" fontWeight="semibold">
-                            Ready to export {exportResourceType} → {exportPlatform}
+                            Ready to export {exportResourceType} →{" "}
+                            {EXPORT_PLATFORMS.find((p) => p.key === exportPlatform)?.name ??
+                              exportPlatform}
                           </Text>
                           <Text as="p" variant="bodySm" tone="subdued">
                             Large catalogs run in the background with live progress on Jobs.
@@ -1300,6 +1344,7 @@ export function Dashboard() {
       >
         <Modal.Section>
           <MappingEditor
+            key={mappingJobId}
             shop={shop}
             jobId={mappingJobId}
             platformKey={importPlatform}
@@ -1312,6 +1357,7 @@ export function Dashboard() {
               name: string;
               mappings: Array<{ sourceColumn: string; targetField: string }>;
             }>}
+            onRemap={remapColumns}
             onComplete={async () => {
               setMappingOpen(false);
               const jobDetail = await gqlRequest<{ job: Job }>(QUERIES.job, { id: mappingJobId }, shop);

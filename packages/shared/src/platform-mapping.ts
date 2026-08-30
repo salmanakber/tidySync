@@ -1,19 +1,151 @@
-import type { FieldMapping, MutationPlan, PlatformKey } from "./index";
+import type { FieldMapping, MutationPlan } from "./index";
 import { normalizeHeader } from "./index";
+import { PLATFORM_CATALOG, getPlatform, type PlatformKey } from "./platforms";
 
 type MappingRecord = Record<string, string>;
 
+export interface MappingSuggestion extends FieldMapping {
+  suggested: boolean;
+  confidence: number;
+  matchReason?: string;
+}
+
+const COMMON_ALIASES: Record<string, string> = {
+  title: "title",
+  name: "title",
+  product: "title",
+  productname: "title",
+  product_name: "title",
+  itemname: "title",
+  item_name: "title",
+  description: "descriptionHtml",
+  body: "descriptionHtml",
+  bodyhtml: "descriptionHtml",
+  "body (html)": "descriptionHtml",
+  shortdescription: "descriptionHtml",
+  vendor: "vendor",
+  brand: "vendor",
+  type: "productType",
+  producttype: "productType",
+  category: "productType",
+  categories: "productType",
+  tags: "tags",
+  sku: "variants.sku",
+  "variant sku": "variants.sku",
+  sellersku: "variants.sku",
+  "seller-sku": "variants.sku",
+  price: "variants.price",
+  "regular price": "variants.price",
+  "variant price": "variants.price",
+  "standard-price": "variants.price",
+  startprice: "variants.price",
+  saleprice: "variants.compareAtPrice",
+  "sale price": "variants.compareAtPrice",
+  compareatprice: "variants.compareAtPrice",
+  "compare at price": "variants.compareAtPrice",
+  "variant compare at price": "variants.compareAtPrice",
+  stock: "variants.inventoryQuantity",
+  quantity: "variants.inventoryQuantity",
+  qty: "variants.inventoryQuantity",
+  inventory: "variants.inventoryQuantity",
+  "current stock": "variants.inventoryQuantity",
+  "variant inventory qty": "variants.inventoryQuantity",
+  weight: "variants.weight",
+  images: "images",
+  image: "images",
+  "image src": "images",
+  "product image url": "images",
+  image_link: "images",
+  picurl: "images",
+};
+
+function stripNoise(s: string): string {
+  return normalizeHeader(s)
+    .replace(/[*#:]/g, "")
+    .replace(/\bg:/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 export function detectPlatformFromHeaders(headers: string[]): PlatformKey | null {
-  const normalized = headers.map(normalizeHeader);
+  const normalized = headers.map((h) => normalizeHeader(h));
+  const stripped = headers.map(stripNoise);
 
-  const wooSignals = ["regular price", "stock", "short description"];
-  const bcSignals = ["product name", "current stock", "sale price"];
+  let best: { key: string; score: number } | null = null;
 
-  const wooScore = wooSignals.filter((s) => normalized.includes(s)).length;
-  const bcScore = bcSignals.filter((s) => normalized.includes(s)).length;
+  for (const platform of PLATFORM_CATALOG) {
+    if (platform.key === "csv" || platform.detectSignals.length === 0) continue;
+    let score = 0;
+    for (const signal of platform.detectSignals) {
+      const n = normalizeHeader(signal);
+      const s = stripNoise(signal);
+      if (normalized.includes(n) || stripped.includes(s)) score += 2;
+      else if (normalized.some((h) => h.includes(n) || n.includes(h))) score += 1;
+    }
+    if (score > 0 && (!best || score > best.score)) {
+      best = { key: platform.key, score };
+    }
+  }
 
-  if (wooScore >= 2) return "woocommerce";
-  if (bcScore >= 2) return "bigcommerce";
+  // Require a minimum signal so we don't false-positive on sparse sheets
+  if (best && best.score >= 2) return best.key;
+  return null;
+}
+
+export function detectPlatformWithConfidence(headers: string[]): {
+  platformKey: string | null;
+  confidence: number;
+  scores: Array<{ key: string; name: string; score: number }>;
+} {
+  const normalized = headers.map((h) => normalizeHeader(h));
+  const stripped = headers.map(stripNoise);
+  const scores: Array<{ key: string; name: string; score: number }> = [];
+
+  for (const platform of PLATFORM_CATALOG) {
+    if (platform.key === "csv" || platform.detectSignals.length === 0) continue;
+    let score = 0;
+    for (const signal of platform.detectSignals) {
+      const n = normalizeHeader(signal);
+      const s = stripNoise(signal);
+      if (normalized.includes(n) || stripped.includes(s)) score += 2;
+      else if (normalized.some((h) => h.includes(n) || n.includes(h))) score += 1;
+    }
+    if (score > 0) scores.push({ key: platform.key, name: platform.name, score });
+  }
+
+  scores.sort((a, b) => b.score - a.score);
+  const top = scores[0];
+  if (!top || top.score < 2) {
+    return { platformKey: null, confidence: 0, scores };
+  }
+  const maxPossible = Math.max(
+    ...PLATFORM_CATALOG.filter((p) => p.key === top.key).map((p) => p.detectSignals.length * 2),
+    1,
+  );
+  const confidence = Math.min(1, top.score / Math.max(4, maxPossible * 0.5));
+  return { platformKey: top.key, confidence, scores: scores.slice(0, 5) };
+}
+
+function fuzzyTargetForHeader(header: string): { target: string; confidence: number; reason: string } | null {
+  const n = normalizeHeader(header);
+  const s = stripNoise(header).replace(/\s+/g, "");
+
+  if (COMMON_ALIASES[n]) {
+    return { target: COMMON_ALIASES[n], confidence: 0.95, reason: "exact alias" };
+  }
+  if (COMMON_ALIASES[s]) {
+    return { target: COMMON_ALIASES[s], confidence: 0.9, reason: "normalized alias" };
+  }
+
+  for (const [alias, target] of Object.entries(COMMON_ALIASES)) {
+    const a = alias.replace(/\s+/g, "");
+    if (s.includes(a) || a.includes(s)) {
+      if (Math.min(s.length, a.length) >= 3) {
+        return { target, confidence: 0.72, reason: `fuzzy: ${alias}` };
+      }
+    }
+  }
+
   return null;
 }
 
@@ -21,24 +153,74 @@ export function buildFieldMappings(
   headers: string[],
   profileMappings: MappingRecord,
 ): FieldMapping[] {
-  const result: FieldMapping[] = [];
+  return buildFieldMappingsWithConfidence(headers, profileMappings).map(
+    ({ sourceColumn, targetField, transform }) => ({
+      sourceColumn,
+      targetField,
+      transform,
+    }),
+  );
+}
+
+export function buildFieldMappingsWithConfidence(
+  headers: string[],
+  profileMappings: MappingRecord = {},
+): MappingSuggestion[] {
+  const result: MappingSuggestion[] = [];
   const profileByNormalized = new Map<string, string>();
+  const usedTargets = new Set<string>();
 
   for (const [source, target] of Object.entries(profileMappings)) {
     profileByNormalized.set(normalizeHeader(source), target);
+    profileByNormalized.set(stripNoise(source), target);
   }
 
   for (const header of headers) {
     const normalized = normalizeHeader(header);
-    const target = profileByNormalized.get(normalized);
-    if (target) {
-      result.push({ sourceColumn: header, targetField: target });
-    } else {
-      result.push({ sourceColumn: header, targetField: "" });
+    const stripped = stripNoise(header);
+    const fromProfile =
+      profileByNormalized.get(normalized) ?? profileByNormalized.get(stripped);
+
+    if (fromProfile && !usedTargets.has(fromProfile)) {
+      usedTargets.add(fromProfile);
+      result.push({
+        sourceColumn: header,
+        targetField: fromProfile,
+        suggested: true,
+        confidence: 0.98,
+        matchReason: "platform profile",
+      });
+      continue;
     }
+
+    const fuzzy = fuzzyTargetForHeader(header);
+    if (fuzzy && !usedTargets.has(fuzzy.target)) {
+      usedTargets.add(fuzzy.target);
+      result.push({
+        sourceColumn: header,
+        targetField: fuzzy.target,
+        suggested: true,
+        confidence: fuzzy.confidence,
+        matchReason: fuzzy.reason,
+      });
+      continue;
+    }
+
+    result.push({
+      sourceColumn: header,
+      targetField: "",
+      suggested: false,
+      confidence: 0,
+      matchReason: "unmatched",
+    });
   }
 
   return result;
+}
+
+export function defaultMappingsForPlatform(platformKey: string): MappingRecord {
+  const platform = getPlatform(platformKey);
+  return platform?.productMappings ?? getPlatform("csv")?.productMappings ?? {};
 }
 
 export function applyMappingsToRow(
@@ -159,9 +341,9 @@ export function buildImpactSummary(
   totalChanges: number,
   rows: Array<{ field: string; before: unknown; after: unknown; resourceType: string }>,
 ): string {
-  const productCount = new Set(rows.map((r) => r.resourceType + ":" + (rows.find((x) => x === r) ? "" : ""))).size;
-  const uniqueResources = new Set(rows.map((r) => `${r.resourceType}`)).size;
-  const priceRows = rows.filter((r) => r.field.includes("price") && typeof r.before === "number" && typeof r.after === "number");
+  const priceRows = rows.filter(
+    (r) => r.field.includes("price") && typeof r.before === "number" && typeof r.after === "number",
+  );
 
   let priceSummary = "";
   if (priceRows.length > 0) {
@@ -171,5 +353,8 @@ export function buildImpactSummary(
     priceSummary = `, average price change of ${pct.toFixed(1)}%`;
   }
 
-  return `This will update ${totalChanges} field change(s) across products${priceSummary}.`;
+  return `This will update ${totalChanges} field change(s) across ${rows[0]?.resourceType ?? "resources"}${priceSummary}.`;
 }
+
+// Re-export catalog helpers used by API/UI
+export { PLATFORM_CATALOG, getPlatform, platformsForImport, platformsForExport } from "./platforms";

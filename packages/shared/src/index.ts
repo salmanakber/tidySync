@@ -8,13 +8,15 @@ export const QUEUE_NAMES = {
   CATALOG_SCAN: "tidysync-catalog-scan",
 } as const;
 
-export const SUPPORTED_PLATFORMS = [
-  { key: "shopify", name: "Shopify", version: "native" },
-  { key: "woocommerce", name: "WooCommerce", version: "v8" },
-  { key: "bigcommerce", name: "BigCommerce", version: "v3" },
-] as const;
-
-export type PlatformKey = "shopify" | "woocommerce" | "bigcommerce";
+export {
+  PLATFORM_CATALOG,
+  SUPPORTED_PLATFORMS,
+  getPlatform,
+  platformsForImport,
+  platformsForExport,
+  type PlatformDefinition,
+  type PlatformKey,
+} from "./platforms";
 
 export interface FieldMapping {
   sourceColumn: string;

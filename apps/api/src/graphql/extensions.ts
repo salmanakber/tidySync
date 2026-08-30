@@ -5,7 +5,6 @@ import { consumeAiCredit } from "../services/tenant";
 import { catalogScanQueue, bulkEditQueue } from "../queues";
 import { type GraphQLContext, requireMerchant, requireActiveMerchant, requireAdmin } from "../context";
 import { parseFileHeaders } from "../services/file-parser";
-import { buildFieldMappings } from "@tidysync/shared";
 
 export const extensionTypeDefs = `#graphql
   type AuditLog {
@@ -234,31 +233,54 @@ export async function suggestMappingsWithAi(
   const profile = await prisma.platformFieldMap.findFirst({
     where: { platformKey, isGlobal: true },
   });
-  const profileMappings = (profile?.mappings as Record<string, string>) ?? {};
-  let mappings = buildFieldMappings(headers, profileMappings);
+  const { defaultMappingsForPlatform, buildFieldMappingsWithConfidence } = await import(
+    "@tidysync/shared"
+  );
+  const profileMappings =
+    (profile?.mappings as Record<string, string>) ?? defaultMappingsForPlatform(platformKey);
 
-  const unrecognized = mappings.filter((m) => !m.targetField);
+  let suggestions = buildFieldMappingsWithConfidence(headers, profileMappings);
+  const unrecognized = suggestions.filter((m) => !m.targetField);
+
   if (unrecognized.length > 0) {
-    await consumeAiCredit(tenantId, 1);
-    const ai = await inferColumnMappingsWithAi(headers, [...targetFields]);
-    mappings = ai.mappings;
-    await prisma.aiOperation.create({
-      data: {
-        tenantId,
-        jobId,
-        operationType: "COLUMN_MAPPING",
-        prompt: platformKey,
-        generatedPlan: mappings as object,
-        creditsConsumed: 1,
-        modelUsed: ai.modelUsed,
-      },
-    });
+    try {
+      await consumeAiCredit(tenantId, 1);
+      const ai = await inferColumnMappingsWithAi(headers, [...targetFields]);
+      const bySource = new Map(ai.mappings.map((m) => [m.sourceColumn, m.targetField]));
+      suggestions = suggestions.map((row) => {
+        if (row.targetField) return row;
+        const aiTarget = bySource.get(row.sourceColumn) ?? "";
+        if (!aiTarget) return row;
+        return {
+          ...row,
+          targetField: aiTarget,
+          suggested: true,
+          confidence: 0.85,
+          matchReason: "ai",
+        };
+      });
+      await prisma.aiOperation.create({
+        data: {
+          tenantId,
+          jobId,
+          operationType: "COLUMN_MAPPING",
+          prompt: platformKey,
+          generatedPlan: suggestions as object,
+          creditsConsumed: 1,
+          modelUsed: ai.modelUsed,
+        },
+      });
+    } catch {
+      // Credits / AI unavailable — keep fuzzy/profile matches so import can continue
+    }
   }
 
-  return mappings.map((m) => ({
+  return suggestions.map((m) => ({
     sourceColumn: m.sourceColumn,
     targetField: m.targetField,
     suggested: Boolean(m.targetField),
+    confidence: m.confidence ?? (m.targetField ? 0.7 : 0),
+    matchReason: m.matchReason ?? null,
   }));
 }
 

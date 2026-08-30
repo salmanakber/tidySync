@@ -1,7 +1,7 @@
 import { prisma, tenantRepository, jobRepository, type Job, type JobStatus } from "@tidysync/database";
 import {
-  buildFieldMappings,
   detectPlatformFromHeaders,
+  detectPlatformWithConfidence,
   parseNlBulkEdit,
   detectAnomalies,
   buildImpactSummary,
@@ -180,6 +180,8 @@ export const typeDefs = `#graphql
     sourceColumn: String!
     targetField: String!
     suggested: Boolean!
+    confidence: Float
+    matchReason: String
   }
 
   type PlatformProfile {
@@ -471,7 +473,8 @@ export const resolvers = {
       const resourceType = args.resourceType ?? "products";
 
       const headers = await parseFileHeaders(args.filePath);
-      const detected = detectPlatformFromHeaders(headers);
+      const detection = detectPlatformWithConfidence(headers);
+      const detected = detection.platformKey ?? detectPlatformFromHeaders(headers);
 
       const job = await prisma.job.create({
         data: {
@@ -480,7 +483,7 @@ export const resolvers = {
           status: "MAPPING",
           fileName: args.fileName,
           filePath: args.filePath,
-          sourcePlatform: detected ?? "unknown",
+          sourcePlatform: detected ?? "csv",
           resourceType,
           rowCount: 0,
         },
@@ -493,11 +496,30 @@ export const resolvers = {
           action: "import.uploaded",
           resourceType: "job",
           resourceId: job.id,
-          metadata: { fileName: args.fileName, detectedPlatform: detected },
+          metadata: {
+            fileName: args.fileName,
+            detectedPlatform: detected,
+            detectionConfidence: detection.confidence,
+            detectionScores: detection.scores,
+          },
         },
       });
 
-      return mapJob({ ...job, lineItems: [], diffPreview: { previewRows: preview } as unknown as Job["diffPreview"] });
+      return {
+        ...mapJob({
+          ...job,
+          lineItems: [],
+          diffPreview: {
+            previewRows: preview,
+            detection: {
+              platformKey: detected,
+              confidence: detection.confidence,
+              scores: detection.scores,
+            },
+          } as unknown as Job["diffPreview"],
+        }),
+        sourcePlatform: detected ?? "csv",
+      };
     },
     suggestFieldMappings: async (
       _: unknown,
@@ -520,6 +542,10 @@ export const resolvers = {
 
       const previewRows = await parseFilePreview(job.filePath, 100);
       const mappings = args.mappings as Array<{ sourceColumn: string; targetField: string }>;
+      const mappedCount = mappings.filter((m) => m.targetField).length;
+      if (mappedCount === 0) {
+        throw new Error("Map at least one column to a Shopify field before previewing.");
+      }
       const resType = job.resourceType ?? "products";
 
       const diffRows: Array<{

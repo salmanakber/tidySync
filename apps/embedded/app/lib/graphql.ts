@@ -177,13 +177,14 @@ export const MUTATIONS = {
     mutation UploadImport($filePath: String!, $fileName: String!, $resourceType: String) {
       uploadImportFile(filePath: $filePath, fileName: $fileName, resourceType: $resourceType) {
         id status sourcePlatform resourceType
+        diffPreview
       }
     }
   `,
   suggestMappings: `
     mutation SuggestMappings($jobId: ID!, $platformKey: String!) {
       suggestFieldMappings(jobId: $jobId, platformKey: $platformKey) {
-        sourceColumn targetField suggested
+        sourceColumn targetField suggested confidence matchReason
       }
     }
   `,

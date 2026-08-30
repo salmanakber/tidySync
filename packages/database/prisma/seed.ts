@@ -1,5 +1,6 @@
 import { prisma } from "../src/index";
 import bcrypt from "bcryptjs";
+import { PLATFORM_CATALOG } from "@tidysync/shared";
 
 const PLANS = [
   {
@@ -52,32 +53,6 @@ const PLANS = [
   },
 ];
 
-const WOOCOMMERCE_MAPPINGS = {
-  "Name": "title",
-  "SKU": "variants.sku",
-  "Regular price": "variants.price",
-  "Sale price": "variants.compareAtPrice",
-  "Stock": "variants.inventoryQuantity",
-  "Description": "descriptionHtml",
-  "Short description": "descriptionHtml",
-  "Categories": "productType",
-  "Tags": "tags",
-  "Images": "images",
-  "Weight": "variants.weight",
-};
-
-const BIGCOMMERCE_MAPPINGS = {
-  "Product Name": "title",
-  "SKU": "variants.sku",
-  "Price": "variants.price",
-  "Sale Price": "variants.compareAtPrice",
-  "Current Stock": "variants.inventoryQuantity",
-  "Description": "descriptionHtml",
-  "Category": "productType",
-  "Product Image URL": "images",
-  "Weight": "variants.weight",
-};
-
 async function main() {
   for (const plan of PLANS) {
     await prisma.plan.upsert({
@@ -88,54 +63,13 @@ async function main() {
   }
 
   const globalMaps = [
-    {
-      platformKey: "woocommerce",
-      version: "v8",
-      name: "WooCommerce v8",
-      mappings: WOOCOMMERCE_MAPPINGS,
-      transforms: {
-        variantModel: "woocommerce_attributes",
-        imageField: "comma_separated_urls",
-      },
-    },
-    {
-      platformKey: "bigcommerce",
-      version: "v3",
-      name: "BigCommerce v3",
-      mappings: BIGCOMMERCE_MAPPINGS,
-      transforms: {
-        variantModel: "bigcommerce_variants",
-        imageField: "single_url",
-      },
-    },
-    {
-      platformKey: "magento",
-      version: "v2",
-      name: "Magento / Adobe Commerce",
-      mappings: { sku: "variants.sku", name: "title", price: "variants.price", qty: "variants.inventoryQuantity" },
-      transforms: { variantModel: "magento_configurable" },
-    },
-    {
-      platformKey: "squarespace",
-      version: "v1",
-      name: "Squarespace",
-      mappings: { Title: "title", Description: "descriptionHtml", SKU: "variants.sku", Price: "variants.price" },
-      transforms: {},
-    },
-    {
-      platformKey: "etsy",
-      version: "v1",
-      name: "Etsy",
-      mappings: { TITLE: "title", DESCRIPTION: "descriptionHtml", SKU: "variants.sku", PRICE: "variants.price" },
-      transforms: {},
-    },
-    {
-      platformKey: "wix",
-      version: "v1",
-      name: "Wix",
-      mappings: { productName: "title", description: "descriptionHtml", sku: "variants.sku", price: "variants.price" },
-      transforms: {},
-    },
+    ...PLATFORM_CATALOG.filter((p) => p.key !== "csv").map((p) => ({
+      platformKey: p.key,
+      version: p.version,
+      name: p.name,
+      mappings: p.productMappings,
+      transforms: {} as Record<string, string>,
+    })),
     {
       platformKey: "woocommerce",
       version: "customers-v1",
@@ -206,7 +140,7 @@ async function main() {
     if (existing) {
       await prisma.platformFieldMap.update({
         where: { id: existing.id },
-        data: { mappings: map.mappings, transforms: map.transforms },
+        data: { mappings: map.mappings, transforms: map.transforms, name: map.name },
       });
     } else {
       await prisma.platformFieldMap.create({

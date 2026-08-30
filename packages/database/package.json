@@ -8,6 +8,7 @@
   "dependencies": {
     "@prisma/client": "^6.1.0",
     "@shopify/shopify-app-session-storage-prisma": "^6.0.6",
+    "@tidysync/shared": "*",
     "bcryptjs": "^2.4.3"
   },
   "scripts": {

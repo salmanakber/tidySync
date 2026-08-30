@@ -717,3 +717,121 @@ body {
   }
 }
 
+/* Platform picker chips */
+.tidysync-platform-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.tidysync-platform-chip {
+  appearance: none;
+  text-align: left;
+  border: 1px solid #e1e3e5;
+  background: #fff;
+  border-radius: 12px;
+  padding: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.12s;
+}
+
+.tidysync-platform-chip:hover {
+  border-color: #c9cccf;
+  transform: translateY(-1px);
+}
+
+.tidysync-platform-chip.is-selected {
+  border-color: #008060;
+  box-shadow: 0 0 0 3px rgba(0, 128, 96, 0.12);
+}
+
+.tidysync-platform-chip.is-detected:not(.is-selected) {
+  border-color: rgba(92, 106, 196, 0.45);
+}
+
+.tidysync-platform-chip-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 650;
+  color: #202223;
+  margin-bottom: 4px;
+}
+
+.tidysync-platform-chip-blurb {
+  display: block;
+  font-size: 12px;
+  color: #6d7175;
+  line-height: 1.35;
+}
+
+.tidysync-platform-pill {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(92, 106, 196, 0.12);
+  color: #5c6ac4;
+}
+
+.tidysync-mapping-summary {
+  border: 1px solid #e1e3e5;
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: #fafbfb;
+}
+
+.tidysync-mapping-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.tidysync-mapping-row {
+  display: grid;
+  grid-template-columns: 1fr 28px minmax(180px, 1.1fr);
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #e1e3e5;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.tidysync-mapping-row.is-matched {
+  border-color: rgba(0, 128, 96, 0.35);
+  background: linear-gradient(90deg, rgba(0, 128, 96, 0.04), #fff 40%);
+}
+
+.tidysync-mapping-row.is-unmatched {
+  border-style: dashed;
+}
+
+.tidysync-mapping-arrow {
+  text-align: center;
+  color: #8c9196;
+  font-weight: 600;
+}
+
+.tidysync-mapping-source {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .tidysync-mapping-row {
+    grid-template-columns: 1fr;
+  }
+  .tidysync-mapping-arrow {
+    display: none;
+  }
+}
+
