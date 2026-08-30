@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { sessionRepository, tenantRepository } from "@tidysync/database";
 import { shopify } from "./shopify/client";
 import { ensureTenant } from "./services/tenant";
+import { appError } from "./graphql/app-error";
 
 export type AuthRole = "merchant" | "admin" | "api";
 
@@ -98,7 +99,7 @@ export async function buildContext(
 
 export function requireMerchant(ctx: GraphQLContext) {
   if (ctx.role !== "merchant" || !ctx.tenantId || !ctx.shop) {
-    throw new Error("Unauthorized — merchant session required");
+    throw appError("UNAUTHORIZED", "Unauthorized — merchant session required.");
   }
   return { tenantId: ctx.tenantId, shop: ctx.shop };
 }
@@ -106,20 +107,20 @@ export function requireMerchant(ctx: GraphQLContext) {
 export function requireActiveMerchant(ctx: GraphQLContext) {
   const merchant = requireMerchant(ctx);
   if (ctx.tenantStatus === "SUSPENDED") {
-    throw new Error("Your TidySync account is suspended. Contact support.");
+    throw appError("FORBIDDEN", "Your TidySync account is suspended. Contact support.");
   }
   if (ctx.tenantStatus === "UNINSTALLED") {
-    throw new Error("App not installed on this store.");
+    throw appError("FORBIDDEN", "App not installed on this store.");
   }
   if (ctx.tenantInstallApproved === false) {
-    throw new Error("This store is pending approval. Contact TidySync support.");
+    throw appError("FORBIDDEN", "This store is pending approval. Contact TidySync support.");
   }
   return merchant;
 }
 
 export function requireAdmin(ctx: GraphQLContext) {
   if (ctx.role !== "admin" || !ctx.adminUserId) {
-    throw new Error("Unauthorized — admin session required");
+    throw appError("UNAUTHORIZED", "Unauthorized — admin session required.");
   }
   return { adminUserId: ctx.adminUserId, adminRole: ctx.adminRole };
 }

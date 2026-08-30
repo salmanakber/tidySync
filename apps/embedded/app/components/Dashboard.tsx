@@ -47,7 +47,14 @@ import { DashboardSkeleton } from "./DashboardSkeleton";
 import { PlatformPicker } from "./PlatformPicker";
 import { ImportProgressLoader, type ImportProgressState } from "./ImportProgressLoader";
 import { ProductSeoStudio } from "./ProductSeoStudio";
+import { AppAlertStack } from "./AppAlert";
 import { subscribeToJobProgress } from "../lib/job-events";
+import {
+  alertFromError,
+  planUsageAlerts,
+  type AppAlertModel,
+  errorMessage,
+} from "../lib/graphql-errors";
 import { useShop } from "../providers";
 
 const IMPORT_PLATFORMS = [
@@ -165,6 +172,8 @@ export function Dashboard() {
   const [bootstrapping, setBootstrapping] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [alerts, setAlerts] = useState<AppAlertModel[]>([]);
+  const [dismissedPlanAlertKeys, setDismissedPlanAlertKeys] = useState<Set<string>>(new Set());
   const [exportPlatform, setExportPlatform] = useState("shopify");
   const [importPlatform, setImportPlatform] = useState("csv");
   const [detectedPlatform, setDetectedPlatform] = useState<string | null>(null);
@@ -202,6 +211,30 @@ export function Dashboard() {
     return () => jobEventCleanupRef.current?.();
   }, []);
 
+  const goToBilling = useCallback(() => setTab(9), []);
+
+  const pushAlert = useCallback((alert: Omit<AppAlertModel, "id">) => {
+    const id = `${alert.code ?? "alert"}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setAlerts((prev) => [...prev, { ...alert, id }]);
+  }, []);
+
+  const showOperationalError = useCallback(
+    (err: unknown, context?: string) => {
+      const model = alertFromError(err, goToBilling);
+      if (context) {
+        model.message = `${context}: ${model.message}`;
+      }
+      pushAlert(model);
+      setError(model.message);
+    },
+    [goToBilling, pushAlert],
+  );
+
+  const dismissAlert = useCallback((id: string) => {
+    setAlerts((prev) => prev.filter((a) => a.id !== id));
+    setError(null);
+  }, []);
+
   const loadData = useCallback(async () => {
     if (!shop) return;
     try {
@@ -222,18 +255,24 @@ export function Dashboard() {
       setMappingTemplates(templatesData.mappingTemplates);
       setError(null);
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Failed to load";
-      setError(message);
+      const message = errorMessage(e, "Failed to load dashboard data");
       if (
         message.includes("Unauthorized") ||
         message.includes("not installed") ||
         message.includes("merchant session")
       ) {
-        // Let user reconnect rather than spam OAuth loops from the poller
         setError("Shopify session missing. Click Connect to install / re-authorize TidySync.");
+        pushAlert({
+          tone: "warning",
+          title: "Session expired",
+          message: "Open TidySync from Shopify Admin, or click Connect to re-authorize.",
+          primaryAction: { content: "Connect", onAction: beginInstall },
+        });
+      } else {
+        showOperationalError(e, "Dashboard load failed");
       }
     }
-  }, [shop]);
+  }, [shop, beginInstall, pushAlert, showOperationalError]);
 
   const beginJobProgress = useCallback(
     (
@@ -313,7 +352,7 @@ export function Dashboard() {
       setTab(0);
       await loadData();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Export failed");
+      showOperationalError(e, "Export failed");
     } finally {
       setLoading(false);
     }
@@ -381,13 +420,13 @@ export function Dashboard() {
       setMappingOpen(true);
       await loadData();
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Import failed";
+      const message = errorMessage(e, "Import failed");
       setImportProgress({
         phase: "failed",
         fileName: file.name,
         message,
       });
-      setError(message);
+      showOperationalError(e, "Import failed");
       setTimeout(() => setImportProgress(null), 4500);
     } finally {
       setLoading(false);
@@ -423,7 +462,7 @@ export function Dashboard() {
       setNlPrompt("");
       void loadData();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Bulk edit failed");
+      showOperationalError(e, "Bulk edit failed");
     } finally {
       setAiLoading(false);
     }
@@ -464,7 +503,7 @@ export function Dashboard() {
 
       void loadData();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Approve failed");
+      showOperationalError(e, "Approve failed");
     } finally {
       setApproveLoading(false);
     }
@@ -477,7 +516,7 @@ export function Dashboard() {
       await gqlRequest(MUTATIONS.undoJob, { jobId }, shop);
       await loadData();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Undo failed");
+      showOperationalError(e, "Undo failed");
     } finally {
       setLoading(false);
       window.setTimeout(() => setUndoingId(null), 500);
@@ -543,6 +582,22 @@ export function Dashboard() {
     tenant.billingStatus !== "ACTIVE" &&
     !tenant.plan?.isFree;
 
+  const planAlerts = useMemo(() => {
+    if (!tenant) return [] as AppAlertModel[];
+    return planUsageAlerts(tenant, goToBilling)
+      .map((alert, index) => ({
+        ...alert,
+        id: `plan-${alert.code ?? "info"}-${index}`,
+      }))
+      .filter((alert) => !dismissedPlanAlertKeys.has(alert.id));
+  }, [tenant, goToBilling, dismissedPlanAlertKeys]);
+
+  const dismissPlanAlert = (id: string) => {
+    setDismissedPlanAlertKeys((prev) => new Set(prev).add(id));
+  };
+
+  const allAlerts = useMemo(() => [...planAlerts, ...alerts], [planAlerts, alerts]);
+
   if (!shopReady || bootstrapping) {
     return (
       <div className="tidysync-page-shell" style={{ padding: "16px 20px" }}>
@@ -596,7 +651,19 @@ export function Dashboard() {
       ]}
     >
       <Layout>
-        {error && (
+        {allAlerts.length > 0 && (
+          <Layout.Section>
+            <AppAlertStack
+              alerts={allAlerts}
+              onDismiss={(id) => {
+                if (id.startsWith("plan-")) dismissPlanAlert(id);
+                else dismissAlert(id);
+              }}
+            />
+          </Layout.Section>
+        )}
+
+        {error && allAlerts.length === 0 && (
           <Layout.Section>
             <Banner tone="critical" onDismiss={() => setError(null)}>
               {error}
@@ -1032,6 +1099,7 @@ export function Dashboard() {
                     shop={shop}
                     creditsRemaining={tenant?.plan?.aiCreditsRemaining}
                     onCreditsRefresh={() => loadData()}
+                    onUpgrade={goToBilling}
                   />
                 )}
 
@@ -1070,7 +1138,7 @@ export function Dashboard() {
                                 setTab(1);
                                 await loadData();
                               } catch (e) {
-                                setError(e instanceof Error ? e.message : "Scan failed");
+                                showOperationalError(e, "Catalog scan failed");
                               } finally {
                                 setLoading(false);
                               }
@@ -1113,7 +1181,7 @@ export function Dashboard() {
                                 setTab(1);
                                 await loadData();
                               } catch (e) {
-                                setError(e instanceof Error ? e.message : "Rewrite failed");
+                                showOperationalError(e, "Content rewrite failed");
                               } finally {
                                 setLoading(false);
                               }

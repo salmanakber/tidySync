@@ -11,6 +11,8 @@ import {
   TextField,
 } from "@shopify/polaris";
 import { gqlRequest, QUERIES, MUTATIONS } from "../lib/graphql";
+import { alertFromError } from "../lib/graphql-errors";
+import { AppAlert } from "./AppAlert";
 
 interface CatalogProduct {
   id: string;
@@ -57,6 +59,7 @@ interface ProductSeoStudioProps {
   shop: string;
   creditsRemaining?: number | string;
   onCreditsRefresh?: () => void;
+  onUpgrade?: () => void;
 }
 
 function scoreTone(score: number): "success" | "warning" | "critical" {
@@ -104,7 +107,7 @@ function ScoreRing({ score }: { score: number }) {
   );
 }
 
-export function ProductSeoStudio({ shop, creditsRemaining, onCreditsRefresh }: ProductSeoStudioProps) {
+export function ProductSeoStudio({ shop, creditsRemaining, onCreditsRefresh, onUpgrade }: ProductSeoStudioProps) {
   const [search, setSearch] = useState("");
   const [products, setProducts] = useState<CatalogProduct[]>([]);
   const [loadingList, setLoadingList] = useState(true);
@@ -113,11 +116,11 @@ export function ProductSeoStudio({ shop, creditsRemaining, onCreditsRefresh }: P
   const [analyzing, setAnalyzing] = useState(false);
   const [applying, setApplying] = useState(false);
   const [applySuccess, setApplySuccess] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [errorAlert, setErrorAlert] = useState<ReturnType<typeof alertFromError> | null>(null);
 
   const loadProducts = useCallback(async (query?: string) => {
     setLoadingList(true);
-    setError(null);
+    setErrorAlert(null);
     try {
       const data = await gqlRequest<{ catalogProducts: CatalogProduct[] }>(
         QUERIES.catalogProducts,
@@ -126,11 +129,14 @@ export function ProductSeoStudio({ shop, creditsRemaining, onCreditsRefresh }: P
       );
       setProducts(data.catalogProducts);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not load products");
+      setErrorAlert(alertFromError(e, onUpgrade));
     } finally {
       setLoadingList(false);
     }
-  }, [shop]);
+  }, [shop, onUpgrade]);
+
+  const creditsLow =
+    typeof creditsRemaining === "number" && creditsRemaining <= 0;
 
   useEffect(() => {
     void loadProducts();
@@ -143,7 +149,7 @@ export function ProductSeoStudio({ shop, creditsRemaining, onCreditsRefresh }: P
 
   const analyze = async (productId: string) => {
     setAnalyzing(true);
-    setError(null);
+    setErrorAlert(null);
     setApplySuccess(null);
     setSelectedId(productId);
     try {
@@ -155,7 +161,7 @@ export function ProductSeoStudio({ shop, creditsRemaining, onCreditsRefresh }: P
       setInsight(data.analyzeProductSeo);
       onCreditsRefresh?.();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "SEO analysis failed");
+      setErrorAlert(alertFromError(e, onUpgrade));
       setInsight(null);
     } finally {
       setAnalyzing(false);
@@ -165,7 +171,7 @@ export function ProductSeoStudio({ shop, creditsRemaining, onCreditsRefresh }: P
   const applySeo = async () => {
     if (!insight?.productId) return;
     setApplying(true);
-    setError(null);
+    setErrorAlert(null);
     setApplySuccess(null);
     try {
       const data = await gqlRequest<{ applyProductSeo: ProductSeoInsight & { applied?: Record<string, string> } }>(
@@ -177,7 +183,7 @@ export function ProductSeoStudio({ shop, creditsRemaining, onCreditsRefresh }: P
       setApplySuccess("AI SEO improvements applied to Shopify.");
       onCreditsRefresh?.();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not apply SEO improvements");
+      setErrorAlert(alertFromError(e, onUpgrade));
     } finally {
       setApplying(false);
     }
@@ -196,6 +202,26 @@ export function ProductSeoStudio({ shop, creditsRemaining, onCreditsRefresh }: P
         <Badge tone="info">{`${String(creditsRemaining ?? "—")} credits left`}</Badge>
       </div>
 
+      {creditsLow && onUpgrade && (
+        <AppAlert
+          tone="warning"
+          title="No AI credits left"
+          message="SEO analysis and apply each use 1 credit. Buy a top-up or upgrade your plan to continue."
+          primaryAction={{ content: "Go to Billing", onAction: onUpgrade }}
+        />
+      )}
+
+      {errorAlert && (
+        <AppAlert
+          tone={errorAlert.tone}
+          title={errorAlert.title}
+          message={errorAlert.message}
+          primaryAction={errorAlert.primaryAction}
+          secondaryAction={errorAlert.secondaryAction}
+          onDismiss={() => setErrorAlert(null)}
+        />
+      )}
+
       <div className="tidysync-seo-search">
         <TextField
           label="Search products"
@@ -209,12 +235,6 @@ export function ProductSeoStudio({ shop, creditsRemaining, onCreditsRefresh }: P
           }
         />
       </div>
-
-      {error && (
-        <div className="tidysync-seo-error">
-          <Text as="p" variant="bodySm">{error}</Text>
-        </div>
-      )}
 
       <div className="tidysync-seo-layout">
         <div className="tidysync-seo-product-list">

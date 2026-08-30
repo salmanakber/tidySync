@@ -1,4 +1,5 @@
 import { prisma, tenantRepository } from "@tidysync/database";
+import { appError, creditLimitError } from "../graphql/app-error";
 
 export async function ensureAiCreditsReset(tenantId: string) {
   const tenant = await tenantRepository.findById(tenantId);
@@ -23,11 +24,20 @@ export async function ensureAiCreditsReset(tenantId: string) {
 
 export async function consumeAiCredit(tenantId: string, credits = 1) {
   const tenant = (await ensureAiCreditsReset(tenantId)) ?? (await tenantRepository.findById(tenantId));
-  if (!tenant?.plan) throw new Error("Tenant plan not found");
+  if (!tenant?.plan) {
+    throw appError("NOT_FOUND", "Tenant plan not found.");
+  }
 
   const limit = tenant.plan.aiCreditsPerMonth + tenant.extraAiCredits;
   if (tenant.aiCreditsUsed + credits > limit) {
-    throw new Error("AI credit limit reached. Purchase a top-up or upgrade your plan.");
+    throw creditLimitError(
+      {
+        aiCreditsUsed: tenant.aiCreditsUsed,
+        extraAiCredits: tenant.extraAiCredits,
+        plan: tenant.plan,
+      },
+      credits,
+    );
   }
 
   return tenantRepository.incrementAiCreditsUsed(tenantId, credits);

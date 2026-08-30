@@ -1167,3 +1167,8 @@ body {
   }
 }
 
+.tidysync-alert-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}

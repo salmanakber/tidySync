@@ -1,4 +1,5 @@
 import { clearSessionTokenCache, getAuthSessionToken } from "./session-token";
+import { GraphQLClientError, parseGraphQLClientError } from "./graphql-errors";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/graphql";
 const UPLOAD_URL = process.env.NEXT_PUBLIC_UPLOAD_URL ?? "/api/upload";
@@ -36,6 +37,8 @@ async function fetchWithTimeout(
   }
 }
 
+export { GraphQLClientError } from "./graphql-errors";
+
 export async function gqlRequest<T>(
   query: string,
   variables?: Record<string, unknown>,
@@ -51,29 +54,37 @@ export async function gqlRequest<T>(
     return fetchWithTimeout(API_URL, { method: "POST", headers, body });
   };
 
+  const parseResponse = async (response: Response): Promise<T> => {
+    const json = await response.json();
+    if (json.errors?.length) {
+      throw parseGraphQLClientError(json.errors);
+    }
+    return json.data as T;
+  };
+
   let res = await send();
   if (res.status === 401) {
     clearSessionTokenCache();
     res = await send(true);
   }
 
-  const json = await res.json();
-  if (json.errors?.length) {
-    const message = json.errors[0].message as string;
-    if (
-      res.status === 401 ||
-      message.includes("Unauthorized") ||
-      message.includes("session token")
-    ) {
-      clearSessionTokenCache();
-      const retryRes = await send(true);
-      const retryJson = await retryRes.json();
-      if (retryJson.errors?.length) throw new Error(retryJson.errors[0].message);
-      return retryJson.data as T;
+  try {
+    return await parseResponse(res);
+  } catch (error) {
+    if (error instanceof GraphQLClientError) {
+      const message = error.message;
+      if (
+        res.status === 401 ||
+        message.includes("Unauthorized") ||
+        message.includes("session token")
+      ) {
+        clearSessionTokenCache();
+        const retryRes = await send(true);
+        return parseResponse(retryRes);
+      }
     }
-    throw new Error(message);
+    throw error;
   }
-  return json.data as T;
 }
 
 export async function uploadFile(file: File, shop: string) {

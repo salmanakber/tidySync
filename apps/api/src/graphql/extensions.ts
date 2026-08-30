@@ -4,6 +4,7 @@ import { inferColumnMappingsWithAi, parseNlBulkEditWithAi, generateImpactSummary
 import { consumeAiCredit } from "../services/tenant";
 import { catalogScanQueue, bulkEditQueue } from "../queues";
 import { type GraphQLContext, requireMerchant, requireActiveMerchant, requireAdmin } from "../context";
+import { planLimitError } from "./app-error";
 import { parseFileHeaders } from "../services/file-parser";
 import { parseFilePreview } from "../services/file-parser";
 import { merchantGraphqlRequest } from "../shopify/client";
@@ -457,7 +458,9 @@ export const extensionResolvers = {
     ) => {
       const { tenantId } = requireActiveMerchant(ctx);
       const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, include: { plan: true } });
-      if (!tenant?.plan?.scheduledJobs) throw new Error("Scheduled jobs not available on your plan");
+      if (!tenant?.plan?.scheduledJobs) {
+        throw planLimitError("Scheduled jobs are not available on your plan. Upgrade to unlock automation.");
+      }
       return prisma.scheduledJob.create({
         data: {
           tenantId,

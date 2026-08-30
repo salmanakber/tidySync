@@ -4,10 +4,13 @@ import multer from "multer";
 import path from "node:path";
 import fs from "node:fs";
 import { createYoga } from "graphql-yoga";
+import { GraphQLError } from "graphql";
+import { maskError as yogaMaskError } from "graphql-yoga";
 import { makeExecutableSchema } from "@graphql-tools/schema";
 import { mergeResolvers } from "@graphql-tools/merge";
 import { typeDefs, resolvers } from "./graphql/schema";
 import { extensionTypeDefs, extensionResolvers } from "./graphql/extensions";
+import { isUserFacingErrorCode } from "./graphql/app-error";
 import { buildContext } from "./context";
 import { shopify, sessionStorage } from "./shopify/client";
 import { ensureTenant } from "./services/tenant";
@@ -77,6 +80,17 @@ const yoga = createYoga({
   schema,
   context: buildContext,
   graphqlEndpoint: "/graphql",
+  maskedErrors: {
+    maskError(error, defaultMessage, isDev) {
+      if (error instanceof GraphQLError) {
+        const code = error.extensions?.code as string | undefined;
+        if (isUserFacingErrorCode(code) || !error.originalError) {
+          return error;
+        }
+      }
+      return yogaMaskError(error, defaultMessage, isDev);
+    },
+  },
 });
 
 app.get("/health", async (_req, res) => {
