@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Page,
   Layout,
@@ -192,6 +192,13 @@ export function Dashboard() {
   const [notifyEmail, setNotifyEmail] = useState("");
   const [creditTopUp, setCreditTopUp] = useState("10");
   const [undoingId, setUndoingId] = useState<string | null>(null);
+  const jobPollCleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      jobPollCleanupRef.current?.();
+    };
+  }, []);
 
   const loadData = useCallback(async () => {
     if (!shop) return;
@@ -234,9 +241,15 @@ export function Dashboard() {
     }
     setBootstrapping(true);
     loadData().finally(() => setBootstrapping(false));
-    const interval = setInterval(loadData, 5000);
+
+    const interval = setInterval(() => {
+      if (importProgress) return;
+      const hasActive = jobs.some((j) => j.status === "RUNNING" || j.status === "QUEUED");
+      if (hasActive) loadData();
+    }, 5000);
+
     return () => clearInterval(interval);
-  }, [loadData, shopReady, shop, authenticated]);
+  }, [loadData, shopReady, shop, authenticated, jobs, importProgress]);
 
   const handleExport = async () => {
     setLoading(true);
@@ -371,52 +384,77 @@ export function Dashboard() {
 
   const handleApprove = async (jobId: string) => {
     setLoading(true);
+    setError(null);
     try {
       await gqlRequest(MUTATIONS.approveJob, { jobId }, shop);
       setPreviewOpen(false);
+      setSelectedJob(null);
       setTab(0);
 
       const jobDetail = await gqlRequest<{ job: Job }>(QUERIES.job, { id: jobId }, shop);
+      const jobType = jobDetail.job.type;
+      const isImport = jobType === "IMPORT";
+      const progressMessage =
+        jobDetail.job.status === "QUEUED"
+          ? "Queued — starting shortly…"
+          : isImport
+            ? "Importing products to Shopify…"
+            : "Applying changes to your Shopify catalog…";
+
       setImportProgress({
         phase: "importing",
         jobId,
-        fileName: jobDetail.job.fileName,
+        fileName: jobDetail.job.fileName ?? jobDetail.job.nlPrompt,
         rowCount: jobDetail.job.rowCount,
-        processedCount: 0,
-        successCount: 0,
-        failedCount: 0,
-        message: "Writing products to your Shopify catalog…",
+        processedCount: jobDetail.job.processedCount ?? 0,
+        successCount: jobDetail.job.successCount ?? 0,
+        failedCount: jobDetail.job.failedCount ?? 0,
+        message: progressMessage,
       });
 
-      pollJobProgress(jobId, shop, (job) => {
+      jobPollCleanupRef.current?.();
+      jobPollCleanupRef.current = pollJobProgress(jobId, shop, (job) => {
         const status = job.status as string;
         const done = ["COMPLETED", "FAILED", "CANCELLED"].includes(status);
+        const queued = status === "QUEUED";
+        const running = status === "RUNNING";
+
         setImportProgress({
           phase: done ? (status === "COMPLETED" ? "complete" : "failed") : "importing",
           jobId,
-          fileName: job.fileName as string | undefined,
+          fileName: (job.fileName as string | undefined) ?? jobDetail.job.nlPrompt,
           rowCount: job.rowCount as number,
           processedCount: job.processedCount as number,
           successCount: job.successCount as number,
           failedCount: job.failedCount as number,
-          message:
-            status === "COMPLETED"
-              ? "Import finished — your catalog is updated"
-              : status === "FAILED"
-                ? ((job.errorSummary as string) ?? "Some rows could not be imported")
-                : "Syncing products live to Shopify…",
+          message: done
+            ? status === "COMPLETED"
+              ? isImport
+                ? "Import finished — your catalog is updated"
+                : "Changes applied successfully"
+              : ((job.errorSummary as string) ?? "Some updates could not be applied")
+            : queued
+              ? "Queued — waiting for worker…"
+              : running
+                ? isImport
+                  ? "Importing products live to Shopify…"
+                  : "Applying changes live to Shopify…"
+                : "Processing…",
         });
+
         if (done) {
-          setTimeout(() => {
+          jobPollCleanupRef.current = null;
+          window.setTimeout(() => {
             setImportProgress(null);
             loadData();
-          }, 2800);
+          }, 2200);
         }
       });
 
       await loadData();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Approve failed");
+      setImportProgress(null);
     } finally {
       setLoading(false);
     }

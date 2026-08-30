@@ -50,7 +50,7 @@ export function ImportProgressLoader({ state }: { state: ImportProgressState }) 
 
   const headline = (() => {
     if (state.phase === "importing" && state.rowCount) {
-      return `${formatCount(state.processedCount ?? 0)} of ${formatCount(state.rowCount)} products`;
+      return `${formatCount(state.processedCount ?? 0)} of ${formatCount(state.rowCount)} updated`;
     }
     if (state.phase === "analyzing" && state.rowCount) {
       return `${formatCount(state.rowCount)} products found`;

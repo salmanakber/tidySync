@@ -4,11 +4,21 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/graphql";
 const UPLOAD_URL = process.env.NEXT_PUBLIC_UPLOAD_URL ?? "/api/upload";
 const DOWNLOAD_BASE = process.env.NEXT_PUBLIC_DOWNLOAD_URL ?? "/download";
 
+/** Reuse App Bridge session token between GraphQL calls (avoids spamming idToken). */
+let cachedSessionToken: { value: string; expiresAt: number } | null = null;
+
 async function authHeaders(shop?: string): Promise<Record<string, string>> {
   const headers: Record<string, string> = {};
-  const token = await getSessionToken(6);
-  if (token) headers.Authorization = `Bearer ${token}`;
-  // Always send shop when known — backend uses it with offline session / tenant lookup
+  const now = Date.now();
+  if (cachedSessionToken && cachedSessionToken.expiresAt > now) {
+    headers.Authorization = `Bearer ${cachedSessionToken.value}`;
+  } else {
+    const token = await getSessionToken(4);
+    if (token) {
+      cachedSessionToken = { value: token, expiresAt: now + 50_000 };
+      headers.Authorization = `Bearer ${token}`;
+    }
+  }
   if (shop) {
     headers["x-tidysync-shop"] = shop;
     headers["x-shopify-shop"] = shop;
@@ -54,24 +64,52 @@ export function pollJobProgress(
   shop: string,
   onUpdate: (data: Record<string, unknown>) => void,
   untilStatuses = ["COMPLETED", "FAILED", "CANCELLED"],
+  options?: { intervalMs?: number; maxPolls?: number },
 ) {
-  const interval = setInterval(async () => {
+  const intervalMs = options?.intervalMs ?? 2500;
+  const maxPolls = options?.maxPolls ?? 180;
+  let cancelled = false;
+  let pollCount = 0;
+  let intervalId: ReturnType<typeof setInterval> | null = null;
+
+  const cleanup = () => {
+    cancelled = true;
+    if (intervalId) clearInterval(intervalId);
+    intervalId = null;
+  };
+
+  const poll = async () => {
+    if (cancelled) return;
+    pollCount += 1;
     try {
       const data = await gqlRequest<{ job: Record<string, unknown> }>(
         QUERIES.job,
         { id: jobId },
         shop,
       );
+      if (cancelled) return;
       onUpdate(data.job);
       const status = data.job.status as string;
       if (untilStatuses.includes(status)) {
-        clearInterval(interval);
+        cleanup();
+        return;
+      }
+      if (pollCount >= maxPolls) {
+        onUpdate({
+          ...data.job,
+          status: "FAILED",
+          errorSummary: "Timed out waiting for the job to finish. Check the Jobs tab for status.",
+        });
+        cleanup();
       }
     } catch {
-      clearInterval(interval);
+      cleanup();
     }
-  }, 1200);
-  return () => clearInterval(interval);
+  };
+
+  void poll();
+  intervalId = setInterval(poll, intervalMs);
+  return cleanup;
 }
 
 export async function waitForJobStatus(
