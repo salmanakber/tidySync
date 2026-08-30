@@ -12,8 +12,6 @@ export default async function Page({
   const host = typeof params.host === "string" ? params.host : "";
   const embedded = params.embedded === "1" || params.embedded === "true";
   const forceShopify = Boolean(shop || host || embedded);
-  const apiKey =
-    process.env.SHOPIFY_API_KEY ?? process.env.NEXT_PUBLIC_SHOPIFY_API_KEY ?? "";
 
-  return <HomeGate forceShopify={forceShopify} apiKey={apiKey} />;
+  return <HomeGate forceShopify={forceShopify} />;
 }

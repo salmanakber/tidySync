@@ -21,42 +21,37 @@ export function DashboardSkeleton() {
   );
 }
 
-export function useShopifyBootstrap(apiKey: string) {
+/** Wait for App Bridge global from layout.tsx — do NOT inject the script here (async breaks Shopify). */
+export function useShopifyBootstrap() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (typeof document === "undefined") return;
+    if (typeof window === "undefined") return;
 
-    let meta = document.querySelector('meta[name="shopify-api-key"]') as HTMLMetaElement | null;
-    if (!meta) {
-      meta = document.createElement("meta");
-      meta.setAttribute("name", "shopify-api-key");
-      document.head.insertBefore(meta, document.head.firstChild);
-    }
-    meta.setAttribute("content", apiKey);
+    let cancelled = false;
+    let attempts = 0;
+    const maxAttempts = 40;
 
-    const existing = document.querySelector(
-      'script[src="https://cdn.shopify.com/shopifycloud/app-bridge.js"]',
-    );
-    if (!existing) {
-      const script = document.createElement("script");
-      script.src = "https://cdn.shopify.com/shopifycloud/app-bridge.js";
-      // Insert as early as possible after meta
-      if (meta.nextSibling) {
-        document.head.insertBefore(script, meta.nextSibling);
-      } else {
-        document.head.appendChild(script);
+    const check = () => {
+      if (cancelled) return;
+      attempts += 1;
+      if (window.shopify?.idToken) {
+        setReady(true);
+        return;
       }
-      script.onload = () => setReady(true);
-      script.onerror = () => setReady(true);
-    } else {
-      setReady(true);
-    }
+      if (attempts >= maxAttempts) {
+        // Proceed anyway — providers will retry idToken / fall back to OAuth check
+        setReady(true);
+        return;
+      }
+      window.setTimeout(check, 100);
+    };
 
-    // Fallback if already loaded
-    const t = window.setTimeout(() => setReady(true), 800);
-    return () => window.clearTimeout(t);
-  }, [apiKey]);
+    check();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return ready;
 }

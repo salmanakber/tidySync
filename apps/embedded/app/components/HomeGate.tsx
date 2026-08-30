@@ -6,8 +6,8 @@ import { Dashboard } from "./Dashboard";
 import { DashboardSkeleton, useShopifyBootstrap } from "./DashboardSkeleton";
 import { MarketingHome } from "./MarketingHome";
 
-export function ShopifyApp({ apiKey }: { apiKey: string }) {
-  const bridgeReady = useShopifyBootstrap(apiKey);
+export function ShopifyApp() {
+  const bridgeReady = useShopifyBootstrap();
 
   if (!bridgeReady) {
     return (
@@ -24,13 +24,7 @@ export function ShopifyApp({ apiKey }: { apiKey: string }) {
   );
 }
 
-export function HomeGate({
-  forceShopify,
-  apiKey,
-}: {
-  forceShopify: boolean;
-  apiKey: string;
-}) {
+export function HomeGate({ forceShopify }: { forceShopify: boolean }) {
   const [mode, setMode] = useState<"loading" | "shopify" | "marketing">(
     forceShopify ? "shopify" : "loading",
   );
@@ -65,7 +59,7 @@ export function HomeGate({
   }
 
   if (mode === "shopify") {
-    return <ShopifyApp apiKey={apiKey} />;
+    return <ShopifyApp />;
   }
 
   return <MarketingHome />;
