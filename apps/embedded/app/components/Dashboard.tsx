@@ -17,7 +17,6 @@ import {
   EmptyState,
   Modal,
   Select,
-  Spinner,
   Divider,
   Icon,
 } from "@shopify/polaris";
@@ -44,6 +43,7 @@ import { MappingEditor } from "./MappingEditor";
 import { FileDropzone } from "./FileDropzone";
 import { AiStudio } from "./AiStudio";
 import { DiffPreviewPanel } from "./DiffPreviewPanel";
+import { DashboardSkeleton } from "./DashboardSkeleton";
 import { useShop } from "../providers";
 
 interface Tenant {
@@ -360,15 +360,8 @@ export function Dashboard() {
 
   if (!shopReady || bootstrapping) {
     return (
-      <div className="tidysync-loading-shell">
-        <BlockStack gap="400" inlineAlign="center">
-          <Spinner accessibilityLabel="Loading TidySync" size="large" />
-          <Text as="p" variant="bodyMd" tone="subdued">
-            {authError === "Connecting to Shopify…"
-              ? "Connecting to Shopify…"
-              : "Loading your store workspace…"}
-          </Text>
-        </BlockStack>
+      <div className="tidysync-page-shell" style={{ padding: "16px 20px" }}>
+        <DashboardSkeleton />
       </div>
     );
   }

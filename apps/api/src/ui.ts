@@ -1,7 +1,7 @@
 import next from "next";
 import path from "node:path";
 import { parse as parseUrl } from "node:url";
-import type { Express, Request, Response } from "express";
+import express, { type Express, type Request, type Response } from "express";
 
 /** Serve embedded + admin inside the same HTTP server (no extra ports). */
 export async function attachUiApps(app: Express) {
@@ -31,7 +31,10 @@ export async function attachUiApps(app: Express) {
   // Admin routes first — must not fall through to embedded (shows merchant UI)
   app.all(/^\/admin(?:\/.*)?$/, serveAdmin);
 
-  // Everything else → Shopify embedded app
+  // Brand assets from repo /public (logo, etc.)
+  app.use("/images", express.static(path.join(root, "public/images")));
+
+  // Everything else → Shopify embedded app (+ marketing pages)
   app.use((req: Request, res: Response) => {
     serveEmbedded(req, res);
   });

@@ -15,9 +15,10 @@ In **App setup**:
 
 | Field | Value |
 |-------|-------|
-| App URL | `https://sync.tidyflowapp.com` |
-| Allowed redirection URL(s) | `https://sync.tidyflowapp.com/auth/callback` |
-| Embedded app | **Enabled** |
+| Privacy policy URL | `https://sync.tidyflowapp.com/privacy` |
+| Terms of service URL | `https://sync.tidyflowapp.com/terms` |
+| Docs / install | `https://sync.tidyflowapp.com/docs` |
+| Marketing homepage | `https://sync.tidyflowapp.com` (browser) — Shopify Admin still opens the embedded app |
 
 ## 3. API scopes
 
