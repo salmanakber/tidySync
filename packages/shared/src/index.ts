@@ -3,6 +3,17 @@ export const TIDYSYNC_APP_NAME = "TidySync";
 export { resolveRedisUrl } from "./redis-url";
 
 export {
+  IMPORT_REQUIRED_BY_RESOURCE,
+  isFieldMapped,
+  validateImportMappings,
+  applyImportDefaults,
+  type ImportFieldRequirement,
+  type ImportDefaults,
+  type ImportAiPolish,
+  type ImportMutationPlan,
+} from "./import-settings";
+
+export {
   buildDiffFromProducts,
   productMatchesFilter,
   computeAfterValue,

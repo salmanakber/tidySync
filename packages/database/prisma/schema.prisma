@@ -301,6 +301,7 @@ enum AiOperationType {
   CONTENT_REWRITE
   IMPACT_SUMMARY
   ANOMALY_DETECTION
+  PRODUCT_SEO_INSIGHT
 }
 
 // ─── Audit log ─────────────────────────────────────────────────────────────────

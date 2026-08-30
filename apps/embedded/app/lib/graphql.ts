@@ -130,7 +130,14 @@ export const QUERIES = {
     query Jobs($limit: Int) {
       jobs(limit: $limit) {
         id type status rowCount processedCount successCount failedCount
-        impactSummary errorSummary createdAt finishedAt fileName
+        impactSummary errorSummary createdAt finishedAt fileName nlPrompt
+      }
+    }
+  `,
+  catalogProducts: `
+    query CatalogProducts($first: Int, $query: String) {
+      catalogProducts(first: $first, query: $query) {
+        id title handle status featuredImageUrl
       }
     }
   `,
@@ -240,6 +247,27 @@ export const MUTATIONS = {
   contentRewrite: `
     mutation ContentRewrite($brandVoice: String!) {
       runContentRewrite(brandVoice: $brandVoice) { id status }
+    }
+  `,
+  analyzeProductSeo: `
+    mutation AnalyzeProductSeo($productId: ID!) {
+      analyzeProductSeo(productId: $productId) {
+        productId title handle featuredImageUrl creditsUsed aiExplanation
+        metrics {
+          overallScore titleScore descriptionScore metaScore mediaScore readabilityScore
+          titleLength metaDescriptionLength descriptionWordCount imageCount imagesWithAlt
+          hasCustomSeoTitle hasCustomSeoDescription
+          checks { id label status detail score }
+        }
+      }
+    }
+  `,
+  polishImportSample: `
+    mutation PolishImportSample($jobId: ID!, $brandVoice: String) {
+      polishImportSample(jobId: $jobId, brandVoice: $brandVoice) {
+        creditsUsed
+        rows { rowIndex field before after }
+      }
     }
   `,
   createSchedule: `

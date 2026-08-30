@@ -22,12 +22,12 @@ export interface ImportProgressState {
 }
 
 const PHASE_LABELS: Record<ImportLoaderPhase, string> = {
-  uploading: "Uploading file",
-  analyzing: "Scanning catalog",
-  mapping: "Matching columns with AI",
-  importing: "Importing products",
-  complete: "Import complete",
-  failed: "Import failed",
+  uploading: "Uploading",
+  analyzing: "Reading file",
+  mapping: "Column mapping",
+  importing: "Writing to Shopify",
+  complete: "Done",
+  failed: "Failed",
 };
 
 function formatCount(n: number) {
@@ -35,36 +35,49 @@ function formatCount(n: number) {
 }
 
 export function ImportProgressLoader({ state }: { state: ImportProgressState }) {
+  const rowTotal = state.rowCount ?? 0;
+  const success = state.successCount ?? 0;
+  const failed = state.failedCount ?? 0;
+  const hasRealProgress = state.phase === "importing" && rowTotal > 0;
+
   const pct = (() => {
-    if (state.phase === "importing" && state.rowCount && state.rowCount > 0) {
-      return Math.min(100, Math.round(((state.processedCount ?? 0) / state.rowCount) * 100));
-    }
-    if (state.phase === "analyzing" && state.rowCount && state.rowCount > 0) {
-      return 100;
-    }
-    if (state.phase === "mapping") return 85;
-    if (state.phase === "uploading") return 35;
     if (state.phase === "complete") return 100;
-    return 0;
+    if (state.phase === "failed") return 0;
+    if (hasRealProgress) return Math.min(100, Math.round((success / rowTotal) * 100));
+    return null;
   })();
 
   const headline = (() => {
-    if (state.phase === "importing" && state.rowCount) {
-      return `${formatCount(state.processedCount ?? 0)} of ${formatCount(state.rowCount)} updated`;
+    if (state.phase === "importing" && rowTotal > 0) {
+      return `${formatCount(success)} of ${formatCount(rowTotal)} in Shopify`;
     }
-    if (state.phase === "analyzing" && state.rowCount) {
-      return `${formatCount(state.rowCount)} products found`;
+    if (state.phase === "importing") {
+      return "Working on your catalog…";
+    }
+    if (state.phase === "analyzing" && rowTotal > 0) {
+      return `${formatCount(rowTotal)} rows detected`;
+    }
+    if (state.phase === "complete") {
+      return failed > 0
+        ? `${formatCount(success)} added · ${formatCount(failed)} failed`
+        : `${formatCount(success)} products ready in Shopify`;
     }
     return PHASE_LABELS[state.phase];
   })();
 
+  const showOrbitPct = pct !== null;
+
   return (
-    <div className="tidysync-import-loader" role="status" aria-live="polite">
+    <div className="tidysync-import-loader tidysync-import-loader--calm" role="status" aria-live="polite">
       <div className="tidysync-import-loader-orbit">
         <div className="tidysync-import-loader-ring" />
         <div className="tidysync-import-loader-ring tidysync-import-loader-ring--delay" />
         <div className="tidysync-import-loader-core">
-          <span className="tidysync-import-loader-pct">{pct}%</span>
+          {showOrbitPct ? (
+            <span className="tidysync-import-loader-pct">{pct}%</span>
+          ) : (
+            <span className="tidysync-import-loader-dot" aria-hidden="true" />
+          )}
         </div>
       </div>
 
@@ -82,31 +95,30 @@ export function ImportProgressLoader({ state }: { state: ImportProgressState }) 
         )}
       </div>
 
-      {state.phase === "importing" && (
+      {(state.phase === "importing" || state.phase === "complete") && (
         <div className="tidysync-import-loader-stats">
           <div className="tidysync-import-stat is-success">
-            <span className="tidysync-import-stat-value">{formatCount(state.successCount ?? 0)}</span>
-            <span className="tidysync-import-stat-label">Imported</span>
+            <span className="tidysync-import-stat-value">{formatCount(success)}</span>
+            <span className="tidysync-import-stat-label">In Shopify</span>
           </div>
           <div className="tidysync-import-stat is-failed">
-            <span className="tidysync-import-stat-value">{formatCount(state.failedCount ?? 0)}</span>
+            <span className="tidysync-import-stat-value">{formatCount(failed)}</span>
             <span className="tidysync-import-stat-label">Failed</span>
           </div>
         </div>
       )}
 
       <div className="tidysync-import-loader-track">
-        <div className="tidysync-import-loader-bar" style={{ width: `${pct}%` }} />
+        {pct !== null ? (
+          <div className="tidysync-import-loader-bar" style={{ width: `${pct}%` }} />
+        ) : (
+          <div className="tidysync-import-loader-bar tidysync-import-loader-bar--pulse" />
+        )}
       </div>
 
-      <div className="tidysync-import-loader-steps">
+      <div className="tidysync-import-loader-steps tidysync-import-loader-steps--compact">
         {(["uploading", "analyzing", "mapping", "importing"] as ImportLoaderPhase[]).map((step) => {
-          const active =
-            state.phase === step ||
-            (state.phase === "complete" && step === "importing") ||
-            (["mapping", "importing", "complete"].includes(state.phase) &&
-              ["uploading", "analyzing"].includes(step)) ||
-            (["importing", "complete"].includes(state.phase) && step === "mapping");
+          const active = state.phase === step;
           const done =
             state.phase === "complete" ||
             (state.phase === "importing" && step !== "importing") ||

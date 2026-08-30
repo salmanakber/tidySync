@@ -1,10 +1,13 @@
 import { prisma, auditRepository, scheduledJobRepository, featureFlagRepository, jobRepository, type JobType } from "@tidysync/database";
 import { getShopifyFieldsForResource, parseNlBulkEdit, type ResourceType } from "@tidysync/shared";
-import { inferColumnMappingsWithAi, parseNlBulkEditWithAi, generateImpactSummary } from "@tidysync/ai";
+import { inferColumnMappingsWithAi, parseNlBulkEditWithAi, generateImpactSummary, generateProductSeoInsight, rewriteProductContent } from "@tidysync/ai";
 import { consumeAiCredit } from "../services/tenant";
 import { catalogScanQueue, bulkEditQueue } from "../queues";
 import { type GraphQLContext, requireMerchant, requireActiveMerchant, requireAdmin } from "../context";
 import { parseFileHeaders } from "../services/file-parser";
+import { parseFilePreview } from "../services/file-parser";
+import { merchantGraphqlRequest } from "../shopify/client";
+import { analyzeProductSeoMetrics } from "../services/product-seo";
 
 export const extensionTypeDefs = `#graphql
   type AuditLog {
@@ -48,10 +51,66 @@ export const extensionTypeDefs = `#graphql
     description: String
   }
 
+  type CatalogProduct {
+    id: ID!
+    title: String!
+    handle: String
+    status: String
+    featuredImageUrl: String
+  }
+
+  type ProductSeoCheck {
+    id: String!
+    label: String!
+    status: String!
+    detail: String!
+    score: Int!
+  }
+
+  type ProductSeoMetrics {
+    overallScore: Int!
+    titleScore: Int!
+    descriptionScore: Int!
+    metaScore: Int!
+    mediaScore: Int!
+    readabilityScore: Int!
+    titleLength: Int!
+    metaDescriptionLength: Int!
+    descriptionWordCount: Int!
+    imageCount: Int!
+    imagesWithAlt: Int!
+    hasCustomSeoTitle: Boolean!
+    hasCustomSeoDescription: Boolean!
+    checks: [ProductSeoCheck!]!
+  }
+
+  type ProductSeoInsight {
+    productId: ID!
+    title: String!
+    handle: String
+    featuredImageUrl: String
+    metrics: ProductSeoMetrics!
+    aiExplanation: String!
+    creditsUsed: Int!
+  }
+
+  type ImportPolishRow {
+    rowIndex: Int!
+    field: String!
+    before: String!
+    after: String!
+  }
+
+  type ImportPolishSample {
+    rows: [ImportPolishRow!]!
+    creditsUsed: Int!
+  }
+
   extend type Query {
     auditLogs(limit: Int = 50): [AuditLog!]!
     scheduledJobs: [ScheduledJob!]!
     notificationSettings: NotificationSettings
+    catalogProducts(first: Int = 24, query: String): [CatalogProduct!]!
     adminAuditLogs(limit: Int = 100): [AuditLog!]!
     adminFeatureFlags: [FeatureFlag!]!
   }
@@ -59,6 +118,8 @@ export const extensionTypeDefs = `#graphql
   extend type Mutation {
     runCatalogHealthScan: Job!
     runContentRewrite(brandVoice: String!): Job!
+    polishImportSample(jobId: ID!, brandVoice: String): ImportPolishSample!
+    analyzeProductSeo(productId: ID!): ProductSeoInsight!
     createScheduledJob(name: String!, jobType: JobType!, schedule: String!, config: JSON): ScheduledJob!
     deleteScheduledJob(id: ID!): Boolean!
     updateNotificationSettings(
@@ -86,6 +147,56 @@ export const extensionResolvers = {
     notificationSettings: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
       const { tenantId } = requireMerchant(ctx);
       return prisma.notificationSetting.findUnique({ where: { tenantId } });
+    },
+    catalogProducts: async (
+      _: unknown,
+      args: { first?: number; query?: string },
+      ctx: GraphQLContext,
+    ) => {
+      const { shop } = requireActiveMerchant(ctx);
+      const first = Math.min(args.first ?? 24, 50);
+      const response = (await merchantGraphqlRequest(
+        shop,
+        ctx.sessionToken,
+        `#graphql
+          query CatalogProducts($first: Int!, $query: String) {
+            products(first: $first, query: $query) {
+              edges {
+                node {
+                  id
+                  title
+                  handle
+                  status
+                  featuredImage { url }
+                }
+              }
+            }
+          }`,
+        { first, query: args.query ?? null },
+      )) as {
+        data?: {
+          products?: {
+            edges: Array<{
+              node: {
+                id: string;
+                title: string;
+                handle?: string;
+                status?: string;
+                featuredImage?: { url?: string } | null;
+              };
+            }>;
+          };
+        };
+      };
+
+      const edges = response.data?.products?.edges ?? [];
+      return edges.map(({ node }) => ({
+        id: node.id,
+        title: node.title,
+        handle: node.handle ?? null,
+        status: node.status ?? "ACTIVE",
+        featuredImageUrl: node.featuredImage?.url ?? null,
+      }));
     },
     adminAuditLogs: async (_: unknown, args: { limit?: number }, ctx: GraphQLContext) => {
       requireAdmin(ctx);
@@ -119,6 +230,147 @@ export const extensionResolvers = {
       });
       await bulkEditQueue.add("content-rewrite", { jobId: job.id, tenantId, shop });
       return { ...job, lineItems: [] };
+    },
+    polishImportSample: async (
+      _: unknown,
+      args: { jobId: string; brandVoice?: string },
+      ctx: GraphQLContext,
+    ) => {
+      const { tenantId } = requireActiveMerchant(ctx);
+      await consumeAiCredit(tenantId, 1);
+
+      const job = await prisma.job.findFirst({ where: { id: args.jobId, tenantId } });
+      if (!job?.filePath) throw new Error("Import job not found");
+
+      const previewRows = await parseFilePreview(job.filePath, 5);
+      const plan = job.mutationPlan as { mappings?: Array<{ sourceColumn: string; targetField: string }> } | null;
+      const mappings = plan?.mappings ?? [];
+      const descMapping = mappings.find((m) => m.targetField === "descriptionHtml");
+      const titleMapping = mappings.find((m) => m.targetField === "title");
+      const voice = args.brandVoice ?? "professional, helpful, SEO-optimized";
+
+      const samples: Array<{ rowIndex: number; field: string; before: string; after: string }> = [];
+
+      for (let i = 0; i < previewRows.length; i++) {
+        const row = previewRows[i];
+        const title = titleMapping ? String(row[titleMapping.sourceColumn] ?? "") : "";
+        const description = descMapping ? String(row[descMapping.sourceColumn] ?? "") : "";
+        if (!description.trim()) continue;
+
+        const polished = await rewriteProductContent(
+          [{ title: title || `Product ${i + 1}`, description }],
+          voice,
+        );
+        samples.push({
+          rowIndex: i,
+          field: "descriptionHtml",
+          before: description.slice(0, 500),
+          after: (polished[0]?.description ?? description).slice(0, 500),
+        });
+      }
+
+      if (samples.length === 0) {
+        throw new Error("Map a description column first, then preview AI polish.");
+      }
+
+      await prisma.aiOperation.create({
+        data: {
+          tenantId,
+          jobId: job.id,
+          operationType: "CONTENT_REWRITE",
+          prompt: "import-polish-sample",
+          generatedPlan: { samples } as object,
+          creditsConsumed: 1,
+          modelUsed: "import-polish",
+        },
+      });
+
+      return { rows: samples, creditsUsed: 1 };
+    },
+    analyzeProductSeo: async (_: unknown, args: { productId: string }, ctx: GraphQLContext) => {
+      const { tenantId, shop } = requireActiveMerchant(ctx);
+      await consumeAiCredit(tenantId, 1);
+
+      const response = (await merchantGraphqlRequest(
+        shop,
+        ctx.sessionToken,
+        `#graphql
+          query ProductSeoDetail($id: ID!) {
+            product(id: $id) {
+              id
+              title
+              handle
+              descriptionHtml
+              status
+              seo { title description }
+              featuredImage { url altText }
+              images(first: 20) {
+                edges { node { url altText } }
+              }
+            }
+          }`,
+        { id: args.productId },
+      )) as {
+        data?: {
+          product?: {
+            id: string;
+            title: string;
+            handle?: string;
+            descriptionHtml?: string | null;
+            seo?: { title?: string | null; description?: string | null } | null;
+            featuredImage?: { url?: string | null; altText?: string | null } | null;
+            images?: { edges: Array<{ node: { url?: string | null; altText?: string | null } }> };
+          } | null;
+        };
+      };
+
+      const product = response.data?.product;
+      if (!product) throw new Error("Product not found in your Shopify catalog.");
+
+      const images =
+        product.images?.edges?.map((e) => ({
+          url: e.node.url,
+          altText: e.node.altText,
+        })) ?? [];
+
+      const metrics = analyzeProductSeoMetrics({
+        title: product.title,
+        descriptionHtml: product.descriptionHtml,
+        seo: product.seo,
+        featuredImage: product.featuredImage,
+        images,
+      });
+
+      const aiExplanation = await generateProductSeoInsight(
+        {
+          title: product.title,
+          handle: product.handle,
+          seo: product.seo,
+          descriptionWordCount: metrics.descriptionWordCount,
+        },
+        metrics as unknown as Record<string, unknown>,
+      );
+
+      await prisma.aiOperation.create({
+        data: {
+          tenantId,
+          operationType: "PRODUCT_SEO_INSIGHT",
+          prompt: product.id,
+          generatedPlan: metrics as object,
+          creditsConsumed: 1,
+          modelUsed: "seo-insight",
+        },
+      });
+
+      return {
+        productId: product.id,
+        title: product.title,
+        handle: product.handle ?? null,
+        featuredImageUrl: product.featuredImage?.url ?? null,
+        metrics,
+        aiExplanation,
+        creditsUsed: 1,
+      };
     },
     createScheduledJob: async (
       _: unknown,

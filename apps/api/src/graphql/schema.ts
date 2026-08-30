@@ -4,7 +4,9 @@ import {
   buildImpactSummary,
   detectPlatformFromHeaders,
   detectPlatformWithConfidence,
+  validateImportMappings,
   resolveRedisUrl,
+  type ImportMutationPlan,
 } from "@tidysync/shared";
 import { consumeAiCredit } from "../services/tenant";
 import {
@@ -215,7 +217,7 @@ export const typeDefs = `#graphql
     health: String!
     meTenant: Tenant
     availablePlans: [Plan!]!
-    jobs(limit: Int = 20): [Job!]!
+    jobs(limit: Int = 8): [Job!]!
     job(id: ID!): Job
     platformProfiles: [PlatformProfile!]!
     mappingTemplates: [MappingTemplate!]!
@@ -285,7 +287,7 @@ export const resolvers = {
     },
     jobs: async (_: unknown, args: { limit?: number }, ctx: GraphQLContext) => {
       const { tenantId } = requireMerchant(ctx);
-      const jobs = await jobRepository.listForTenant(tenantId, args.limit ?? 20);
+      const jobs = await jobRepository.listForTenant(tenantId, args.limit ?? 8);
       return jobs.map(mapJob);
     },
     job: async (_: unknown, args: { id: string }, ctx: GraphQLContext) => {
@@ -540,14 +542,30 @@ export const resolvers = {
       const job = await prisma.job.findFirst({ where: { id: args.jobId, tenantId } });
       if (!job?.filePath) throw new Error("Job not found");
 
+      const raw = args.mappings as
+        | Array<{ sourceColumn: string; targetField: string }>
+        | ImportMutationPlan;
+      const mappings = Array.isArray(raw) ? raw : raw.mappings ?? [];
+      const defaults = Array.isArray(raw) ? undefined : raw.defaults;
+      const aiPolish = Array.isArray(raw) ? undefined : raw.aiPolish;
+
+      if (aiPolish?.descriptions || aiPolish?.titles) {
+        await consumeAiCredit(tenantId, 1);
+      }
+
       const previewRows = await parseFilePreview(job.filePath, 100);
-      const mappings = args.mappings as Array<{ sourceColumn: string; targetField: string }>;
       const mappedCount = mappings.filter((m) => m.targetField).length;
       if (mappedCount === 0) {
         throw new Error("Map at least one column to a Shopify field before previewing.");
       }
       const totalRows = job.rowCount > 0 ? job.rowCount : previewRows.length;
       const resType = job.resourceType ?? "products";
+      const validation = validateImportMappings(resType, mappings, defaults);
+      if (!validation.ok) {
+        throw new Error(
+          `Required fields missing: ${validation.missing.map((m) => m.label).join(", ")}. Map a column or set a default value.`,
+        );
+      }
 
       const diffRows: Array<{
         resourceType: string;
@@ -585,7 +603,11 @@ export const resolvers = {
         where: { id: job.id },
         data: {
           status: "PREVIEW",
-          mutationPlan: { mappings },
+          mutationPlan: {
+            mappings,
+            defaults: defaults ?? null,
+            aiPolish: aiPolish ?? null,
+          } as object,
           diffPreview: { rows: diffRows, totalChanges: diffRows.length, anomalies },
           impactSummary,
           rowCount: totalRows,

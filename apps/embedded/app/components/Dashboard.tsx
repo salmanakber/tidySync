@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Page,
   Layout,
@@ -46,6 +46,8 @@ import { DiffPreviewPanel } from "./DiffPreviewPanel";
 import { DashboardSkeleton } from "./DashboardSkeleton";
 import { PlatformPicker } from "./PlatformPicker";
 import { ImportProgressLoader, type ImportProgressState } from "./ImportProgressLoader";
+import { ProductSeoStudio } from "./ProductSeoStudio";
+import { subscribeToJobProgress } from "../lib/job-events";
 import { useShop } from "../providers";
 
 const IMPORT_PLATFORMS = [
@@ -194,6 +196,11 @@ export function Dashboard() {
   const [notifyEmail, setNotifyEmail] = useState("");
   const [creditTopUp, setCreditTopUp] = useState("10");
   const [undoingId, setUndoingId] = useState<string | null>(null);
+  const jobEventCleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => jobEventCleanupRef.current?.();
+  }, []);
 
   const loadData = useCallback(async () => {
     if (!shop) return;
@@ -203,7 +210,7 @@ export function Dashboard() {
       if (tenantData.meTenant?.shopDomain) {
         setSessionShop(tenantData.meTenant.shopDomain);
       }
-      const jobsData = await gqlRequest<{ jobs: Job[] }>(QUERIES.jobs, { limit: 20 }, shop);
+      const jobsData = await gqlRequest<{ jobs: Job[] }>(QUERIES.jobs, { limit: 8 }, shop);
       setJobs(jobsData.jobs);
       const plansData = await gqlRequest<{ availablePlans: PlanOption[] }>(QUERIES.availablePlans, {}, shop);
       setPlans(plansData.availablePlans);
@@ -227,6 +234,59 @@ export function Dashboard() {
       }
     }
   }, [shop]);
+
+  const beginJobProgress = useCallback(
+    (
+      jobId: string,
+      meta: { fileName?: string; rowCount?: number; isImport?: boolean },
+    ) => {
+      jobEventCleanupRef.current?.();
+      setImportProgress({
+        phase: "importing",
+        jobId,
+        fileName: meta.fileName,
+        rowCount: meta.rowCount ?? 0,
+        successCount: 0,
+        failedCount: 0,
+        processedCount: 0,
+        message: meta.isImport
+          ? "Creating products in your Shopify store…"
+          : "Applying your approved changes…",
+      });
+
+      jobEventCleanupRef.current = subscribeToJobProgress(
+        jobId,
+        shop,
+        (ev) => {
+          const done = ["COMPLETED", "FAILED", "CANCELLED"].includes(ev.status);
+          const rowTotal = ev.rowCount > 0 ? ev.rowCount : meta.rowCount ?? 0;
+          setImportProgress({
+            phase: done ? (ev.status === "COMPLETED" ? "complete" : "failed") : "importing",
+            jobId,
+            fileName: meta.fileName,
+            rowCount: rowTotal,
+            successCount: ev.successCount,
+            failedCount: ev.failedCount,
+            processedCount: ev.successCount,
+            message: done
+              ? ev.status === "COMPLETED"
+                ? `${ev.successCount.toLocaleString()} in Shopify · ${ev.failedCount} failed`
+                : "Some rows could not be processed — see Jobs for details"
+              : rowTotal > 0
+                ? `${ev.successCount.toLocaleString()} of ${rowTotal.toLocaleString()} live in Shopify`
+                : `${ev.successCount.toLocaleString()} products added so far`,
+          });
+          if (done) {
+            jobEventCleanupRef.current = null;
+            window.setTimeout(() => setImportProgress(null), 2800);
+            void loadData();
+          }
+        },
+        () => void loadData(),
+      );
+    },
+    [shop, loadData],
+  );
 
   useEffect(() => {
     if (!shopReady) return;
@@ -370,6 +430,7 @@ export function Dashboard() {
   };
 
   const handleApprove = async (jobId: string) => {
+    const previewMeta = selectedJob;
     setApproveLoading(true);
     setError(null);
     setNotice(null);
@@ -379,9 +440,28 @@ export function Dashboard() {
 
     try {
       await gqlRequest(MUTATIONS.approveJob, { jobId }, shop);
-      setNotice(
-        "Changes approved and queued. Open the Jobs tab and tap Refresh to see progress.",
-      );
+
+      const jobDetail = await gqlRequest<{ job: Job }>(QUERIES.job, { id: jobId }, shop);
+      const job = jobDetail.job;
+      const isImport = job.type === "IMPORT";
+      const tracksLive =
+        job.type === "IMPORT" || job.type === "BULK_EDIT";
+
+      if (tracksLive) {
+        beginJobProgress(jobId, {
+          fileName: job.fileName ?? job.nlPrompt ?? previewMeta?.fileName,
+          rowCount: job.rowCount,
+          isImport,
+        });
+        setNotice(
+          isImport
+            ? "Import started — watch live counts below."
+            : "Changes are applying — watch live progress below.",
+        );
+      } else {
+        setNotice("Job approved and queued.");
+      }
+
       void loadData();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Approve failed");
@@ -428,6 +508,7 @@ export function Dashboard() {
     { id: "import", content: "Import" },
     { id: "export", content: "Export" },
     { id: "ai", content: "AI Edit" },
+    { id: "seo", content: "SEO" },
     { id: "health", content: "Health" },
     { id: "audit", content: "Audit" },
     { id: "schedules", content: "Schedules" },
@@ -436,8 +517,8 @@ export function Dashboard() {
 
   useEffect(() => {
     if (!shop) return;
-    if (tab === 6) void loadAudit();
-    if (tab === 7) void loadSchedules();
+    if (tab === 7) void loadAudit();
+    if (tab === 8) void loadSchedules();
   }, [tab, shop]);
 
   const loadAudit = async () => {
@@ -542,7 +623,7 @@ export function Dashboard() {
             <Banner
               tone="warning"
               title="Complete your subscription"
-              action={{ content: "View plans", onAction: () => setTab(8) }}
+              action={{ content: "View plans", onAction: () => setTab(9) }}
             >
               Choose a plan to unlock imports, exports, and AI bulk edits.
             </Banner>
@@ -638,6 +719,15 @@ export function Dashboard() {
                           <div className="tidysync-action-icon">
                             <Icon source={ProductIcon} />
                           </div>
+                          <p className="tidysync-action-title">Product SEO</p>
+                          <p className="tidysync-action-desc">
+                            Deep SEO scores, charts, and AI strategist briefings per product (1 credit).
+                          </p>
+                        </button>
+                        <button type="button" className="tidysync-action-card" onClick={() => setTab(6)}>
+                          <div className="tidysync-action-icon">
+                            <Icon source={ProductIcon} />
+                          </div>
                           <p className="tidysync-action-title">Catalog health</p>
                           <p className="tidysync-action-desc">
                             Scan for missing images, thin content, and pricing anomalies.
@@ -656,17 +746,19 @@ export function Dashboard() {
                         </InlineStack>
                         {runningJobs.map((job) => {
                           const pct =
-                            job.rowCount > 0 ? Math.round((job.processedCount / job.rowCount) * 100) : 0;
+                            job.rowCount > 0
+                              ? Math.round((job.successCount / job.rowCount) * 100)
+                              : 0;
                           return (
                             <div key={job.id} className="tidysync-job-live is-running">
                               <InlineStack align="space-between" blockAlign="center">
                                 <BlockStack gap="100">
                                   <Text as="span" variant="bodyMd" fontWeight="semibold">
-                                    {job.type} · {job.fileName ?? "In progress"}
+                                    {job.type} · {job.fileName ?? job.nlPrompt ?? "In progress"}
                                   </Text>
                                   <Text as="span" variant="bodySm" tone="subdued">
-                                    {job.processedCount.toLocaleString()} / {job.rowCount.toLocaleString()}{" "}
-                                    records
+                                    {job.successCount.toLocaleString()} in Shopify /{" "}
+                                    {job.rowCount.toLocaleString()} total
                                   </Text>
                                 </BlockStack>
                                 <Text as="span" variant="headingSm">
@@ -711,7 +803,7 @@ export function Dashboard() {
                           <p>Import a catalog or describe a bulk change to get started.</p>
                         </EmptyState>
                       ) : (
-                        jobs.slice(0, 5).map((job) => (
+                        jobs.slice(0, 3).map((job) => (
                           <div
                             key={job.id}
                             className={`tidysync-job-live${undoingId === job.id ? " is-undoing" : ""}`}
@@ -748,7 +840,7 @@ export function Dashboard() {
                     <div>
                       <p className="tidysync-section-title">Jobs</p>
                       <p className="tidysync-section-sub">
-                        Live counters update every few seconds while a job is running.
+                        Showing your 8 most recent jobs. Progress reflects products live in Shopify.
                       </p>
                     </div>
                     {jobs.length === 0 ? (
@@ -786,14 +878,13 @@ export function Dashboard() {
                                   <ProgressBar
                                     progress={
                                       job.rowCount > 0
-                                        ? (job.processedCount / job.rowCount) * 100
+                                        ? (job.successCount / job.rowCount) * 100
                                         : 0
                                     }
                                     size="small"
                                   />
                                   <Text as="span" variant="bodySm" tone="subdued">
-                                    {job.processedCount}/{job.rowCount} · ✓{job.successCount} · ✕
-                                    {job.failedCount}
+                                    {job.successCount}/{job.rowCount} in Shopify · ✕{job.failedCount}
                                   </Text>
                                 </BlockStack>
                               ) : (
@@ -937,6 +1028,13 @@ export function Dashboard() {
                 )}
 
                 {tab === 5 && (
+                  <ProductSeoStudio
+                    shop={shop}
+                    creditsRemaining={tenant?.plan?.aiCreditsRemaining}
+                  />
+                )}
+
+                {tab === 6 && (
                   <BlockStack gap="500">
                     <div>
                       <p className="tidysync-section-title">Catalog health</p>
@@ -1029,7 +1127,7 @@ export function Dashboard() {
                   </BlockStack>
                 )}
 
-                {tab === 6 && (
+                {tab === 7 && (
                   <BlockStack gap="400">
                     <div>
                       <p className="tidysync-section-title">Audit log</p>
@@ -1072,7 +1170,7 @@ export function Dashboard() {
                   </BlockStack>
                 )}
 
-                {tab === 7 && (
+                {tab === 8 && (
                   <BlockStack gap="500">
                     <div>
                       <p className="tidysync-section-title">Schedules</p>
@@ -1184,7 +1282,7 @@ export function Dashboard() {
                   </BlockStack>
                 )}
 
-                {tab === 8 && (
+                {tab === 9 && (
                   <BlockStack gap="500">
                     <div className="tidysync-billing-hero">
                       <InlineStack align="space-between" blockAlign="start" wrap>

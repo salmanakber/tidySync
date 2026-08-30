@@ -690,6 +690,144 @@ body {
   border-radius: 0 0 16px 16px;
 }
 
+.tidysync-import-loader--calm .tidysync-import-loader-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #008060;
+  animation: tidysync-pulse-dot 1.2s ease-in-out infinite;
+}
+
+.tidysync-import-loader-bar--pulse {
+  width: 40% !important;
+  animation: tidysync-bar-slide 1.8s ease-in-out infinite;
+}
+
+.tidysync-import-loader-steps--compact .tidysync-import-step {
+  font-size: 11px;
+}
+
+@keyframes tidysync-pulse-dot {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes tidysync-bar-slide {
+  0% { transform: translateX(-10%); }
+  50% { transform: translateX(120%); }
+  100% { transform: translateX(-10%); }
+}
+
+.tidysync-seo-studio { display: flex; flex-direction: column; gap: 20px; }
+.tidysync-seo-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.tidysync-seo-layout { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 20px; min-height: 480px; }
+.tidysync-seo-product-list { display: flex; flex-direction: column; gap: 8px; max-height: 620px; overflow-y: auto; padding-right: 4px; }
+.tidysync-seo-product-card {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  border: 1px solid #e3e3e3; border-radius: 12px; background: #fff; cursor: pointer; text-align: left;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.tidysync-seo-product-card:hover, .tidysync-seo-product-card.is-selected {
+  border-color: #008060; box-shadow: 0 4px 14px rgba(0, 128, 96, 0.12);
+}
+.tidysync-seo-product-thumb { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex-shrink: 0; }
+.tidysync-seo-product-thumb--empty { background: linear-gradient(135deg, #f0f1f3, #e4e5e7); }
+.tidysync-seo-product-meta { flex: 1; min-width: 0; }
+.tidysync-seo-product-cta { font-size: 11px; color: #6d7175; background: #f6f6f7; padding: 4px 8px; border-radius: 999px; }
+.tidysync-seo-insight-panel { background: #fff; border: 1px solid #e3e3e3; border-radius: 16px; padding: 24px; min-height: 480px; }
+.tidysync-seo-insight-empty, .tidysync-seo-insight-loading, .tidysync-seo-list-loading {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  min-height: 320px; text-align: center;
+}
+.tidysync-seo-score-grid { display: grid; grid-template-columns: auto 1fr; gap: 24px; align-items: center; }
+.tidysync-seo-ring { position: relative; width: 140px; height: 140px; }
+.tidysync-seo-ring-svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.tidysync-seo-ring-bg { fill: none; stroke: #e4e5e7; stroke-width: 10; }
+.tidysync-seo-ring-progress { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray 0.6s ease; }
+.tidysync-seo-ring.is-success .tidysync-seo-ring-progress { stroke: #008060; }
+.tidysync-seo-ring.is-warning .tidysync-seo-ring-progress { stroke: #b98900; }
+.tidysync-seo-ring.is-critical .tidysync-seo-ring-progress { stroke: #d72c0d; }
+.tidysync-seo-ring-label { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.tidysync-seo-ring-value { font-size: 36px; font-weight: 700; line-height: 1; color: #202223; }
+.tidysync-seo-ring-sub { font-size: 12px; color: #6d7175; }
+.tidysync-seo-metrics-stack { display: flex; flex-direction: column; gap: 12px; }
+.tidysync-seo-metric-track { height: 8px; background: #f1f2f3; border-radius: 999px; overflow: hidden; margin-top: 6px; }
+.tidysync-seo-metric-fill { height: 100%; border-radius: 999px; transition: width 0.5s ease; }
+.tidysync-seo-metric-fill.is-success { background: #008060; }
+.tidysync-seo-metric-fill.is-warning { background: #b98900; }
+.tidysync-seo-metric-fill.is-critical { background: #d72c0d; }
+.tidysync-seo-kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.tidysync-seo-kpi { background: #f6f6f7; border-radius: 12px; padding: 14px; text-align: center; }
+.tidysync-seo-kpi-value { display: block; font-size: 22px; font-weight: 700; color: #202223; }
+.tidysync-seo-kpi-label { font-size: 11px; color: #6d7175; }
+.tidysync-seo-check { padding: 10px 12px; border-radius: 10px; background: #fafbfb; border: 1px solid #e3e3e3; }
+.tidysync-seo-ai-panel { background: linear-gradient(135deg, #f0faf6 0%, #f6f6f7 100%); border: 1px solid #c9e8dc; border-radius: 14px; padding: 18px 20px; }
+.tidysync-seo-ai-body { margin-top: 12px; }
+.tidysync-seo-ai-line { margin: 0 0 8px; font-size: 14px; line-height: 1.55; color: #202223; }
+.tidysync-seo-insight-image { width: 72px; height: 72px; border-radius: 12px; object-fit: cover; }
+.tidysync-seo-error { padding: 10px 14px; background: #fff4f4; border: 1px solid #fecaca; border-radius: 10px; }
+
+.tidysync-mapping-required,
+.tidysync-mapping-defaults,
+.tidysync-mapping-ai-polish {
+  padding: 16px;
+  border: 1px solid #e3e3e3;
+  border-radius: 14px;
+  background: #fafbfb;
+}
+
+.tidysync-required-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.tidysync-required-item.is-ok { border-left: 3px solid #008060; padding-left: 10px; }
+.tidysync-required-item.is-missing { border-left: 3px solid #d72c0d; padding-left: 10px; }
+
+.tidysync-defaults-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.tidysync-polish-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.tidysync-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #202223;
+}
+
+.tidysync-polish-samples {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tidysync-polish-sample {
+  padding: 12px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid #e3e3e3;
+}
+
+@media (max-width: 900px) {
+  .tidysync-seo-layout { grid-template-columns: 1fr; }
+  .tidysync-seo-kpi-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tidysync-enter,
   .tidysync-diff-row,

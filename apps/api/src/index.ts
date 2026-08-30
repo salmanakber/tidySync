@@ -263,7 +263,9 @@ app.get("/download/:jobId", async (req, res) => {
 });
 
 app.get("/jobs/:jobId/events", async (req, res) => {
-  const shop = req.headers["x-tidysync-shop"] as string | undefined;
+  const shop =
+    (req.headers["x-tidysync-shop"] as string | undefined) ??
+    (req.query.shop as string | undefined);
   if (!shop) {
     res.status(401).end();
     return;

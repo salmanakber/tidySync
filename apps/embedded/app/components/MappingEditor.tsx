@@ -13,6 +13,12 @@ import {
   ProgressBar,
 } from "@shopify/polaris";
 import { gqlRequest, MUTATIONS } from "../lib/graphql";
+import {
+  IMPORT_REQUIRED_BY_RESOURCE,
+  isFieldMapped,
+  validateImportMappings,
+  type ImportDefaults,
+} from "@tidysync/shared/import-settings";
 
 interface MappingRow {
   sourceColumn: string;
@@ -34,7 +40,7 @@ const PRODUCT_TARGETS = [
   { label: "variants.price", value: "variants.price" },
   { label: "variants.compareAtPrice", value: "variants.compareAtPrice" },
   { label: "variants.inventoryQuantity", value: "variants.inventoryQuantity" },
-  { label: "variants.weight", value: "variants.weight" },
+  { label: "variants.barcode", value: "variants.barcode" },
   { label: "images", value: "images" },
 ];
 
@@ -126,7 +132,37 @@ export function MappingEditor({
   const [remapping, setRemapping] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [templateName, setTemplateName] = useState("");
+  const [defaults, setDefaults] = useState<ImportDefaults>({
+    price: "",
+    vendor: "",
+    status: "ACTIVE",
+    title: "",
+    skuPrefix: "",
+  });
+  const [aiPolishDescriptions, setAiPolishDescriptions] = useState(false);
+  const [aiPolishTitles, setAiPolishTitles] = useState(false);
+  const [brandVoice, setBrandVoice] = useState("professional, helpful, SEO-optimized");
+  const [polishSamples, setPolishSamples] = useState<
+    Array<{ rowIndex: number; field: string; before: string; after: string }>
+  >([]);
+  const [polishing, setPolishing] = useState(false);
   const targetOptions = targetsForResource(resourceType);
+  const requiredFields = IMPORT_REQUIRED_BY_RESOURCE[resourceType] ?? IMPORT_REQUIRED_BY_RESOURCE.products;
+
+  const requirementStatus = useMemo(() => {
+    return requiredFields.map((req) => ({
+      ...req,
+      satisfied:
+        isFieldMapped(mappings, req.field) ||
+        (req.field === "variants.price" && defaults.price?.trim()) ||
+        (req.field === "title" && defaults.title?.trim()),
+    }));
+  }, [requiredFields, mappings, defaults]);
+
+  const validation = useMemo(
+    () => validateImportMappings(resourceType, mappings, defaults),
+    [resourceType, mappings, defaults],
+  );
 
   useEffect(() => {
     if (initialMappings.length > 0) {
@@ -213,14 +249,30 @@ export function MappingEditor({
       if (!mappings.some((m) => m.targetField)) {
         throw new Error("Map at least one column before previewing.");
       }
+      if (!validation.ok) {
+        throw new Error(
+          `Required: ${validation.missing.map((m) => m.label).join(", ")}. Map a column or set a default below.`,
+        );
+      }
       await gqlRequest(
         MUTATIONS.updateMappings,
         {
           jobId,
-          mappings: mappings.map(({ sourceColumn, targetField }) => ({
-            sourceColumn,
-            targetField,
-          })),
+          mappings: {
+            mappings: mappings.map(({ sourceColumn, targetField }) => ({
+              sourceColumn,
+              targetField,
+            })),
+            defaults,
+            aiPolish:
+              aiPolishDescriptions || aiPolishTitles
+                ? {
+                    descriptions: aiPolishDescriptions,
+                    titles: aiPolishTitles,
+                    brandVoice,
+                  }
+                : null,
+          },
         },
         shop,
       );
@@ -229,6 +281,39 @@ export function MappingEditor({
       setError(e instanceof Error ? e.message : "Preview failed");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const previewPolish = async () => {
+    setPolishing(true);
+    setError(null);
+    try {
+      if (!isFieldMapped(mappings, "descriptionHtml")) {
+        throw new Error("Map a column to descriptionHtml before previewing AI polish.");
+      }
+      await gqlRequest(
+        MUTATIONS.updateMappings,
+        {
+          jobId,
+          mappings: {
+            mappings: mappings.map(({ sourceColumn, targetField }) => ({
+              sourceColumn,
+              targetField,
+            })),
+            defaults,
+            aiPolish: null,
+          },
+        },
+        shop,
+      );
+      const data = await gqlRequest<{
+        polishImportSample: { rows: typeof polishSamples; creditsUsed: number };
+      }>(MUTATIONS.polishImportSample, { jobId, brandVoice }, shop);
+      setPolishSamples(data.polishImportSample.rows);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "AI polish preview failed");
+    } finally {
+      setPolishing(false);
     }
   };
 
@@ -280,6 +365,132 @@ export function MappingEditor({
         <Banner tone="critical" onDismiss={() => setError(null)}>
           {error}
         </Banner>
+      )}
+
+      {resourceType === "products" && (
+        <div className="tidysync-mapping-required">
+          <Text as="h4" variant="headingSm">Required for Shopify API</Text>
+          <div className="tidysync-required-grid">
+            {requirementStatus.map((req) => (
+              <div
+                key={req.field}
+                className={`tidysync-required-item${req.satisfied ? " is-ok" : " is-missing"}`}
+              >
+                <Badge tone={req.satisfied ? "success" : "critical"}>{req.label}</Badge>
+                <Text as="p" variant="bodySm" tone="subdued">{req.hint}</Text>
+              </div>
+            ))}
+          </div>
+          {!validation.ok && (
+            <Banner tone="warning">
+              Map required fields above or set defaults in the panel below before previewing.
+            </Banner>
+          )}
+        </div>
+      )}
+
+      {resourceType === "products" && (
+        <div className="tidysync-mapping-defaults">
+          <Text as="h4" variant="headingSm">Defaults when a column is not mapped</Text>
+          <div className="tidysync-defaults-grid">
+            <TextField
+              label="Default price"
+              value={defaults.price ?? ""}
+              onChange={(v) => setDefaults((d) => ({ ...d, price: v }))}
+              placeholder="e.g. 29.99"
+              autoComplete="off"
+              helpText="Used when no price column is mapped"
+            />
+            <TextField
+              label="Default vendor"
+              value={defaults.vendor ?? ""}
+              onChange={(v) => setDefaults((d) => ({ ...d, vendor: v }))}
+              autoComplete="off"
+            />
+            <Select
+              label="Product status"
+              options={[
+                { label: "Active", value: "ACTIVE" },
+                { label: "Draft", value: "DRAFT" },
+                { label: "Archived", value: "ARCHIVED" },
+              ]}
+              value={defaults.status ?? "ACTIVE"}
+              onChange={(v) => setDefaults((d) => ({ ...d, status: v }))}
+            />
+            <TextField
+              label="Title fallback pattern"
+              value={defaults.title ?? ""}
+              onChange={(v) => setDefaults((d) => ({ ...d, title: v }))}
+              placeholder="Imported product {n}"
+              autoComplete="off"
+              helpText="Use {n} for row number"
+            />
+            <TextField
+              label="SKU prefix"
+              value={defaults.skuPrefix ?? ""}
+              onChange={(v) => setDefaults((d) => ({ ...d, skuPrefix: v }))}
+              placeholder="SKU"
+              autoComplete="off"
+            />
+          </div>
+        </div>
+      )}
+
+      {resourceType === "products" && (
+        <div className="tidysync-mapping-ai-polish">
+          <InlineStack align="space-between" blockAlign="center" wrap>
+            <BlockStack gap="100">
+              <Text as="h4" variant="headingSm">AI catalog polish</Text>
+              <Text as="p" variant="bodySm" tone="subdued">
+                Rewrite descriptions (and optional titles) during import. Preview costs 1 credit; enabling polish on import costs 1 credit when you save preview.
+              </Text>
+            </BlockStack>
+            <Badge tone="info">AI</Badge>
+          </InlineStack>
+          <div style={{ marginTop: 12 }}>
+            <TextField
+              label="Brand voice"
+              value={brandVoice}
+              onChange={setBrandVoice}
+              autoComplete="off"
+              multiline={2}
+            />
+          </div>
+          <div className="tidysync-polish-actions">
+            <label className="tidysync-check">
+              <input
+                type="checkbox"
+                checked={aiPolishDescriptions}
+                onChange={(e) => setAiPolishDescriptions(e.target.checked)}
+              />
+              Polish descriptions on import
+            </label>
+            <label className="tidysync-check">
+              <input
+                type="checkbox"
+                checked={aiPolishTitles}
+                onChange={(e) => setAiPolishTitles(e.target.checked)}
+              />
+              Polish titles on import
+            </label>
+            <Button onClick={previewPolish} loading={polishing} disabled={polishing}>
+              Preview polish (1 credit)
+            </Button>
+          </div>
+          {polishSamples.length > 0 && (
+            <div className="tidysync-polish-samples">
+              {polishSamples.map((s) => (
+                <div key={s.rowIndex} className="tidysync-polish-sample">
+                  <Text as="p" variant="bodySm" fontWeight="semibold">Row {s.rowIndex + 1}</Text>
+                  <div className="tidysync-diff-row">
+                    <span className="tidysync-diff-before">{s.before}</span>
+                    <span className="tidysync-diff-after">{s.after}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {loadingMappings && (

@@ -86,6 +86,27 @@ export async function generateImpactSummary(
   return result.text.trim();
 }
 
+export async function generateProductSeoInsight(
+  product: Record<string, unknown>,
+  metrics: Record<string, unknown>,
+): Promise<string> {
+  const fallback =
+    "Review title length, meta description, and description depth. Add alt text to images and expand thin content.";
+  const result = await chatCompletion([
+    {
+      role: "system",
+      content:
+        "You are a senior Shopify SEO strategist. Given product data and computed SEO metrics, write a concise expert briefing: 1) overall verdict, 2) top 3 strengths, 3) top 3 prioritized fixes, 4) one quick win for today. Use short paragraphs and bullet points. Be specific with numbers from the data. Tone: premium, clear, actionable.",
+    },
+    { role: "user", content: JSON.stringify({ product, metrics }) },
+  ]);
+
+  if (result.provider === "rule-based" || !result.text.trim()) {
+    return fallback;
+  }
+  return result.text.trim();
+}
+
 export async function rewriteProductContent(
   products: Array<{ title: string; description?: string }>,
   brandVoice: string,

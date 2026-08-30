@@ -1,16 +1,9 @@
 import { prisma } from "@tidysync/database";
-import { applyMappingsToRow } from "@tidysync/shared";
-import { streamFileRows } from "../file-parser";
+import { applyMappingsToRow, applyImportDefaults, type ImportMutationPlan } from "@tidysync/shared";
+import { rewriteProductContent } from "@tidysync/ai";
+import { streamFileRows, countFileRows } from "../file-parser";
 import { getShopGraphqlClient } from "../shopify";
-
-const PRODUCT_CREATE = `#graphql
-  mutation productCreate($input: ProductInput!) {
-    productCreate(input: $input) {
-      product { id title }
-      userErrors { field message }
-    }
-  }
-`;
+import { createProductFromMappedRow, type MappedProductRow } from "../shopify-product-create";
 
 const COLLECTION_CREATE = `#graphql
   mutation collectionCreate($input: CollectionInput!) {
@@ -52,14 +45,31 @@ export async function processImportJob(jobId: string, tenantId: string, shop: st
   const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job?.filePath) throw new Error("Import job missing file");
 
-  const mutationPlan = job.mutationPlan as { mappings?: Array<{ sourceColumn: string; targetField: string }> };
+  const mutationPlan = job.mutationPlan as ImportMutationPlan | null;
   const mappings = mutationPlan?.mappings ?? [];
+  const importDefaults = mutationPlan?.defaults;
+  const aiPolish = mutationPlan?.aiPolish;
   const resourceType = job.resourceType ?? "products";
 
   await prisma.job.update({
     where: { id: jobId },
     data: { status: "RUNNING", startedAt: new Date() },
   });
+
+  let expectedRows = job.rowCount > 0 ? job.rowCount : 0;
+  if (expectedRows <= 0) {
+    try {
+      expectedRows = await countFileRows(job.filePath);
+    } catch {
+      expectedRows = 0;
+    }
+  }
+  if (expectedRows > 0) {
+    await prisma.job.update({
+      where: { id: jobId },
+      data: { rowCount: expectedRows },
+    });
+  }
 
   const client = await getShopGraphqlClient(shop);
   let processed = 0;
@@ -68,7 +78,26 @@ export async function processImportJob(jobId: string, tenantId: string, shop: st
 
   await streamFileRows(job.filePath, async (row, index) => {
     processed++;
-    const mapped = applyMappingsToRow(row, mappings);
+    let mapped = applyMappingsToRow(row, mappings);
+    mapped = applyImportDefaults(mapped, importDefaults, index);
+
+    if (resourceType === "products" && aiPolish?.descriptions && mapped.descriptionHtml) {
+      try {
+        const items = await rewriteProductContent(
+          [
+            {
+              title: String(mapped.title ?? `Product ${index + 1}`),
+              description: String(mapped.descriptionHtml),
+            },
+          ],
+          aiPolish.brandVoice ?? "professional, helpful, SEO-optimized",
+        );
+        if (items[0]?.description) mapped.descriptionHtml = items[0].description;
+        if (aiPolish.titles && items[0]?.title) mapped.title = items[0].title;
+      } catch {
+        /* keep original row content */
+      }
+    }
 
     try {
       if (resourceType === "collections") {
@@ -322,78 +351,30 @@ export async function processImportJob(jobId: string, tenantId: string, shop: st
           });
         }
       } else {
-        const title = (mapped.title as string) ?? `Imported product ${index + 1}`;
-        const response = await client.request(PRODUCT_CREATE, {
-          variables: {
-            input: {
-              title,
-              descriptionHtml: mapped.descriptionHtml as string | undefined,
-              productType: mapped.productType as string | undefined,
-              tags: mapped.tags as string[] | undefined,
-              variants: mapped.variants
-                ? [
-                    {
-                      sku: (mapped.variants as Record<string, unknown>).sku as string | undefined,
-                      price: String((mapped.variants as Record<string, unknown>).price ?? "0"),
-                      inventoryQuantities: [
-                        {
-                          availableQuantity: Number(
-                            (mapped.variants as Record<string, unknown>).inventoryQuantity ?? 0,
-                          ),
-                          locationId: "gid://shopify/Location/1",
-                        },
-                      ],
-                    },
-                  ]
-                : undefined,
-            },
+        const created = await createProductFromMappedRow(client, mapped as MappedProductRow, index);
+        success++;
+        const productId = created.productId;
+        await prisma.jobSnapshot.create({
+          data: {
+            tenantId,
+            jobId,
+            resourceType: "product",
+            resourceId: productId,
+            beforeState: {},
+            afterState: mapped as object,
           },
         });
-
-        const data = response.data as {
-          productCreate: {
-            product: { id: string; title: string } | null;
-            userErrors: Array<{ message: string }>;
-          };
-        };
-
-        if (data.productCreate.userErrors?.length) {
-          failed++;
-          await prisma.jobLineItem.create({
-            data: {
-              tenantId,
-              jobId,
-              rowIndex: index,
-              status: "FAILED",
-              errorMessage: data.productCreate.userErrors.map((e) => e.message).join(", "),
-              autoFixSuggestion: "Check required fields and SKU uniqueness",
-            },
-          });
-        } else if (data.productCreate.product) {
-          success++;
-          const productId = data.productCreate.product.id;
-          await prisma.jobSnapshot.create({
-            data: {
-              tenantId,
-              jobId,
-              resourceType: "product",
-              resourceId: productId,
-              beforeState: {},
-              afterState: mapped as object,
-            },
-          });
-          await prisma.jobLineItem.create({
-            data: {
-              tenantId,
-              jobId,
-              rowIndex: index,
-              resourceType: "product",
-              resourceId: productId,
-              status: "SUCCESS",
-              afterValue: mapped as object,
-            },
-          });
-        }
+        await prisma.jobLineItem.create({
+          data: {
+            tenantId,
+            jobId,
+            rowIndex: index,
+            resourceType: "product",
+            resourceId: productId,
+            status: "SUCCESS",
+            afterValue: mapped as object,
+          },
+        });
       }
     } catch (err) {
       failed++;
