@@ -103,7 +103,33 @@ interface AuditLog {
   tenant?: { shopDomain: string };
 }
 
-type Tab = "overview" | "tenants" | "tenant-detail" | "jobs" | "billing" | "plans" | "flags" | "apikeys" | "health" | "audit";
+interface AdminAiSettings {
+  provider: string;
+  fallbackOrder: string;
+  groqApiKeySet: boolean;
+  groqApiKeyHint: string | null;
+  groqModel: string;
+  geminiApiKeySet: boolean;
+  geminiApiKeyHint: string | null;
+  geminiModel: string;
+  openaiApiKeySet: boolean;
+  openaiApiKeyHint: string | null;
+  openaiModel: string;
+  envFallback: { groq: boolean; gemini: boolean; openai: boolean };
+  source: string;
+}
+
+interface AdminAiTestResult {
+  ok: boolean;
+  provider: string;
+  modelUsed: string;
+  reply: string;
+  configuredProviders: string[];
+  providerMode: string;
+  error?: string | null;
+}
+
+type Tab = "overview" | "tenants" | "tenant-detail" | "jobs" | "billing" | "plans" | "flags" | "ai" | "apikeys" | "health" | "audit";
 
 export function AdminConsole() {
   const [token, setToken] = useState<string | null>(null);
@@ -133,6 +159,18 @@ export function AdminConsole() {
   const [tab, setTab] = useState<Tab>("overview");
   const [search, setSearch] = useState("");
   const [jobFilter, setJobFilter] = useState("");
+  const [aiSettings, setAiSettings] = useState<AdminAiSettings | null>(null);
+  const [aiProvider, setAiProvider] = useState("auto");
+  const [aiFallbackOrder, setAiFallbackOrder] = useState("groq,gemini,openai");
+  const [aiGroqKey, setAiGroqKey] = useState("");
+  const [aiGroqModel, setAiGroqModel] = useState("");
+  const [aiGeminiKey, setAiGeminiKey] = useState("");
+  const [aiGeminiModel, setAiGeminiModel] = useState("");
+  const [aiOpenaiKey, setAiOpenaiKey] = useState("");
+  const [aiOpenaiModel, setAiOpenaiModel] = useState("");
+  const [aiTestPrompt, setAiTestPrompt] = useState("Reply with: TidySync AI is working.");
+  const [aiTestResult, setAiTestResult] = useState<AdminAiTestResult | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem("tidysync_admin_token");
@@ -273,6 +311,119 @@ export function AdminConsole() {
     );
     await loadData(token);
   };
+
+  const applyAiSettingsForm = (s: AdminAiSettings) => {
+    setAiSettings(s);
+    setAiProvider(s.provider || "auto");
+    setAiFallbackOrder(s.fallbackOrder || "groq,gemini,openai");
+    setAiGroqModel(s.groqModel || "");
+    setAiGeminiModel(s.geminiModel || "");
+    setAiOpenaiModel(s.openaiModel || "");
+    setAiGroqKey("");
+    setAiGeminiKey("");
+    setAiOpenaiKey("");
+  };
+
+  const loadAiSettings = async (authToken?: string) => {
+    const t = authToken ?? token;
+    if (!t) return;
+    setError(null);
+    try {
+      const data = await adminGql<{ adminAiSettings: AdminAiSettings }>(
+        `query {
+          adminAiSettings {
+            provider fallbackOrder
+            groqApiKeySet groqApiKeyHint groqModel
+            geminiApiKeySet geminiApiKeyHint geminiModel
+            openaiApiKeySet openaiApiKeyHint openaiModel
+            envFallback { groq gemini openai }
+            source
+          }
+        }`,
+        {},
+        t,
+      );
+      applyAiSettingsForm(data.adminAiSettings);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load AI settings");
+    }
+  };
+
+  const saveAiSettings = async (extra?: {
+    clearGroqApiKey?: boolean;
+    clearGeminiApiKey?: boolean;
+    clearOpenaiApiKey?: boolean;
+  }) => {
+    if (!token) return;
+    setAiBusy(true);
+    setError(null);
+    try {
+      const data = await adminGql<{ adminUpdateAiSettings: AdminAiSettings }>(
+        `mutation($input: AdminAiSettingsInput!) {
+          adminUpdateAiSettings(input: $input) {
+            provider fallbackOrder
+            groqApiKeySet groqApiKeyHint groqModel
+            geminiApiKeySet geminiApiKeyHint geminiModel
+            openaiApiKeySet openaiApiKeyHint openaiModel
+            envFallback { groq gemini openai }
+            source
+          }
+        }`,
+        {
+          input: {
+            provider: aiProvider,
+            fallbackOrder: aiFallbackOrder,
+            groqModel: aiGroqModel || null,
+            geminiModel: aiGeminiModel || null,
+            openaiModel: aiOpenaiModel || null,
+            groqApiKey: aiGroqKey.trim() || null,
+            geminiApiKey: aiGeminiKey.trim() || null,
+            openaiApiKey: aiOpenaiKey.trim() || null,
+            clearGroqApiKey: extra?.clearGroqApiKey ?? false,
+            clearGeminiApiKey: extra?.clearGeminiApiKey ?? false,
+            clearOpenaiApiKey: extra?.clearOpenaiApiKey ?? false,
+          },
+        },
+        token,
+      );
+      applyAiSettingsForm(data.adminUpdateAiSettings);
+      setAiTestResult(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save AI settings");
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const testAi = async () => {
+    if (!token) return;
+    setAiBusy(true);
+    setError(null);
+    setAiTestResult(null);
+    try {
+      const data = await adminGql<{ adminTestAi: AdminAiTestResult }>(
+        `mutation($prompt: String) {
+          adminTestAi(prompt: $prompt) {
+            ok provider modelUsed reply configuredProviders providerMode error
+          }
+        }`,
+        { prompt: aiTestPrompt || null },
+        token,
+      );
+      setAiTestResult(data.adminTestAi);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "AI test failed");
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === "ai" && token) {
+      void loadAiSettings(token);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, token]);
 
   const updateTenantPlan = async (tenantId: string, planSlug: string) => {
     if (!token) return;
@@ -510,6 +661,7 @@ export function AdminConsole() {
     { id: "billing", label: "Billing" },
     { id: "plans", label: "Plans" },
     { id: "flags", label: "Feature flags" },
+    { id: "ai", label: "AI settings" },
     { id: "apikeys", label: "API keys" },
     { id: "health", label: "System health" },
     { id: "audit", label: "Audit log" },
@@ -1298,6 +1450,226 @@ export function AdminConsole() {
           </table>
           </div>
         </div>
+      )}
+
+      {tab === "ai" && (
+        <>
+          <div className="card">
+            <h2 className="card-title">AI providers</h2>
+            <p style={{ color: "var(--text-secondary)", marginBottom: 16 }}>
+              Save API keys here instead of (or in addition to) server <code>.env</code>.
+              Values stored in the database override env when set. Leave a key field blank to keep the current saved key.
+              Source: <strong>{aiSettings?.source ?? "…"}</strong>
+              {aiSettings?.envFallback && (
+                <>
+                  {" "}
+                  · Env fallback: Groq {aiSettings.envFallback.groq ? "yes" : "no"}, Gemini{" "}
+                  {aiSettings.envFallback.gemini ? "yes" : "no"}, OpenAI{" "}
+                  {aiSettings.envFallback.openai ? "yes" : "no"}
+                </>
+              )}
+            </p>
+
+            <div className="flex-row" style={{ marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 160 }}>
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Provider mode</span>
+                <select className="input" value={aiProvider} onChange={(e) => setAiProvider(e.target.value)}>
+                  <option value="auto">auto (fallback order)</option>
+                  <option value="groq">groq only</option>
+                  <option value="gemini">gemini only</option>
+                  <option value="openai">openai only</option>
+                </select>
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 220 }}>
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Fallback order</span>
+                <input
+                  className="input"
+                  value={aiFallbackOrder}
+                  onChange={(e) => setAiFallbackOrder(e.target.value)}
+                  placeholder="groq,gemini,openai"
+                />
+              </label>
+            </div>
+
+            <h3 className="card-title">Groq</h3>
+            <div className="flex-row" style={{ marginBottom: 12, flexWrap: "wrap", gap: 12 }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 220 }}>
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  API key{" "}
+                  {aiSettings?.groqApiKeySet
+                    ? `(saved ${aiSettings.groqApiKeyHint ?? "••••"})`
+                    : "(not saved in DB)"}
+                </span>
+                <input
+                  className="input"
+                  type="password"
+                  autoComplete="off"
+                  placeholder="Paste new key to replace…"
+                  value={aiGroqKey}
+                  onChange={(e) => setAiGroqKey(e.target.value)}
+                />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 200 }}>
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Model</span>
+                <input
+                  className="input"
+                  value={aiGroqModel}
+                  onChange={(e) => setAiGroqModel(e.target.value)}
+                  placeholder="llama-3.3-70b-versatile"
+                />
+              </label>
+              {aiSettings?.groqApiKeySet && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  style={{ alignSelf: "flex-end" }}
+                  disabled={aiBusy}
+                  onClick={() => saveAiSettings({ clearGroqApiKey: true })}
+                >
+                  Clear saved key
+                </button>
+              )}
+            </div>
+
+            <h3 className="card-title">Gemini</h3>
+            <div className="flex-row" style={{ marginBottom: 12, flexWrap: "wrap", gap: 12 }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 220 }}>
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  API key{" "}
+                  {aiSettings?.geminiApiKeySet
+                    ? `(saved ${aiSettings.geminiApiKeyHint ?? "••••"})`
+                    : "(not saved in DB)"}
+                </span>
+                <input
+                  className="input"
+                  type="password"
+                  autoComplete="off"
+                  placeholder="Paste new key to replace…"
+                  value={aiGeminiKey}
+                  onChange={(e) => setAiGeminiKey(e.target.value)}
+                />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 200 }}>
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Model</span>
+                <input
+                  className="input"
+                  value={aiGeminiModel}
+                  onChange={(e) => setAiGeminiModel(e.target.value)}
+                  placeholder="gemini-2.0-flash"
+                />
+              </label>
+              {aiSettings?.geminiApiKeySet && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  style={{ alignSelf: "flex-end" }}
+                  disabled={aiBusy}
+                  onClick={() => saveAiSettings({ clearGeminiApiKey: true })}
+                >
+                  Clear saved key
+                </button>
+              )}
+            </div>
+
+            <h3 className="card-title">OpenAI</h3>
+            <div className="flex-row" style={{ marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 220 }}>
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  API key{" "}
+                  {aiSettings?.openaiApiKeySet
+                    ? `(saved ${aiSettings.openaiApiKeyHint ?? "••••"})`
+                    : "(not saved in DB)"}
+                </span>
+                <input
+                  className="input"
+                  type="password"
+                  autoComplete="off"
+                  placeholder="Paste new key to replace…"
+                  value={aiOpenaiKey}
+                  onChange={(e) => setAiOpenaiKey(e.target.value)}
+                />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 200 }}>
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Model</span>
+                <input
+                  className="input"
+                  value={aiOpenaiModel}
+                  onChange={(e) => setAiOpenaiModel(e.target.value)}
+                  placeholder="gpt-4o-mini"
+                />
+              </label>
+              {aiSettings?.openaiApiKeySet && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  style={{ alignSelf: "flex-end" }}
+                  disabled={aiBusy}
+                  onClick={() => saveAiSettings({ clearOpenaiApiKey: true })}
+                >
+                  Clear saved key
+                </button>
+              )}
+            </div>
+
+            <div className="flex-row" style={{ gap: 8 }}>
+              <button type="button" className="btn" disabled={aiBusy} onClick={() => saveAiSettings()}>
+                {aiBusy ? "Saving…" : "Save AI settings"}
+              </button>
+              <button type="button" className="btn btn-secondary" disabled={aiBusy} onClick={() => loadAiSettings()}>
+                Reload
+              </button>
+            </div>
+          </div>
+
+          <div className="card testing-mode-card">
+            <h2 className="card-title">AI testing mode</h2>
+            <p style={{ color: "var(--text-secondary)", marginBottom: 16 }}>
+              Runs a live chat call with the current provider config (DB + env). Use this after saving keys to confirm AI is working for Agent, SEO, and bulk rewrite.
+            </p>
+            <div className="flex-row" style={{ marginBottom: 12, flexWrap: "wrap", gap: 12 }}>
+              <input
+                className="input"
+                style={{ flex: 1, minWidth: 240 }}
+                value={aiTestPrompt}
+                onChange={(e) => setAiTestPrompt(e.target.value)}
+                placeholder="Test prompt…"
+              />
+              <button type="button" className="btn" disabled={aiBusy} onClick={() => testAi()}>
+                {aiBusy ? "Testing…" : "Test AI connection"}
+              </button>
+            </div>
+            {aiTestResult && (
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: 12,
+                  borderRadius: 8,
+                  background: aiTestResult.ok ? "rgba(34, 160, 90, 0.08)" : "rgba(200, 60, 60, 0.08)",
+                  border: `1px solid ${aiTestResult.ok ? "rgba(34, 160, 90, 0.35)" : "rgba(200, 60, 60, 0.35)"}`,
+                }}
+              >
+                <p style={{ margin: "0 0 8px", fontWeight: 600 }}>
+                  {aiTestResult.ok ? "Connection OK" : "Connection failed"}
+                </p>
+                <p style={{ margin: "0 0 4px", fontSize: 13, color: "var(--text-secondary)" }}>
+                  Mode: {aiTestResult.providerMode} · Provider: {aiTestResult.provider} · Model:{" "}
+                  {aiTestResult.modelUsed}
+                </p>
+                <p style={{ margin: "0 0 4px", fontSize: 13, color: "var(--text-secondary)" }}>
+                  Configured: {aiTestResult.configuredProviders.join(", ") || "none"}
+                </p>
+                {aiTestResult.reply ? (
+                  <p style={{ margin: "8px 0 0" }}>Reply: {aiTestResult.reply}</p>
+                ) : null}
+                {aiTestResult.error ? (
+                  <p style={{ margin: "8px 0 0", color: "var(--text-critical, #b42318)" }}>
+                    {aiTestResult.error}
+                  </p>
+                ) : null}
+              </div>
+            )}
+          </div>
+        </>
       )}
 
       {tab === "audit" && (

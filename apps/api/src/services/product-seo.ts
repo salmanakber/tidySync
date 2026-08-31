@@ -82,25 +82,28 @@ function scoreMeta(seoTitle: string | null, seoDescription: string | null, produ
   checks: ProductSeoCheck[];
 } {
   const checks: ProductSeoCheck[] = [];
-  let score = 0;
-  let parts = 0;
+  let titleScore = 0;
+  let descScore = 0;
 
   const metaTitle = seoTitle?.trim() || "";
   const metaDesc = seoDescription?.trim() || "";
 
   if (metaTitle) {
-    parts++;
     const len = metaTitle.length;
-    const titleScore =
+    titleScore =
       len >= 40 && len <= 60 ? 100 : len >= 25 && len <= 70 ? 75 : len > 0 ? 50 : 0;
-    score += titleScore;
+    // Identical to product title is weaker than a dedicated SEO title
+    if (metaTitle === productTitle.trim()) {
+      titleScore = Math.min(titleScore, 70);
+    }
     checks.push({
       id: "meta_title",
       label: "SEO title",
       status: titleScore >= 75 ? "pass" : titleScore >= 50 ? "warn" : "fail",
-      detail: metaTitle === productTitle
-        ? `Uses product title (${len} chars) — consider a keyword-focused SEO title.`
-        : `Custom SEO title (${len} chars).`,
+      detail:
+        metaTitle === productTitle.trim()
+          ? `Uses product title (${len} chars) — add a keyword-focused SEO title.`
+          : `Custom SEO title (${len} chars).`,
       score: titleScore,
     });
   } else {
@@ -114,11 +117,9 @@ function scoreMeta(seoTitle: string | null, seoDescription: string | null, produ
   }
 
   if (metaDesc) {
-    parts++;
     const len = metaDesc.length;
-    const descScore =
+    descScore =
       len >= 120 && len <= 160 ? 100 : len >= 80 && len <= 200 ? 75 : len > 0 ? 55 : 0;
-    score += descScore;
     checks.push({
       id: "meta_description",
       label: "Meta description",
@@ -136,7 +137,18 @@ function scoreMeta(seoTitle: string | null, seoDescription: string | null, produ
     });
   }
 
-  return { score: parts > 0 ? Math.round(score / parts) : 0, checks };
+  // Always average both SEO title + meta description (missing = 0) so gaps lower the score
+  return { score: Math.round((titleScore + descScore) / 2), checks };
+}
+
+/** How many AI credits an SEO apply should cost based on gaps before improvement. */
+export function seoApplyCreditCost(metrics: ProductSeoMetrics): number {
+  let credits = 1;
+  if (!metrics.hasCustomSeoTitle) credits += 1;
+  if (!metrics.hasCustomSeoDescription) credits += 1;
+  if (metrics.descriptionWordCount < 150) credits += 1;
+  if (metrics.overallScore < 55) credits += 1;
+  return Math.min(4, Math.max(1, credits));
 }
 
 function scoreDescription(html: string): { score: number; checks: ProductSeoCheck[]; wordCount: number } {
@@ -337,7 +349,7 @@ export const PRODUCT_SEO_GRAPHQL = `
       handle
       descriptionHtml
       seo { title description }
-      featuredImage { url }
+      featuredImage { url altText }
       images(first: 20) { nodes { url altText } }
     }
   }
@@ -359,7 +371,7 @@ export function mapProductSeoGraphql(product: {
   handle?: string | null;
   descriptionHtml?: string | null;
   seo?: { title?: string | null; description?: string | null } | null;
-  featuredImage?: { url?: string | null } | null;
+  featuredImage?: { url?: string | null; altText?: string | null } | null;
   images?: { nodes?: Array<{ url?: string | null; altText?: string | null }> } | null;
 }): ProductSeoSource {
   return {
@@ -372,10 +384,12 @@ export function mapProductSeoGraphql(product: {
       description: product.seo?.description ?? null,
     },
     featuredImageUrl: product.featuredImage?.url ?? null,
-    images: (product.images?.nodes ?? []).map((img) => ({
-      url: img.url ?? "",
-      altText: img.altText ?? null,
-    })),
+    images: (product.images?.nodes ?? [])
+      .map((img) => ({
+        url: img.url ?? "",
+        altText: img.altText ?? null,
+      }))
+      .filter((img) => img.url),
   };
 }
 
@@ -411,7 +425,9 @@ export function productSeoMetricsInput(source: ProductSeoSource) {
     title: source.title,
     descriptionHtml: source.descriptionHtml,
     seo: source.seo,
-    featuredImage: source.featuredImageUrl ? { url: source.featuredImageUrl } : null,
+    featuredImage: source.featuredImageUrl
+      ? { url: source.featuredImageUrl, altText: source.images[0]?.altText ?? null }
+      : null,
     images: source.images,
   };
 }
@@ -425,30 +441,45 @@ export async function applyProductSeoToShopify(
     seoDescription?: string;
     descriptionHtml?: string;
   },
-): Promise<void> {
+): Promise<{ seoTitle: string | null; seoDescription: string | null }> {
   const { merchantGraphqlRequest } = await import("../shopify/client");
+
+  const seoTitle = improvements.seoTitle?.trim() || undefined;
+  const seoDescription = improvements.seoDescription?.trim() || undefined;
+  const descriptionHtml = improvements.descriptionHtml?.trim() || undefined;
+
   const product: Record<string, unknown> = { id: productId };
-  if (improvements.descriptionHtml) {
-    product.descriptionHtml = improvements.descriptionHtml;
+  if (descriptionHtml) {
+    product.descriptionHtml = descriptionHtml;
   }
-  const seo: Record<string, string> = {};
-  if (improvements.seoTitle) seo.title = improvements.seoTitle;
-  if (improvements.seoDescription) seo.description = improvements.seoDescription;
-  if (Object.keys(seo).length > 0) product.seo = seo;
+  // Always send SEO block when we have either field — required so Shopify stores custom title
+  if (seoTitle || seoDescription) {
+    product.seo = {
+      ...(seoTitle ? { title: seoTitle.slice(0, 70) } : {}),
+      ...(seoDescription ? { description: seoDescription.slice(0, 320) } : {}),
+    };
+  }
 
   const response = await merchantGraphqlRequest<{
     data?: {
       productUpdate?: {
+        product?: {
+          seo?: { title?: string | null; description?: string | null } | null;
+        } | null;
         userErrors?: Array<{ message: string }>;
       };
     };
   }>(
     shop,
     sessionToken,
-    `
+    `#graphql
       mutation ProductSeoApply($product: ProductUpdateInput!) {
         productUpdate(product: $product) {
-          userErrors { message }
+          product {
+            id
+            seo { title description }
+          }
+          userErrors { field message }
         }
       }
     `,
@@ -459,4 +490,10 @@ export async function applyProductSeoToShopify(
   if (errors.length > 0) {
     throw new Error(errors.map((e) => e.message).join("; "));
   }
+
+  const appliedSeo = response.data?.productUpdate?.product?.seo;
+  return {
+    seoTitle: appliedSeo?.title ?? seoTitle ?? null,
+    seoDescription: appliedSeo?.description ?? seoDescription ?? null,
+  };
 }

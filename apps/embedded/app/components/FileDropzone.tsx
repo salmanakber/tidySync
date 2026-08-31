@@ -8,7 +8,7 @@ interface FileDropzoneProps {
   loading?: boolean;
   disabled?: boolean;
   accept?: string;
-  onFile: (file: File) => void;
+  onFile: (file: File) => void | Promise<void>;
 }
 
 function formatBytes(bytes: number) {
@@ -38,8 +38,20 @@ export function FileDropzone({
   );
 
   return (
-    <label
-      className={`tidysync-dropzone${dragging ? " is-dragging" : ""}${loading ? " is-uploading" : ""}`}
+    <div
+      className={`tidysync-dropzone${dragging ? " is-dragging" : ""}${loading ? " is-uploading" : ""}${disabled ? " is-disabled" : ""}`}
+      role="button"
+      tabIndex={disabled || loading ? -1 : 0}
+      onKeyDown={(e) => {
+        if (disabled || loading) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          (e.currentTarget.querySelector('input[type="file"]') as HTMLInputElement | null)?.click();
+        }
+      }}
+      onClick={() => {
+        /* label handles file picker */
+      }}
       onDragEnter={(e) => {
         e.preventDefault();
         if (!disabled) setDragging(true);
@@ -58,52 +70,57 @@ export function FileDropzone({
         takeFile(e.dataTransfer.files?.[0]);
       }}
     >
-      <input
-        type="file"
-        accept={accept}
-        disabled={disabled || loading}
-        hidden
-        onChange={(e) => takeFile(e.target.files?.[0])}
-      />
+      <label className="tidysync-dropzone-label">
+        <input
+          type="file"
+          accept={accept}
+          disabled={disabled || loading}
+          className="tidysync-dropzone-input"
+          onChange={(e) => {
+            takeFile(e.target.files?.[0]);
+            e.target.value = "";
+          }}
+        />
 
-      <div className="tidysync-dropzone-icon">
-        {loading ? <Spinner size="small" /> : <Icon source={UploadIcon} tone="success" />}
-      </div>
-
-      <BlockStack gap="100">
-        <Text as="p" variant="headingSm">
-          {loading
-            ? "Uploading & analyzing…"
-            : dragging
-              ? "Drop to upload"
-              : "Drag & drop your CSV or Excel file"}
-        </Text>
-        <Text as="p" variant="bodySm" tone="subdued">
-          or click to browse · .csv, .xlsx · Max recommended 50MB
-        </Text>
-      </BlockStack>
-
-      {loading && (
-        <div style={{ marginTop: 16 }}>
-          <div className="tidysync-shimmer-bar" />
+        <div className="tidysync-dropzone-icon">
+          {loading ? <Spinner size="small" /> : <Icon source={UploadIcon} tone="success" />}
         </div>
-      )}
 
-      {fileName && !loading && (
-        <div className="tidysync-file-pill">
-          <Icon source={FileIcon} tone="base" />
-          <InlineStack gap="200" blockAlign="center">
-            <Text as="span" variant="bodySm" fontWeight="semibold">
-              {fileName}
-            </Text>
-            {fileSize != null && (
-              <Text as="span" variant="bodySm" tone="subdued">
-                {formatBytes(fileSize)}
+        <BlockStack gap="100">
+          <Text as="p" variant="headingSm">
+            {loading
+              ? "Uploading & analyzing…"
+              : dragging
+                ? "Drop to upload"
+                : "Drag & drop your CSV or Excel file"}
+          </Text>
+          <Text as="p" variant="bodySm" tone="subdued">
+            or click to browse · .csv, .xlsx · Max recommended 50MB
+          </Text>
+        </BlockStack>
+
+        {loading && (
+          <div style={{ marginTop: 16 }}>
+            <div className="tidysync-shimmer-bar" />
+          </div>
+        )}
+
+        {fileName && !loading && (
+          <div className="tidysync-file-pill">
+            <Icon source={FileIcon} tone="base" />
+            <InlineStack gap="200" blockAlign="center">
+              <Text as="span" variant="bodySm" fontWeight="semibold">
+                {fileName}
               </Text>
-            )}
-          </InlineStack>
-        </div>
-      )}
-    </label>
+              {fileSize != null && (
+                <Text as="span" variant="bodySm" tone="subdued">
+                  {formatBytes(fileSize)}
+                </Text>
+              )}
+            </InlineStack>
+          </div>
+        )}
+      </label>
+    </div>
   );
 }

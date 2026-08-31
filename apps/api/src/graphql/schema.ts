@@ -388,12 +388,17 @@ export const resolvers = {
         prisma.tenant.count({ where: { status: "ACTIVE" } }),
         jobRepository.countByStatus(),
       ]);
-      const { listConfiguredAiProviders } = await import("@tidysync/ai");
+      const { applyAiSettingsToRuntime } = await import("../services/ai-settings");
+      await applyAiSettingsToRuntime();
+      const { getAiProviderStatus } = await import("@tidysync/ai");
+      const aiStatus = getAiProviderStatus();
       return {
         redis: redisOk ? "ok" : "error",
         activeTenants: tenantCount,
-        aiProviders: listConfiguredAiProviders(),
-        aiProviderMode: process.env.AI_PROVIDER ?? "auto",
+        aiProviders: aiStatus.configuredProviders,
+        aiProviderMode: aiStatus.providerMode,
+        aiFallbackOrder: aiStatus.fallbackOrder,
+        aiRuntimeSource: aiStatus.runtimeSource,
         jobs: {
           total: jobCounts[0],
           running: jobCounts[1],

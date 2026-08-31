@@ -19,7 +19,14 @@ export {
   type AgentIntentResult,
 } from "./agent";
 
-export { listConfiguredAiProviders } from "./providers";
+export {
+  listConfiguredAiProviders,
+  testAiConnection,
+  getAiProviderStatus,
+  setAiRuntimeConfig,
+  type AiRuntimeConfig,
+  type AiProviderName,
+} from "./providers";
 
 export async function parseNlBulkEditWithAi(prompt: string): Promise<{
   plan: MutationPlan;
@@ -135,7 +142,13 @@ Return JSON only (no markdown fences):
   "descriptionHtml": "full rich HTML product description"
 }
 
-${SHOPIFY_DESCRIPTION_HTML_INSTRUCTIONS}`,
+${SHOPIFY_DESCRIPTION_HTML_INSTRUCTIONS}
+
+Important SEO rules:
+- seoTitle MUST be set (40-60 chars), keyword-focused, and preferably different from the bare product title
+- seoDescription MUST be 120-160 characters with a clear CTA
+- descriptionHtml: short paragraphs (2-3 sentences), bullet lists, no inline CSS or <style> tags
+- Prefer readable HTML only: <p>, <ul>, <li>, <h2>, <strong>`,
       },
       { role: "user", content: JSON.stringify({ product, metrics }) },
     ],

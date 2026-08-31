@@ -227,6 +227,7 @@ export function Dashboard() {
   const [scheduleActionId, setScheduleActionId] = useState<string | null>(null);
   const [migrationBackupDone, setMigrationBackupDone] = useState(false);
   const [cancelingJobId, setCancelingJobId] = useState<string | null>(null);
+  const [agentAutoStartSeo, setAgentAutoStartSeo] = useState(false);
   const [brandVoice, setBrandVoice] = useState("professional, helpful");
   const [notifyEmail, setNotifyEmail] = useState("");
   const [creditTopUp, setCreditTopUp] = useState("10");
@@ -1245,6 +1246,10 @@ export function Dashboard() {
                     creditsRemaining={tenant?.plan?.aiCreditsRemaining}
                     onCreditsRefresh={() => loadData()}
                     onUpgrade={goToBilling}
+                    onBulkApplySeo={() => {
+                      setAgentAutoStartSeo(true);
+                      setTab(12);
+                    }}
                   />
                 )}
 
@@ -1689,6 +1694,8 @@ export function Dashboard() {
                       setSelectedJob(job as Job);
                       setPreviewOpen(true);
                     }}
+                    autoStartSeo={agentAutoStartSeo}
+                    onAutoStartSeoConsumed={() => setAgentAutoStartSeo(false)}
                   />
                 )}
 

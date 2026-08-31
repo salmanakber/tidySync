@@ -60,6 +60,7 @@ interface ProductSeoStudioProps {
   creditsRemaining?: number | string;
   onCreditsRefresh?: () => void;
   onUpgrade?: () => void;
+  onBulkApplySeo?: () => void;
 }
 
 function scoreTone(score: number): "success" | "warning" | "critical" {
@@ -107,7 +108,13 @@ function ScoreRing({ score }: { score: number }) {
   );
 }
 
-export function ProductSeoStudio({ shop, creditsRemaining, onCreditsRefresh, onUpgrade }: ProductSeoStudioProps) {
+export function ProductSeoStudio({
+  shop,
+  creditsRemaining,
+  onCreditsRefresh,
+  onUpgrade,
+  onBulkApplySeo,
+}: ProductSeoStudioProps) {
   const [search, setSearch] = useState("");
   const [products, setProducts] = useState<CatalogProduct[]>([]);
   const [loadingList, setLoadingList] = useState(true);
@@ -195,18 +202,26 @@ export function ProductSeoStudio({ shop, creditsRemaining, onCreditsRefresh, onU
         <BlockStack gap="100">
           <Text as="h3" variant="headingMd">Product SEO intelligence</Text>
           <Text as="p" variant="bodySm" tone="subdued">
-            Select a product for a deep SEO audit with scores, charts, and an AI strategist briefing.
-            Each analysis uses <strong>1 AI credit</strong>.
+            Select a product for a deep SEO audit. Analysis uses <strong>1 credit</strong>.
+            Apply uses <strong>1–4 credits</strong> based on how much SEO work the product needs
+            (missing titles, thin copy, low score).
           </Text>
         </BlockStack>
-        <Badge tone="info">{`${String(creditsRemaining ?? "—")} credits left`}</Badge>
+        <InlineStack gap="200" blockAlign="center" wrap>
+          {onBulkApplySeo && (
+            <Button variant="primary" onClick={onBulkApplySeo}>
+              Bulk apply SEO
+            </Button>
+          )}
+          <Badge tone="info">{`${String(creditsRemaining ?? "—")} credits left`}</Badge>
+        </InlineStack>
       </div>
 
       {creditsLow && onUpgrade && (
         <AppAlert
           tone="warning"
           title="No AI credits left"
-          message="SEO analysis and apply each use 1 credit. Buy a top-up or upgrade your plan to continue."
+          message="SEO analysis uses 1 credit; apply uses 1–4 credits depending on effort. Buy a top-up or upgrade your plan to continue."
           primaryAction={{ content: "Go to Billing", onAction: onUpgrade }}
         />
       )}
@@ -309,8 +324,11 @@ export function ProductSeoStudio({ shop, creditsRemaining, onCreditsRefresh, onU
                       loading={applying}
                       disabled={analyzing || applying}
                     >
-                      Apply AI SEO improvements (1 credit)
+                      Apply AI SEO improvements
                     </Button>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Credits scale with effort (missing SEO title/meta, thin description, low score) — typically 1–4.
+                    </Text>
                   </InlineStack>
                   {applySuccess && (
                     <Text as="p" variant="bodySm" tone="success">{applySuccess}</Text>

@@ -386,6 +386,14 @@ app.all("/api/graphql", graphqlHandler);
 app.all("/admin/api/graphql", graphqlHandler);
 
 async function main() {
+  try {
+    const { applyAiSettingsToRuntime } = await import("./services/ai-settings");
+    await applyAiSettingsToRuntime();
+    console.log("AI runtime config loaded from app settings / env");
+  } catch (err) {
+    console.warn("AI settings bootstrap skipped:", err instanceof Error ? err.message : err);
+  }
+
   await attachUiApps(app);
 
   app.listen(PORT, API_HOST, () => {

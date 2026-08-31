@@ -116,7 +116,35 @@ createWorker(QUEUE_NAMES.CATALOG_SCAN, async (data) => {
   await processCatalogHealthScan(data.jobId, data.tenantId, data.shop);
 });
 
-setInterval(() => runScheduler().catch(console.error), 60000);
+async function refreshAiRuntimeFromDb() {
+  try {
+    const { prisma } = await import("@tidysync/database");
+    const { setAiRuntimeConfig } = await import("@tidysync/ai");
+    const row = await prisma.appSetting.findUnique({ where: { key: "ai_providers" } });
+    const value = (row?.value ?? {}) as Record<string, string | undefined>;
+    setAiRuntimeConfig({
+      provider: value.provider,
+      fallbackOrder: value.fallbackOrder,
+      groqApiKey: value.groqApiKey,
+      groqModel: value.groqModel,
+      geminiApiKey: value.geminiApiKey,
+      geminiModel: value.geminiModel,
+      openaiApiKey: value.openaiApiKey,
+      openaiModel: value.openaiModel,
+    });
+  } catch (err) {
+    console.warn(
+      "[ai] Failed to refresh runtime config:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
+
+void refreshAiRuntimeFromDb();
+setInterval(() => {
+  runScheduler().catch(console.error);
+  void refreshAiRuntimeFromDb();
+}, 60000);
 
 console.log("TidySync worker started — listening on queues:");
 console.log(Object.values(QUEUE_NAMES).join(", "));

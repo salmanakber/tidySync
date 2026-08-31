@@ -73,6 +73,9 @@ interface AgentStudioProps {
   onUpgrade?: () => void;
   onJobStarted?: (jobId: string, meta?: { isImport?: boolean; rowCount?: number }) => void;
   onFixPreview?: (job: AgentJob) => void;
+  /** When set, auto-runs the Improve product SEO mission once */
+  autoStartSeo?: boolean;
+  onAutoStartSeoConsumed?: () => void;
 }
 
 const QUICK_ACTIONS = [
@@ -129,7 +132,15 @@ function isScanResult(v: unknown): v is StoreScanResult {
   return Boolean(v && typeof v === "object" && "overallHealthScore" in (v as object));
 }
 
-export function AgentStudio({ shop, onApprove, onUpgrade, onJobStarted, onFixPreview }: AgentStudioProps) {
+export function AgentStudio({
+  shop,
+  onApprove,
+  onUpgrade,
+  onJobStarted,
+  onFixPreview,
+  autoStartSeo,
+  onAutoStartSeoConsumed,
+}: AgentStudioProps) {
   const [prompt, setPrompt] = useState("");
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [loading, setLoading] = useState(false);
@@ -267,6 +278,22 @@ export function AgentStudio({ shop, onApprove, onUpgrade, onJobStarted, onFixPre
       void runAgentMission(action.prompt);
     }
   };
+
+  const seoAutoStarted = useRef(false);
+  useEffect(() => {
+    if (!autoStartSeo) {
+      seoAutoStarted.current = false;
+      return;
+    }
+    if (seoAutoStarted.current) return;
+    seoAutoStarted.current = true;
+    onAutoStartSeoConsumed?.();
+    const seoAction = QUICK_ACTIONS.find((a) => a.id === "seo");
+    if (seoAction?.prompt) {
+      void runAgentMission(seoAction.prompt);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot from SEO studio bulk button
+  }, [autoStartSeo]);
 
   const steps = agentJob?.mutationPlan?.steps ?? [];
   const runsPct =

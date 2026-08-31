@@ -19,6 +19,7 @@ import {
   applyProductSeoToShopify,
   fetchProductSeoSource,
   productSeoMetricsInput,
+  seoApplyCreditCost,
 } from "../services/product-seo";
 
 export const extensionTypeDefs = `#graphql
@@ -213,6 +214,52 @@ export const extensionTypeDefs = `#graphql
     fields: [String!]
   }
 
+  type AiEnvFallback {
+    groq: Boolean!
+    gemini: Boolean!
+    openai: Boolean!
+  }
+
+  type AdminAiSettings {
+    provider: String!
+    fallbackOrder: String!
+    groqApiKeySet: Boolean!
+    groqApiKeyHint: String
+    groqModel: String!
+    geminiApiKeySet: Boolean!
+    geminiApiKeyHint: String
+    geminiModel: String!
+    openaiApiKeySet: Boolean!
+    openaiApiKeyHint: String
+    openaiModel: String!
+    envFallback: AiEnvFallback!
+    source: String!
+  }
+
+  type AdminAiTestResult {
+    ok: Boolean!
+    provider: String!
+    modelUsed: String!
+    reply: String!
+    configuredProviders: [String!]!
+    providerMode: String!
+    error: String
+  }
+
+  input AdminAiSettingsInput {
+    provider: String
+    fallbackOrder: String
+    groqApiKey: String
+    groqModel: String
+    geminiApiKey: String
+    geminiModel: String
+    openaiApiKey: String
+    openaiModel: String
+    clearGroqApiKey: Boolean
+    clearGeminiApiKey: Boolean
+    clearOpenaiApiKey: Boolean
+  }
+
   extend type Query {
     auditLogs(limit: Int = 50): [AuditLog!]!
     scheduledJobs: [ScheduledJob!]!
@@ -224,6 +271,7 @@ export const extensionTypeDefs = `#graphql
     tenantIntegrations: [TenantIntegration!]!
     adminAuditLogs(limit: Int = 100): [AuditLog!]!
     adminFeatureFlags: [FeatureFlag!]!
+    adminAiSettings: AdminAiSettings!
   }
 
   extend type Mutation {
@@ -261,6 +309,8 @@ export const extensionTypeDefs = `#graphql
     ): NotificationSettings!
     pauseJob(jobId: ID!): Job!
     adminUpdateFeatureFlag(key: String!, enabled: Boolean!, tenantId: ID): FeatureFlag!
+    adminUpdateAiSettings(input: AdminAiSettingsInput!): AdminAiSettings!
+    adminTestAi(prompt: String): AdminAiTestResult!
     adminRetryJob(jobId: ID!): Job!
   }
 `;
@@ -377,6 +427,12 @@ export const extensionResolvers = {
     adminFeatureFlags: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
       requireAdmin(ctx);
       return featureFlagRepository.listAll();
+    },
+    adminAiSettings: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
+      requireAdmin(ctx);
+      const { getPublicAiSettings, applyAiSettingsToRuntime } = await import("../services/ai-settings");
+      await applyAiSettingsToRuntime();
+      return getPublicAiSettings();
     },
   },
   Mutation: {
@@ -546,10 +602,11 @@ export const extensionResolvers = {
     },
     applyProductSeo: async (_: unknown, args: { productId: string }, ctx: GraphQLContext) => {
       const { tenantId, shop } = requireActiveMerchant(ctx);
-      await consumeAiCredit(tenantId, 1);
 
       const source = await fetchProductSeoSource(shop, ctx.sessionToken, args.productId);
       const beforeMetrics = analyzeProductSeoMetrics(productSeoMetricsInput(source));
+      const creditsUsed = seoApplyCreditCost(beforeMetrics);
+      await consumeAiCredit(tenantId, creditsUsed);
 
       const improvements = await generateProductSeoImprovements(
         {
@@ -561,9 +618,51 @@ export const extensionResolvers = {
         beforeMetrics as unknown as Record<string, unknown>,
       );
 
-      await applyProductSeoToShopify(shop, ctx.sessionToken, args.productId, improvements);
+      // Guarantee SEO title/description even if the model omitted them
+      if (!improvements.seoTitle?.trim()) {
+        improvements.seoTitle = source.title.slice(0, 60);
+      }
+      if (!improvements.seoDescription?.trim()) {
+        const plain = String(source.descriptionHtml ?? "")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        improvements.seoDescription =
+          plain.slice(0, 155) || `Shop ${source.title} — quality products with fast shipping.`;
+      }
 
-      const updated = await fetchProductSeoSource(shop, ctx.sessionToken, args.productId);
+      const appliedSeo = await applyProductSeoToShopify(
+        shop,
+        ctx.sessionToken,
+        args.productId,
+        improvements,
+      );
+
+      // Brief pause so Shopify Admin API reflects the write
+      await new Promise((r) => setTimeout(r, 400));
+
+      let updated = await fetchProductSeoSource(shop, ctx.sessionToken, args.productId);
+      // If SEO title still missing after apply, force a second write with known good values
+      if (!updated.seo.title?.trim() && improvements.seoTitle) {
+        await applyProductSeoToShopify(shop, ctx.sessionToken, args.productId, {
+          seoTitle: improvements.seoTitle,
+          seoDescription: improvements.seoDescription,
+        });
+        await new Promise((r) => setTimeout(r, 400));
+        updated = await fetchProductSeoSource(shop, ctx.sessionToken, args.productId);
+      }
+
+      // Prefer mutation response SEO if re-fetch lags
+      if (!updated.seo.title?.trim() && appliedSeo.seoTitle) {
+        updated = {
+          ...updated,
+          seo: {
+            title: appliedSeo.seoTitle,
+            description: appliedSeo.seoDescription ?? updated.seo.description,
+          },
+        };
+      }
+
       const metrics = analyzeProductSeoMetrics(productSeoMetricsInput(updated));
 
       const aiExplanation = await generateProductSeoInsight(
@@ -584,8 +683,11 @@ export const extensionResolvers = {
           generatedPlan: {
             applied: improvements,
             metrics,
+            creditsUsed,
+            beforeScore: beforeMetrics.overallScore,
+            afterScore: metrics.overallScore,
           } as object,
-          creditsConsumed: 1,
+          creditsConsumed: creditsUsed,
           modelUsed: improvements.modelUsed ?? "seo-apply",
         },
       });
@@ -602,7 +704,7 @@ export const extensionResolvers = {
           seoDescription: improvements.seoDescription,
           descriptionPreview: improvements.descriptionHtml.slice(0, 400),
         },
-        creditsUsed: 1,
+        creditsUsed,
       };
     },
     createStoreBackup: async (_: unknown, args: { label?: string }, ctx: GraphQLContext) => {
@@ -1043,6 +1145,36 @@ export const extensionResolvers = {
           enabled: args.enabled,
         },
       });
+    },
+    adminUpdateAiSettings: async (
+      _: unknown,
+      args: {
+        input: {
+          provider?: string | null;
+          fallbackOrder?: string | null;
+          groqApiKey?: string | null;
+          groqModel?: string | null;
+          geminiApiKey?: string | null;
+          geminiModel?: string | null;
+          openaiApiKey?: string | null;
+          openaiModel?: string | null;
+          clearGroqApiKey?: boolean | null;
+          clearGeminiApiKey?: boolean | null;
+          clearOpenaiApiKey?: boolean | null;
+        };
+      },
+      ctx: GraphQLContext,
+    ) => {
+      requireAdmin(ctx);
+      const { updateAiSettings } = await import("../services/ai-settings");
+      return updateAiSettings(args.input);
+    },
+    adminTestAi: async (_: unknown, args: { prompt?: string | null }, ctx: GraphQLContext) => {
+      requireAdmin(ctx);
+      const { applyAiSettingsToRuntime } = await import("../services/ai-settings");
+      await applyAiSettingsToRuntime();
+      const { testAiConnection } = await import("@tidysync/ai");
+      return testAiConnection(args.prompt ?? undefined);
     },
     adminRetryJob: async (_: unknown, args: { jobId: string }, ctx: GraphQLContext) => {
       requireAdmin(ctx);

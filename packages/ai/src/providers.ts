@@ -1,6 +1,12 @@
 import OpenAI from "openai";
+import {
+  getAiRuntimeConfig,
+  resolveAiSetting,
+  type AiProviderName,
+} from "./runtime-config";
 
-export type AiProviderName = "openai" | "groq" | "gemini" | "rule-based";
+export type { AiProviderName, AiRuntimeConfig } from "./runtime-config";
+export { setAiRuntimeConfig, getAiRuntimeConfig, resolveAiSetting } from "./runtime-config";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -26,7 +32,8 @@ interface ProviderCallOptions {
 }
 
 function parseFallbackOrder(): AiProviderName[] {
-  const raw = process.env.AI_FALLBACK_ORDER ?? "groq,gemini,openai";
+  const raw =
+    resolveAiSetting("fallbackOrder", "AI_FALLBACK_ORDER") ?? "groq,gemini,openai";
   const names = raw
     .split(",")
     .map((s) => s.trim().toLowerCase())
@@ -37,7 +44,9 @@ function parseFallbackOrder(): AiProviderName[] {
 }
 
 function configuredProviders(): AiProviderName[] {
-  const forced = process.env.AI_PROVIDER?.trim().toLowerCase();
+  const forced = (
+    resolveAiSetting("provider", "AI_PROVIDER") ?? "auto"
+  ).trim().toLowerCase();
   if (forced && forced !== "auto") {
     if (forced === "openai" || forced === "groq" || forced === "gemini") {
       return [forced];
@@ -75,11 +84,9 @@ async function chatOpenAICompatible(
 async function chatGemini(
   messages: ChatMessage[],
   options: ProviderCallOptions,
+  apiKey: string,
+  model: string,
 ): Promise<ChatCompletionResult> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY not set");
-
-  const model = process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
   const system = messages.find((m) => m.role === "system")?.content ?? "";
   const userParts = messages.filter((m) => m.role === "user").map((m) => m.content);
   const userText = userParts.join("\n\n");
@@ -119,23 +126,27 @@ async function chatWithProvider(
   messages: ChatMessage[],
   options: ProviderCallOptions,
 ): Promise<ChatCompletionResult> {
-  if (provider === "groq" && process.env.GROQ_API_KEY) {
-    const client = openaiCompatibleClient(
-      "https://api.groq.com/openai/v1",
-      process.env.GROQ_API_KEY,
-    );
-    const model = process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile";
+  if (provider === "groq") {
+    const apiKey = resolveAiSetting("groqApiKey", "GROQ_API_KEY");
+    if (!apiKey) throw new Error("Groq API key not configured (admin AI settings or GROQ_API_KEY)");
+    const client = openaiCompatibleClient("https://api.groq.com/openai/v1", apiKey);
+    const model = resolveAiSetting("groqModel", "GROQ_MODEL") ?? "llama-3.3-70b-versatile";
     return chatOpenAICompatible(client, model, messages, options, "groq");
   }
 
-  if (provider === "openai" && process.env.OPENAI_API_KEY) {
-    const client = openaiCompatibleClient("https://api.openai.com/v1", process.env.OPENAI_API_KEY);
-    const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+  if (provider === "openai") {
+    const apiKey = resolveAiSetting("openaiApiKey", "OPENAI_API_KEY");
+    if (!apiKey) throw new Error("OpenAI API key not configured (admin AI settings or OPENAI_API_KEY)");
+    const client = openaiCompatibleClient("https://api.openai.com/v1", apiKey);
+    const model = resolveAiSetting("openaiModel", "OPENAI_MODEL") ?? "gpt-4o-mini";
     return chatOpenAICompatible(client, model, messages, options, "openai");
   }
 
-  if (provider === "gemini" && process.env.GEMINI_API_KEY) {
-    return chatGemini(messages, options);
+  if (provider === "gemini") {
+    const apiKey = resolveAiSetting("geminiApiKey", "GEMINI_API_KEY");
+    if (!apiKey) throw new Error("Gemini API key not configured (admin AI settings or GEMINI_API_KEY)");
+    const model = resolveAiSetting("geminiModel", "GEMINI_MODEL") ?? "gemini-2.0-flash";
+    return chatGemini(messages, options, apiKey, model);
   }
 
   throw new Error(`Provider ${provider} not configured`);
@@ -151,12 +162,14 @@ export async function chatCompletion(
     temperature: options?.temperature ?? 0.2,
   };
   const providers = configuredProviders();
+  const errors: string[] = [];
 
   for (const provider of providers) {
     try {
       return await chatWithProvider(provider, messages, callOptions);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`${provider}: ${msg}`);
       if (process.env.NODE_ENV !== "production") {
         console.warn(`[tidysync-ai] ${provider} failed: ${msg}`);
       }
@@ -170,10 +183,92 @@ export async function chatCompletion(
   };
 }
 
+/** Throws if no live provider succeeds — used by admin AI test. */
+export async function testAiConnection(prompt?: string): Promise<{
+  ok: boolean;
+  provider: AiProviderName;
+  modelUsed: string;
+  reply: string;
+  configuredProviders: AiProviderName[];
+  providerMode: string;
+  error?: string;
+}> {
+  const configured = listConfiguredAiProviders();
+  const providerMode = resolveAiSetting("provider", "AI_PROVIDER") ?? "auto";
+
+  if (configured.length === 0) {
+    return {
+      ok: false,
+      provider: "rule-based",
+      modelUsed: "none",
+      reply: "",
+      configuredProviders: [],
+      providerMode,
+      error: "No AI API keys configured. Save a Groq, Gemini, or OpenAI key in Admin → AI settings.",
+    };
+  }
+
+  const callOptions: ProviderCallOptions = {
+    jsonMode: false,
+    maxTokens: 80,
+    temperature: 0.2,
+  };
+  const messages: ChatMessage[] = [
+    {
+      role: "system",
+      content: "You are a connectivity probe for TidySync. Reply in one short sentence.",
+    },
+    {
+      role: "user",
+      content: prompt?.trim() || "Reply with: TidySync AI is working.",
+    },
+  ];
+
+  const errors: string[] = [];
+  for (const provider of configuredProviders()) {
+    try {
+      const result = await chatWithProvider(provider, messages, callOptions);
+      if (!result.text.trim()) {
+        errors.push(`${provider}: empty response`);
+        continue;
+      }
+      return {
+        ok: true,
+        provider: result.provider,
+        modelUsed: result.modelUsed,
+        reply: result.text.trim(),
+        configuredProviders: configured,
+        providerMode,
+      };
+    } catch (err) {
+      errors.push(`${provider}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return {
+    ok: false,
+    provider: "rule-based",
+    modelUsed: "none",
+    reply: "",
+    configuredProviders: configured,
+    providerMode,
+    error: errors.join(" | ") || "All providers failed",
+  };
+}
+
 export function listConfiguredAiProviders(): AiProviderName[] {
   const list: AiProviderName[] = [];
-  if (process.env.GROQ_API_KEY) list.push("groq");
-  if (process.env.GEMINI_API_KEY) list.push("gemini");
-  if (process.env.OPENAI_API_KEY) list.push("openai");
+  if (resolveAiSetting("groqApiKey", "GROQ_API_KEY")) list.push("groq");
+  if (resolveAiSetting("geminiApiKey", "GEMINI_API_KEY")) list.push("gemini");
+  if (resolveAiSetting("openaiApiKey", "OPENAI_API_KEY")) list.push("openai");
   return list;
+}
+
+export function getAiProviderStatus() {
+  return {
+    providerMode: resolveAiSetting("provider", "AI_PROVIDER") ?? "auto",
+    fallbackOrder: resolveAiSetting("fallbackOrder", "AI_FALLBACK_ORDER") ?? "groq,gemini,openai",
+    configuredProviders: listConfiguredAiProviders(),
+    runtimeSource: Object.keys(getAiRuntimeConfig()).length > 0 ? "admin+env" : "env",
+  };
 }

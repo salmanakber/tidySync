@@ -144,20 +144,38 @@ export function MigrationWizard({
               <p>CSV or XLSX export from your old platform. Column analysis runs in the background.</p>
             </div>
             <div className="tidysync-studio-step-body">
-              {importProgress && importProgress.phase !== "failed" ? (
-                <div className="tidysync-studio-loading-inline">
-                  <Spinner size="small" />
-                  <span>{importProgress.message ?? "Processing your file…"}</span>
-                </div>
-              ) : (
-                <FileDropzone onFile={async (file) => {
-                  await onUpload(file);
-                  goNext();
-                }} loading={loading} />
-              )}
+              <div className="tidysync-migration-upload">
+                {(loading || (importProgress && importProgress.phase !== "failed" && importProgress.phase !== "complete")) && (
+                  <div className="tidysync-studio-loading-inline">
+                    <Spinner size="small" />
+                    <span>{importProgress?.message ?? "Uploading & analyzing your file…"}</span>
+                  </div>
+                )}
+                <FileDropzone
+                  disabled={loading}
+                  loading={loading}
+                  onFile={(file) => {
+                    void (async () => {
+                      try {
+                        await onUpload(file);
+                        goNext();
+                      } catch {
+                        /* parent surfaces error via importProgress / alerts */
+                      }
+                    })();
+                  }}
+                />
+              </div>
             </div>
             <div className="tidysync-studio-step-foot">
               <Button onClick={goBack}>Back</Button>
+              <Button
+                variant="primary"
+                onClick={goNext}
+                disabled={!mappingReady && !importProgress?.jobId}
+              >
+                Continue
+              </Button>
             </div>
           </>
         )}
