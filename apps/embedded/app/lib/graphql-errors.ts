@@ -76,6 +76,8 @@ export interface AppAlertModel {
   code?: string;
   primaryAction?: { content: string; onAction: () => void };
   secondaryAction?: { content: string; onAction: () => void };
+  /** Auto-hide after ms (success toasts default to this in the UI stack). */
+  autoDismissMs?: number;
 }
 
 export function alertFromError(

@@ -130,7 +130,7 @@ async function chatWithProvider(
     const apiKey = resolveAiSetting("groqApiKey", "GROQ_API_KEY");
     if (!apiKey) throw new Error("Groq API key not configured (admin AI settings or GROQ_API_KEY)");
     const client = openaiCompatibleClient("https://api.groq.com/openai/v1", apiKey);
-    const model = resolveAiSetting("groqModel", "GROQ_MODEL") ?? "llama-3.3-70b-versatile";
+    const model = resolveAiSetting("groqModel", "GROQ_MODEL") ?? "openai/gpt-oss-120b";
     return chatOpenAICompatible(client, model, messages, options, "groq");
   }
 

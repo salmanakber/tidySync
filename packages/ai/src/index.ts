@@ -98,7 +98,7 @@ export async function generateProductSeoInsight(
     {
       role: "system",
       content:
-        "You are a senior Shopify SEO strategist. Given product data and computed SEO metrics, write a concise expert briefing: 1) overall verdict, 2) top 3 strengths, 3) top 3 prioritized fixes, 4) one quick win for today. Use short paragraphs and bullet points. Be specific with numbers from the data. Tone: premium, clear, actionable.",
+        "You are a senior Shopify SEO strategist. Given product data and computed SEO metrics, write a concise expert briefing using this exact structure and plain text (you may use **bold** for emphasis only):\n\n**Overall Verdict – SCORE / 100**\nOne short paragraph verdict.\n\n### Top 3 Strengths\n- item\n- item\n- item\n\n### Top 3 Prioritized Fixes\n1. item\n2. item\n3. item\n\n### Quick Win for Today\nOne concrete action the merchant can do today.\n\nBe specific with numbers from the data. Tone: premium, clear, actionable. Do not wrap the whole response in a code fence.",
     },
     { role: "user", content: JSON.stringify({ product, metrics }) },
   ]);

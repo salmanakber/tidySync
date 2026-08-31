@@ -1515,7 +1515,7 @@ export function AdminConsole() {
                   className="input"
                   value={aiGroqModel}
                   onChange={(e) => setAiGroqModel(e.target.value)}
-                  placeholder="llama-3.3-70b-versatile"
+                  placeholder="openai/gpt-oss-120b"
                 />
               </label>
               {aiSettings?.groqApiKeySet && (

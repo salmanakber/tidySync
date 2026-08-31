@@ -188,7 +188,11 @@ export function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [alerts, setAlerts] = useState<AppAlertModel[]>([]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [dismissedPlanAlertKeys, setDismissedPlanAlertKeys] = useState<Set<string>>(new Set());
+  const jobStatusRef = useRef<Map<string, string>>(new Map());
+  const jobToastSeededRef = useRef(false);
+  const toastedJobIdsRef = useRef<Set<string>>(new Set());
   const [exportPlatform, setExportPlatform] = useState("shopify");
   const [importPlatform, setImportPlatform] = useState("csv");
   const [detectedPlatform, setDetectedPlatform] = useState<string | null>(null);
@@ -242,7 +246,14 @@ export function Dashboard() {
 
   const pushAlert = useCallback((alert: Omit<AppAlertModel, "id">) => {
     const id = `${alert.code ?? "alert"}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    setAlerts((prev) => [...prev, { ...alert, id }]);
+    const next: AppAlertModel = {
+      ...alert,
+      id,
+      autoDismissMs:
+        alert.autoDismissMs ??
+        (alert.tone === "success" || alert.code === "JOB_SUCCESS" ? 4500 : undefined),
+    };
+    setAlerts((prev) => [...prev, next]);
   }, []);
 
   const showOperationalError = useCallback(
@@ -348,6 +359,31 @@ export function Dashboard() {
           });
           if (done) {
             jobEventCleanupRef.current = null;
+            if (ev.status === "COMPLETED" || ev.status === "FAILED") {
+              toastedJobIdsRef.current.add(jobId);
+            }
+            if (ev.status === "COMPLETED") {
+              pushAlert({
+                tone: "success",
+                code: "JOB_SUCCESS",
+                title: "Job completed",
+                message:
+                  ev.successCount > 0
+                    ? `${ev.successCount.toLocaleString()} items processed successfully${
+                        ev.failedCount ? ` · ${ev.failedCount} failed` : ""
+                      }`
+                    : "Your job finished successfully.",
+                autoDismissMs: 4500,
+              });
+            } else if (ev.status === "FAILED") {
+              pushAlert({
+                tone: "critical",
+                code: "JOB_FAILED",
+                title: "Job failed",
+                message: "Some rows could not be processed — check Jobs for details.",
+                autoDismissMs: 7000,
+              });
+            }
             window.setTimeout(() => setImportProgress(null), 2800);
             void loadData();
           }
@@ -355,7 +391,7 @@ export function Dashboard() {
         () => void loadData(),
       );
     },
-    [shop, loadData],
+    [shop, loadData, pushAlert],
   );
 
   useEffect(() => {
@@ -651,6 +687,50 @@ export function Dashboard() {
     const timer = window.setInterval(() => void loadData(), 3500);
     return () => window.clearInterval(timer);
   }, [shop, runningJobs.length, loadData]);
+
+  // Toast when jobs finish (including ones not tracked via SSE import progress)
+  useEffect(() => {
+    if (jobs.length === 0) return;
+    const prev = jobStatusRef.current;
+    if (!jobToastSeededRef.current) {
+      jobStatusRef.current = new Map(jobs.map((j) => [j.id, j.status]));
+      jobToastSeededRef.current = true;
+      return;
+    }
+
+    for (const job of jobs) {
+      const was = prev.get(job.id);
+      if (!was) continue;
+      if (toastedJobIdsRef.current.has(job.id)) continue;
+      if ((was === "RUNNING" || was === "QUEUED") && job.status === "COMPLETED") {
+        toastedJobIdsRef.current.add(job.id);
+        const label = job.type.replace(/_/g, " ");
+        pushAlert({
+          tone: "success",
+          code: "JOB_SUCCESS",
+          title: `${label} completed`,
+          message:
+            job.successCount > 0
+              ? `${job.successCount.toLocaleString()} ok${
+                  job.failedCount ? ` · ${job.failedCount} failed` : ""
+                }`
+              : "Finished successfully.",
+          autoDismissMs: 4500,
+        });
+      } else if ((was === "RUNNING" || was === "QUEUED") && job.status === "FAILED") {
+        toastedJobIdsRef.current.add(job.id);
+        pushAlert({
+          tone: "critical",
+          code: "JOB_FAILED",
+          title: `${job.type.replace(/_/g, " ")} failed`,
+          message: job.errorSummary?.slice(0, 160) || "Check the Jobs tab for details.",
+          autoDismissMs: 7000,
+        });
+      }
+    }
+    jobStatusRef.current = new Map(jobs.map((j) => [j.id, j.status]));
+  }, [jobs, pushAlert]);
+
   const productUsage = tenant?.plan?.maxProducts
     ? Math.min(100, Math.round((tenant.productCount / tenant.plan.maxProducts) * 100))
     : 0;
@@ -717,6 +797,14 @@ export function Dashboard() {
 
   return (
     <div className="tidysync-page-shell">
+    <AppAlertStack
+      mode="toasts"
+      alerts={allAlerts}
+      onDismiss={(id) => {
+        if (id.startsWith("plan-")) dismissPlanAlert(id);
+        else dismissAlert(id);
+      }}
+    />
     <Page
       fullWidth
       title="TidySync"
@@ -732,9 +820,10 @@ export function Dashboard() {
       ]}
     >
       <Layout>
-        {allAlerts.length > 0 && (
+        {allAlerts.some((a) => a.tone !== "success" && a.code !== "JOB_SUCCESS" && a.code !== "JOB_FAILED") && (
           <Layout.Section>
             <AppAlertStack
+              mode="banners"
               alerts={allAlerts}
               onDismiss={(id) => {
                 if (id.startsWith("plan-")) dismissPlanAlert(id);
@@ -744,7 +833,7 @@ export function Dashboard() {
           </Layout.Section>
         )}
 
-        {error && allAlerts.length === 0 && (
+        {error && allAlerts.filter((a) => a.tone !== "success" && a.code !== "JOB_SUCCESS" && a.code !== "JOB_FAILED").length === 0 && (
           <Layout.Section>
             <Banner tone="critical" onDismiss={() => setError(null)}>
               {error}
@@ -816,8 +905,18 @@ export function Dashboard() {
         )}
 
         <Layout.Section>
-          <div className="tidysync-workspace tidysync-workspace--sidebar">
-            <WorkspaceNav tabs={tabs} activeIndex={tab} onSelect={setTab} />
+          <div
+            className={`tidysync-workspace tidysync-workspace--sidebar${
+              sidebarCollapsed ? " is-sidebar-collapsed" : ""
+            }`}
+          >
+            <WorkspaceNav
+              tabs={tabs}
+              activeIndex={tab}
+              onSelect={setTab}
+              collapsed={sidebarCollapsed}
+              onCollapsedChange={setSidebarCollapsed}
+            />
             <div className="tidysync-workspace-main">
               <LiveJobsBar
                 jobs={jobs}

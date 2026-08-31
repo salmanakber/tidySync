@@ -12,6 +12,8 @@ import {
   AlertTriangleIcon,
   AutomationIcon,
   DatabaseIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
 } from "@shopify/polaris-icons";
 
 export interface WorkspaceTab {
@@ -29,6 +31,8 @@ interface WorkspaceNavProps {
   tabs: WorkspaceTab[];
   activeIndex: number;
   onSelect: (index: number) => void;
+  collapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
 }
 
 const TAB_ICONS: Record<string, typeof ImportIcon> = {
@@ -56,7 +60,13 @@ const NAV_GROUPS: Array<{ label: string; ids: string[] }> = [
   { label: "Admin", ids: ["audit", "schedules", "settings"] },
 ];
 
-export function WorkspaceNav({ tabs, activeIndex, onSelect }: WorkspaceNavProps) {
+export function WorkspaceNav({
+  tabs,
+  activeIndex,
+  onSelect,
+  collapsed = false,
+  onCollapsedChange,
+}: WorkspaceNavProps) {
   const groups: NavGroup[] = NAV_GROUPS.map((group) => ({
     label: group.label,
     items: group.ids
@@ -73,13 +83,28 @@ export function WorkspaceNav({ tabs, activeIndex, onSelect }: WorkspaceNavProps)
   })).filter((g) => g.items.length > 0);
 
   return (
-    <aside className="tidysync-sidebar" aria-label="Workspace navigation">
+    <aside
+      className={`tidysync-sidebar${collapsed ? " is-collapsed" : ""}`}
+      aria-label="Workspace navigation"
+      data-collapsed={collapsed ? "true" : "false"}
+    >
       <div className="tidysync-sidebar-brand">
         <span className="tidysync-sidebar-mark" />
-        <div>
+        <div className="tidysync-sidebar-brand-text">
           <span className="tidysync-sidebar-title">Workspace</span>
           <span className="tidysync-sidebar-sub">TidySync control center</span>
         </div>
+        {onCollapsedChange ? (
+          <button
+            type="button"
+            className="tidysync-sidebar-toggle"
+            onClick={() => onCollapsedChange(!collapsed)}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand" : "Collapse"}
+          >
+            <Icon source={collapsed ? ChevronRightIcon : ChevronLeftIcon} />
+          </button>
+        ) : null}
       </div>
 
       <nav className="tidysync-sidebar-nav">
@@ -97,6 +122,7 @@ export function WorkspaceNav({ tabs, activeIndex, onSelect }: WorkspaceNavProps)
                       className={`tidysync-sidebar-link${active ? " is-active" : ""}${isPremium ? " is-premium" : ""}`}
                       onClick={() => onSelect(index)}
                       aria-current={active ? "page" : undefined}
+                      title={collapsed ? tab.content : undefined}
                     >
                       <span className="tidysync-sidebar-link-icon">
                         <Icon source={icon} />

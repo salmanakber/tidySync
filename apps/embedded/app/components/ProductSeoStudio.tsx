@@ -13,6 +13,7 @@ import {
 import { gqlRequest, QUERIES, MUTATIONS } from "../lib/graphql";
 import { alertFromError } from "../lib/graphql-errors";
 import { AppAlert } from "./AppAlert";
+import { AiBriefingView } from "./AiBriefingView";
 
 interface CatalogProduct {
   id: string;
@@ -379,14 +380,11 @@ export function ProductSeoStudio({
               </BlockStack>
 
               <div className="tidysync-seo-ai-panel">
-                <Text as="h4" variant="headingSm">AI strategist briefing</Text>
-                <div className="tidysync-seo-ai-body">
-                  {insight.aiExplanation.split("\n").map((line, i) =>
-                    line.trim() ? (
-                      <p key={i} className="tidysync-seo-ai-line">{line}</p>
-                    ) : null,
-                  )}
+                <div className="tidysync-seo-ai-panel-head">
+                  <Text as="h4" variant="headingSm">AI strategist briefing</Text>
+                  <Badge tone="info">Strategist</Badge>
                 </div>
+                <AiBriefingView text={insight.aiExplanation} />
               </div>
             </BlockStack>
           )}

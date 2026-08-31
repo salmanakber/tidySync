@@ -82,7 +82,7 @@ export async function getPublicAiSettings(): Promise<AiSettingsPublic> {
       settings.fallbackOrder?.trim() || process.env.AI_FALLBACK_ORDER || "groq,gemini,openai",
     groqApiKeySet: Boolean(settings.groqApiKey?.trim()),
     groqApiKeyHint: maskHint(settings.groqApiKey),
-    groqModel: settings.groqModel?.trim() || process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+    groqModel: settings.groqModel?.trim() || process.env.GROQ_MODEL || "openai/gpt-oss-120b",
     geminiApiKeySet: Boolean(settings.geminiApiKey?.trim()),
     geminiApiKeyHint: maskHint(settings.geminiApiKey),
     geminiModel: settings.geminiModel?.trim() || process.env.GEMINI_MODEL || "gemini-2.0-flash",
