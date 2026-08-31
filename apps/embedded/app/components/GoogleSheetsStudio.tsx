@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, Checkbox, Select, Spinner, TextField } from "@shopify/polaris";
+import { Button, Checkbox, Collapsible, Select, Spinner, TextField } from "@shopify/polaris";
 import { gqlRequest, QUERIES, MUTATIONS } from "../lib/graphql";
 import { alertFromError } from "../lib/graphql-errors";
 import { AppAlert } from "./AppAlert";
@@ -32,7 +32,6 @@ interface GoogleSheetsStudioProps {
   shop: string;
   onUpgrade?: () => void;
   onJobStarted?: (jobId: string) => void;
-  onOpenImport?: () => void;
   compact?: boolean;
 }
 
@@ -63,6 +62,7 @@ export function GoogleSheetsStudio({
   const [connecting, setConnecting] = useState(false);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [savingFeed, setSavingFeed] = useState(false);
+  const [feedOpen, setFeedOpen] = useState(false);
   const [syncMode, setSyncMode] = useState<FeedSyncMode>("create");
   const [schedule, setSchedule] = useState("daily");
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
@@ -89,6 +89,9 @@ export function GoogleSheetsStudio({
         setSchedule(sheets.config.schedule ?? "daily");
         setAutoSyncEnabled(sheets.config.autoSyncEnabled ?? false);
         setAutoApprove(sheets.config.autoApprove ?? false);
+        if (sheets.config.syncMode && sheets.config.syncMode !== "create") {
+          setFeedOpen(true);
+        }
       }
       setErrorAlert(null);
     } catch (e) {
@@ -174,46 +177,65 @@ export function GoogleSheetsStudio({
     }
   };
 
-  const feedSettingsBlock = sheetsIntegration ? (
-    <div className="tidysync-feed-settings">
-      <p className="tidysync-feed-settings-title">Live supplier feed</p>
-      <Select
-        label="Sync mode"
-        options={SYNC_MODE_OPTIONS}
-        value={syncMode}
-        onChange={(v) => setSyncMode(v as FeedSyncMode)}
-      />
-      {isLiveMode && !hasMapping && (
-        <p className="tidysync-sheets-compact-hint">
-          Run one sync in <strong>create</strong> mode, map columns, preview, and approve — then switch to live update mode.
-        </p>
-      )}
-      {isLiveMode && hasMapping && (
-        <>
-          <Select label="Schedule" options={SCHEDULE_OPTIONS} value={schedule} onChange={setSchedule} />
-          <Checkbox
-            label="Auto-sync on schedule"
-            checked={autoSyncEnabled}
-            onChange={setAutoSyncEnabled}
-            helpText="Worker checks every minute and runs when the interval elapses."
+  const feedSettingsPanel = sheetsIntegration ? (
+    <div className="tidysync-sheets-feed-panel">
+      <button
+        type="button"
+        className="tidysync-sheets-feed-toggle"
+        onClick={() => setFeedOpen((o) => !o)}
+        aria-expanded={feedOpen}
+      >
+        <span>Live supplier feed settings</span>
+        <span className="tidysync-sheets-feed-toggle-meta">
+          {isLiveMode && hasMapping ? "Active" : isLiveMode ? "Needs mapping" : "Import mode"}
+        </span>
+      </button>
+      <Collapsible open={feedOpen} id="sheets-feed-settings">
+        <div className="tidysync-sheets-feed-body">
+          <Select
+            label="Sync mode"
+            options={SYNC_MODE_OPTIONS}
+            value={syncMode}
+            onChange={(v) => setSyncMode(v as FeedSyncMode)}
           />
-          <Checkbox
-            label="Auto-apply without preview"
-            checked={autoApprove}
-            onChange={setAutoApprove}
-            helpText="Skip manual approve — only enable if you trust the supplier file."
-          />
-        </>
-      )}
-      <Button onClick={() => saveFeedSettings(sheetsIntegration.id)} loading={savingFeed}>
-        Save feed settings
-      </Button>
+          {isLiveMode && !hasMapping && (
+            <p className="tidysync-sheets-hint">
+              Run one sync in <strong>Create only</strong> mode, map columns, preview, and approve — then switch to live update.
+            </p>
+          )}
+          {isLiveMode && hasMapping && (
+            <>
+              <Select label="Schedule" options={SCHEDULE_OPTIONS} value={schedule} onChange={setSchedule} />
+              <Checkbox
+                label="Auto-sync on schedule"
+                checked={autoSyncEnabled}
+                onChange={setAutoSyncEnabled}
+                helpText="Runs on your worker schedule (hourly check)."
+              />
+              <Checkbox
+                label="Auto-apply without preview"
+                checked={autoApprove}
+                onChange={setAutoApprove}
+                helpText="Only enable if you fully trust the supplier file."
+              />
+            </>
+          )}
+          <Button onClick={() => saveFeedSettings(sheetsIntegration.id)} loading={savingFeed}>
+            Save feed settings
+          </Button>
+        </div>
+      </Collapsible>
     </div>
   ) : null;
 
   if (compact) {
     return (
-      <div className="tidysync-sheets-compact">
+      <div className="tidysync-sheets-panel">
+        <div className="tidysync-sheets-panel-head">
+          <h4>Google Sheets supplier feed</h4>
+          <p>Connect a shared spreadsheet — map once, then sync by SKU for price and stock updates.</p>
+        </div>
+
         {errorAlert && (
           <AppAlert
             tone={errorAlert.tone}
@@ -222,57 +244,86 @@ export function GoogleSheetsStudio({
             onDismiss={() => setErrorAlert(null)}
           />
         )}
+
         {loading ? (
-          <Spinner size="small" />
+          <div className="tidysync-studio-loading-inline">
+            <Spinner size="small" />
+            <span>Loading connection…</span>
+          </div>
         ) : sheetsIntegration ? (
           <>
-            <div className="tidysync-sheets-compact-row">
-              <span>
-                Connected · {cfg?.sheetName ?? "Sheet"}
-                {hasMapping ? " · mapping saved" : ""}
-                {isLiveMode && hasMapping ? " · live feed" : ""}
-              </span>
-              <Button
-                size="slim"
-                onClick={() => sync(sheetsIntegration.id)}
-                loading={syncing === sheetsIntegration.id}
-              >
-                {isLiveMode && hasMapping ? "Sync feed" : "Sync sheet"}
-              </Button>
-              <Button size="slim" onClick={() => disconnect(sheetsIntegration.id)}>Disconnect</Button>
+            <div className="tidysync-sheets-connected-bar">
+              <div className="tidysync-sheets-connected-info">
+                <span className="tidysync-studio-tag is-success">Connected</span>
+                <strong>{cfg?.sheetName ?? "Spreadsheet"}</strong>
+                {hasMapping && <span className="tidysync-sheets-meta-pill">Mapping saved</span>}
+                {isLiveMode && hasMapping && (
+                  <span className="tidysync-sheets-meta-pill is-live">Live feed</span>
+                )}
+                {cfg?.lastSyncAt && (
+                  <span className="tidysync-sheets-last-sync">
+                    Last sync {new Date(cfg.lastSyncAt).toLocaleString()}
+                  </span>
+                )}
+              </div>
+              <div className="tidysync-sheets-connected-actions">
+                <Button
+                  variant="primary"
+                  onClick={() => sync(sheetsIntegration.id)}
+                  loading={syncing === sheetsIntegration.id}
+                >
+                  {isLiveMode && hasMapping ? "Sync feed" : "Sync sheet"}
+                </Button>
+                <Button onClick={() => disconnect(sheetsIntegration.id)}>Disconnect</Button>
+              </div>
             </div>
-            {feedSettingsBlock}
+            {feedSettingsPanel}
           </>
         ) : (
-          <div className="tidysync-sheets-compact-connect">
+          <div className="tidysync-sheets-connect-form">
             <TextField
-              label="Sheet URL (shared as Viewer)"
-              labelHidden
+              label="Sheet URL"
               value={sheetUrl}
               onChange={setSheetUrl}
               placeholder="https://docs.google.com/spreadsheets/d/…"
+              helpText='Share as "Anyone with the link → Viewer"'
               autoComplete="off"
             />
-            <Button variant="primary" onClick={() => connect()} loading={connecting} disabled={!sheetUrl.trim()}>
-              Connect & sync
-            </Button>
+            <div className="tidysync-sheets-connect-row">
+              <TextField
+                label="Label"
+                value={sheetName}
+                onChange={setSheetName}
+                autoComplete="off"
+              />
+              <Button
+                variant="primary"
+                onClick={() => connect()}
+                loading={connecting}
+                disabled={!sheetUrl.trim()}
+              >
+                Connect & sync
+              </Button>
+            </div>
           </div>
         )}
-        <p className="tidysync-sheets-compact-hint">
-          Map once, then use <strong>Update by SKU</strong> for scheduled price/stock updates without duplicates.
-        </p>
       </div>
     );
   }
 
   return (
-    <div className="tidysync-sheets">
-      <header className="tidysync-sheets-hero">
-        <h2>Google Sheets supplier feed</h2>
-        <p>
-          Connect a supplier spreadsheet. First import maps columns; live feed matches by SKU or barcode and updates
-          price, stock, and titles on a schedule.
-        </p>
+    <div className="tidysync-studio tidysync-sheets">
+      <header className="tidysync-studio-hero">
+        <div className="tidysync-studio-hero-pattern" aria-hidden="true" />
+        <div className="tidysync-studio-hero-inner tidysync-studio-hero-inner--single">
+          <div className="tidysync-studio-hero-copy">
+            <span className="tidysync-studio-badge is-brand">Google Sheets</span>
+            <h2 className="tidysync-studio-title">Supplier feed sync</h2>
+            <p className="tidysync-studio-sub">
+              Connect a spreadsheet, map columns once, then match by SKU or barcode for scheduled price and inventory updates.
+            </p>
+          </div>
+        </div>
       </header>
 
       {errorAlert && (
@@ -285,55 +336,51 @@ export function GoogleSheetsStudio({
         />
       )}
 
-      {loading ? (
-        <div className="tidysync-sheets-loading">
-          <Spinner />
-        </div>
-      ) : sheetsIntegration ? (
-        <div className="tidysync-sheets-connected">
-          <div className="tidysync-sheets-card">
-            <h3>Connected spreadsheet</h3>
-            <p>ID: {cfg?.spreadsheetId}</p>
-            {cfg?.lastSyncAt && (
-              <p className="tidysync-sheets-meta">
-                Last sync: {new Date(cfg.lastSyncAt).toLocaleString()}
-              </p>
-            )}
-            <div className="tidysync-sheets-actions">
-              <Button
-                variant="primary"
-                onClick={() => sync(sheetsIntegration.id)}
-                loading={syncing === sheetsIntegration.id}
-              >
-                {isLiveMode && hasMapping ? "Run feed sync" : "Sync now"}
-              </Button>
-              <Button onClick={() => disconnect(sheetsIntegration.id)} tone="critical">
-                Disconnect
-              </Button>
-            </div>
+      <div className="tidysync-studio-panel">
+        {loading ? (
+          <div className="tidysync-studio-empty">
+            <Spinner />
+            <p>Loading…</p>
           </div>
-          {feedSettingsBlock}
-        </div>
-      ) : (
-        <div className="tidysync-sheets-connect">
-          <TextField
-            label="Google Sheets URL or spreadsheet ID"
-            value={sheetUrl}
-            onChange={setSheetUrl}
-            placeholder="https://docs.google.com/spreadsheets/d/…"
-            autoComplete="off"
-          />
-          <TextField
-            label="Sheet label"
-            value={sheetName}
-            onChange={setSheetName}
-            autoComplete="off"
-          />
-          <Button variant="primary" onClick={() => connect()} loading={connecting} disabled={!sheetUrl.trim()}>
-            Connect spreadsheet
-          </Button>
-        </div>
-      )}
+        ) : sheetsIntegration ? (
+          <>
+            <div className="tidysync-sheets-connected-bar">
+              <div className="tidysync-sheets-connected-info">
+                <span className="tidysync-studio-tag is-success">Connected</span>
+                <strong>{cfg?.sheetName ?? "Spreadsheet"}</strong>
+                <span className="tidysync-sheets-id">ID {cfg?.spreadsheetId?.slice(0, 12)}…</span>
+              </div>
+              <div className="tidysync-sheets-connected-actions">
+                <Button
+                  variant="primary"
+                  onClick={() => sync(sheetsIntegration.id)}
+                  loading={syncing === sheetsIntegration.id}
+                >
+                  {isLiveMode && hasMapping ? "Run feed sync" : "Sync now"}
+                </Button>
+                <Button tone="critical" onClick={() => disconnect(sheetsIntegration.id)}>
+                  Disconnect
+                </Button>
+              </div>
+            </div>
+            {feedSettingsPanel}
+          </>
+        ) : (
+          <div className="tidysync-sheets-connect-form">
+            <TextField
+              label="Google Sheets URL or spreadsheet ID"
+              value={sheetUrl}
+              onChange={setSheetUrl}
+              placeholder="https://docs.google.com/spreadsheets/d/…"
+              autoComplete="off"
+            />
+            <TextField label="Sheet label" value={sheetName} onChange={setSheetName} autoComplete="off" />
+            <Button variant="primary" onClick={() => connect()} loading={connecting} disabled={!sheetUrl.trim()}>
+              Connect spreadsheet
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
