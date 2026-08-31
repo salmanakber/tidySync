@@ -148,6 +148,36 @@ export function buildSeoImprovementPlan(productFilter?: string) {
   };
 }
 
+export function buildSeoImprovementPlanForProductIds(productIds: string[]) {
+  return {
+    steps: [
+      {
+        action: "ai_improve_seo",
+        field: "seo",
+        filter: { productIds },
+        description: `AI improve SEO for ${productIds.length} selected product(s)`,
+      },
+    ],
+  };
+}
+
+export function buildDescriptionRewritePlanForProductIds(
+  productIds: string[],
+  brandVoice = "professional, helpful, SEO-optimized",
+) {
+  return {
+    steps: [
+      {
+        action: "ai_rewrite_description",
+        field: "descriptionHtml",
+        filter: { productIds },
+        value: brandVoice,
+        description: `AI rewrite descriptions for ${productIds.length} selected product(s)`,
+      },
+    ],
+  };
+}
+
 export function enhanceNlPromptForSeo(prompt: string): string | null {
   const lower = prompt.toLowerCase();
   if (!lower.includes("seo") && !lower.includes("meta") && !lower.includes("description")) {

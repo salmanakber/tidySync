@@ -34,8 +34,11 @@ interface WorkspaceNavProps {
 const TAB_ICONS: Record<string, typeof ImportIcon> = {
   home: ProductIcon,
   jobs: ClockIcon,
+  migrate: ImportIcon,
   import: ImportIcon,
   export: ExportIcon,
+  duplicates: ProductIcon,
+  sheets: DatabaseIcon,
   ai: MagicIcon,
   seo: ProductIcon,
   health: AlertTriangleIcon,
@@ -48,7 +51,7 @@ const TAB_ICONS: Record<string, typeof ImportIcon> = {
 
 const NAV_GROUPS: Array<{ label: string; ids: string[] }> = [
   { label: "Overview", ids: ["home", "jobs"] },
-  { label: "Catalog", ids: ["import", "export"] },
+  { label: "Catalog", ids: ["migrate", "import", "export", "duplicates", "sheets"] },
   { label: "Intelligence", ids: ["ai", "seo", "agent"] },
   { label: "Vault & health", ids: ["backups", "health"] },
   { label: "Admin", ids: ["audit", "schedules", "settings"] },
@@ -85,28 +88,19 @@ export function WorkspaceNav({ tabs, activeIndex, onSelect }: WorkspaceNavProps)
           <div key={group.label} className="tidysync-sidebar-group">
             <span className="tidysync-sidebar-group-label">{group.label}</span>
             <ul className="tidysync-sidebar-list">
-              {group.items.map(({ index, tab, icon }) => {
-                const active = activeIndex === index;
-                const isPremium = tab.id === "agent" || tab.id === "backups";
-                return (
-                  <li key={tab.id}>
-                    <button
-                      type="button"
-                      className={`tidysync-sidebar-link${active ? " is-active" : ""}${isPremium ? " is-premium" : ""}`}
-                      onClick={() => onSelect(index)}
-                      aria-current={active ? "page" : undefined}
-                    >
-                      <span className="tidysync-sidebar-link-icon">
-                        <Icon source={icon} />
-                      </span>
-                      <span className="tidysync-sidebar-link-text">{tab.content}</span>
-                      {tab.id === "agent" && (
-                        <span className="tidysync-sidebar-pill">AI</span>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
+              {group.items.map(({ index, tab, icon }) => (
+                <li key={tab.id}>
+                  <button
+                    type="button"
+                    className={`tidysync-sidebar-btn${activeIndex === index ? " is-active" : ""}`}
+                    onClick={() => onSelect(index)}
+                  >
+                    <Icon source={icon} />
+                    <span>{tab.content}</span>
+                    {tab.badge && <span className="tidysync-sidebar-badge">{tab.badge}</span>}
+                  </button>
+                </li>
+              ))}
             </ul>
           </div>
         ))}

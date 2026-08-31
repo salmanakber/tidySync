@@ -51,6 +51,9 @@ import { ImportProgressLoader, type ImportProgressState } from "./ImportProgress
 import { ProductSeoStudio } from "./ProductSeoStudio";
 import { AgentStudio } from "./AgentStudio";
 import { BackupStudio } from "./BackupStudio";
+import { DuplicateStudio } from "./DuplicateStudio";
+import { GoogleSheetsStudio } from "./GoogleSheetsStudio";
+import { MigrationWizard } from "./MigrationWizard";
 import { WorkspaceNav } from "./WorkspaceNav";
 import { LiveJobsBar } from "./LiveJobsBar";
 import { AppAlertStack } from "./AppAlert";
@@ -132,6 +135,7 @@ interface Job {
   impactSummary?: string;
   errorSummary?: string;
   createdAt: string;
+  startedAt?: string;
   finishedAt?: string;
   fileName?: string;
   nlPrompt?: string;
@@ -210,8 +214,19 @@ export function Dashboard() {
   >([]);
   const [auditLogs, setAuditLogs] = useState<Array<{ id: string; action: string; createdAt: string }>>([]);
   const [schedules, setSchedules] = useState<
-    Array<{ id: string; name: string; schedule: string; jobType: string }>
+    Array<{
+      id: string;
+      name: string;
+      schedule: string;
+      jobType: string;
+      enabled?: boolean;
+      lastRunAt?: string | null;
+      nextRunAt?: string | null;
+    }>
   >([]);
+  const [scheduleActionId, setScheduleActionId] = useState<string | null>(null);
+  const [migrationBackupDone, setMigrationBackupDone] = useState(false);
+  const [cancelingJobId, setCancelingJobId] = useState<string | null>(null);
   const [brandVoice, setBrandVoice] = useState("professional, helpful");
   const [notifyEmail, setNotifyEmail] = useState("");
   const [creditTopUp, setCreditTopUp] = useState("10");
@@ -222,7 +237,7 @@ export function Dashboard() {
     return () => jobEventCleanupRef.current?.();
   }, []);
 
-  const goToBilling = useCallback(() => setTab(9), []);
+  const goToBilling = useCallback(() => setTab(12), []);
 
   const pushAlert = useCallback((alert: Omit<AppAlertModel, "id">) => {
     const id = `${alert.code ?? "alert"}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -555,8 +570,11 @@ export function Dashboard() {
   const tabs = [
     { id: "home", content: "Home" },
     { id: "jobs", content: "Jobs" },
+    { id: "migrate", content: "Migrate" },
     { id: "import", content: "Import" },
     { id: "export", content: "Export" },
+    { id: "duplicates", content: "Duplicates" },
+    { id: "sheets", content: "Sheets" },
     { id: "ai", content: "AI Edit" },
     { id: "seo", content: "SEO" },
     { id: "health", content: "Health" },
@@ -569,8 +587,8 @@ export function Dashboard() {
 
   useEffect(() => {
     if (!shop) return;
-    if (tab === 7) void loadAudit();
-    if (tab === 8) void loadSchedules();
+    if (tab === 10) void loadAudit();
+    if (tab === 11) void loadSchedules();
   }, [tab, shop]);
 
   const loadAudit = async () => {
@@ -581,6 +599,42 @@ export function Dashboard() {
   const loadSchedules = async () => {
     const data = await gqlRequest<{ scheduledJobs: typeof schedules }>(QUERIES.scheduledJobs, {}, shop);
     setSchedules(data.scheduledJobs);
+  };
+
+  const handleDeleteSchedule = async (id: string) => {
+    setScheduleActionId(id);
+    try {
+      await gqlRequest(MUTATIONS.deleteSchedule, { id }, shop);
+      await loadSchedules();
+    } catch (e) {
+      showOperationalError(e, "Could not delete schedule");
+    } finally {
+      setScheduleActionId(null);
+    }
+  };
+
+  const handleToggleSchedule = async (id: string, enabled: boolean) => {
+    setScheduleActionId(id);
+    try {
+      await gqlRequest(MUTATIONS.updateSchedule, { id, enabled }, shop);
+      await loadSchedules();
+    } catch (e) {
+      showOperationalError(e, "Could not update schedule");
+    } finally {
+      setScheduleActionId(null);
+    }
+  };
+
+  const handleCancelJob = async (jobId: string) => {
+    setCancelingJobId(jobId);
+    try {
+      await gqlRequest(MUTATIONS.cancelJob, { jobId }, shop);
+      await loadData();
+    } catch (e) {
+      showOperationalError(e, "Could not cancel job");
+    } finally {
+      setCancelingJobId(null);
+    }
   };
 
   const runningJobs = useMemo(
@@ -669,8 +723,8 @@ export function Dashboard() {
         onAction: loadData,
       }}
       secondaryActions={[
-        { content: "Import", onAction: () => setTab(2) },
-        { content: "AI edit", onAction: () => setTab(4) },
+        { content: "Import", onAction: () => setTab(3) },
+        { content: "AI edit", onAction: () => setTab(7) },
       ]}
     >
       <Layout>
@@ -713,7 +767,7 @@ export function Dashboard() {
             <Banner
               tone="warning"
               title="Complete your subscription"
-              action={{ content: "View plans", onAction: () => setTab(9) }}
+              action={{ content: "View plans", onAction: () => setTab(12) }}
             >
               Choose a plan to unlock imports, exports, and AI bulk edits.
             </Banner>
@@ -755,7 +809,11 @@ export function Dashboard() {
           <div className="tidysync-workspace tidysync-workspace--sidebar">
             <WorkspaceNav tabs={tabs} activeIndex={tab} onSelect={setTab} />
             <div className="tidysync-workspace-main">
-              <LiveJobsBar jobs={jobs} />
+              <LiveJobsBar
+                jobs={jobs}
+                onCancel={handleCancelJob}
+                cancelingId={cancelingJobId}
+              />
               <div className="tidysync-panel">
                 {tab === 0 && (
                   <BlockStack gap="500">
@@ -765,7 +823,16 @@ export function Dashboard() {
                         Import catalogs, export Shopify data, or describe a change in plain English.
                       </p>
                       <div className="tidysync-action-grid">
-                        <button type="button" className="tidysync-action-card" onClick={() => setTab(2)}>
+                        <button type="button" className="tidysync-action-card is-ai" onClick={() => setTab(2)}>
+                          <div className="tidysync-action-icon">
+                            <Icon source={ImportIcon} />
+                          </div>
+                          <p className="tidysync-action-title">Migration wizard</p>
+                          <p className="tidysync-action-desc">
+                            Guided move from WooCommerce, Amazon, Etsy, and more — with vault snapshot.
+                          </p>
+                        </button>
+                        <button type="button" className="tidysync-action-card" onClick={() => setTab(3)}>
                           <div className="tidysync-action-icon">
                             <Icon source={ImportIcon} />
                           </div>
@@ -774,7 +841,7 @@ export function Dashboard() {
                             Drop a CSV/XLSX — we map fields, preview every change, then commit.
                           </p>
                         </button>
-                        <button type="button" className="tidysync-action-card" onClick={() => setTab(3)}>
+                        <button type="button" className="tidysync-action-card" onClick={() => setTab(4)}>
                           <div className="tidysync-action-icon">
                             <Icon source={ExportIcon} />
                           </div>
@@ -786,7 +853,7 @@ export function Dashboard() {
                         <button
                           type="button"
                           className="tidysync-action-card is-ai"
-                          onClick={() => setTab(4)}
+                          onClick={() => setTab(7)}
                         >
                           <div className="tidysync-action-icon">
                             <Icon source={MagicIcon} />
@@ -796,7 +863,7 @@ export function Dashboard() {
                             Describe a change — get a mutation plan and staggered diff before anything runs.
                           </p>
                         </button>
-                        <button type="button" className="tidysync-action-card" onClick={() => setTab(5)}>
+                        <button type="button" className="tidysync-action-card" onClick={() => setTab(8)}>
                           <div className="tidysync-action-icon">
                             <Icon source={ProductIcon} />
                           </div>
@@ -805,7 +872,7 @@ export function Dashboard() {
                             Deep SEO scores, charts, and AI strategist briefings per product (1 credit).
                           </p>
                         </button>
-                        <button type="button" className="tidysync-action-card is-ai" onClick={() => setTab(10)}>
+                        <button type="button" className="tidysync-action-card is-ai" onClick={() => setTab(13)}>
                           <div className="tidysync-action-icon">
                             <Icon source={AutomationIcon} />
                           </div>
@@ -814,7 +881,7 @@ export function Dashboard() {
                             Fix my store, improve SEO, bulk edits, and backups — one command center.
                           </p>
                         </button>
-                        <button type="button" className="tidysync-action-card" onClick={() => setTab(11)}>
+                        <button type="button" className="tidysync-action-card" onClick={() => setTab(14)}>
                           <div className="tidysync-action-icon">
                             <Icon source={DatabaseIcon} />
                           </div>
@@ -823,7 +890,7 @@ export function Dashboard() {
                             Snapshot products before risky imports or bulk changes.
                           </p>
                         </button>
-                        <button type="button" className="tidysync-action-card" onClick={() => setTab(6)}>
+                        <button type="button" className="tidysync-action-card" onClick={() => setTab(9)}>
                           <div className="tidysync-action-icon">
                             <Icon source={ProductIcon} />
                           </div>
@@ -895,8 +962,8 @@ export function Dashboard() {
                       {jobs.length === 0 ? (
                         <EmptyState
                           heading="No jobs yet"
-                          action={{ content: "Import a file", onAction: () => setTab(2) }}
-                          secondaryAction={{ content: "Try AI edit", onAction: () => setTab(4) }}
+                          action={{ content: "Import a file", onAction: () => setTab(3) }}
+                          secondaryAction={{ content: "Try AI edit", onAction: () => setTab(7) }}
                           image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
                         >
                           <p>Import a catalog or describe a bulk change to get started.</p>
@@ -945,7 +1012,7 @@ export function Dashboard() {
                     {jobs.length === 0 ? (
                       <EmptyState
                         heading="No jobs yet"
-                        action={{ content: "Import a file", onAction: () => setTab(2) }}
+                        action={{ content: "Import a file", onAction: () => setTab(3) }}
                         image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
                       >
                         <p>Import a file or run an AI bulk edit to get started.</p>
@@ -1018,6 +1085,26 @@ export function Dashboard() {
                 )}
 
                 {tab === 2 && (
+                  <MigrationWizard
+                    platforms={IMPORT_PLATFORMS}
+                    importPlatform={importPlatform}
+                    onPlatformChange={setImportPlatform}
+                    detectedPlatform={detectedPlatform}
+                    detectedConfidence={detectedConfidence}
+                    onUpload={handleImport}
+                    onCreateBackup={async () => {
+                      await gqlRequest(MUTATIONS.createStoreBackup, {}, shop);
+                      setMigrationBackupDone(true);
+                    }}
+                    onOpenMapping={() => setMappingOpen(true)}
+                    importProgress={importProgress}
+                    mappingReady={Boolean(mappingJobId && mappingRows.some((m) => m.targetField))}
+                    backupCreated={migrationBackupDone}
+                    loading={loading}
+                  />
+                )}
+
+                {tab === 3 && (
                   <BlockStack gap="400">
                     <div>
                       <p className="tidysync-section-title">Import</p>
@@ -1044,7 +1131,7 @@ export function Dashboard() {
                   </BlockStack>
                 )}
 
-                {tab === 3 && (
+                {tab === 4 && (
                   <BlockStack gap="500">
                     <div>
                       <p className="tidysync-section-title">Export catalog data</p>
@@ -1115,18 +1202,38 @@ export function Dashboard() {
                   </BlockStack>
                 )}
 
-                {tab === 4 && (
+                {tab === 5 && (
+                  <DuplicateStudio
+                    shop={shop}
+                    onUpgrade={goToBilling}
+                    onApprove={(jobId) => openJob(jobId)}
+                  />
+                )}
+
+                {tab === 6 && (
+                  <GoogleSheetsStudio
+                    shop={shop}
+                    onUpgrade={goToBilling}
+                    onSyncStarted={(jobId) => {
+                      beginJobProgress(jobId, {});
+                      setTab(3);
+                    }}
+                    onOpenImport={() => setTab(3)}
+                  />
+                )}
+
+                {tab === 7 && (
                   <AiStudio
                     value={nlPrompt}
                     onChange={setNlPrompt}
                     onSubmit={handleNlBulkEdit}
                     loading={aiLoading}
                     creditsRemaining={tenant?.plan?.aiCreditsRemaining}
-                    error={tab === 4 ? error : null}
+                    error={tab === 7 ? error : null}
                   />
                 )}
 
-                {tab === 5 && (
+                {tab === 8 && (
                   <ProductSeoStudio
                     shop={shop}
                     creditsRemaining={tenant?.plan?.aiCreditsRemaining}
@@ -1135,7 +1242,7 @@ export function Dashboard() {
                   />
                 )}
 
-                {tab === 6 && (
+                {tab === 9 && (
                   <BlockStack gap="500">
                     <div>
                       <p className="tidysync-section-title">Catalog health</p>
@@ -1228,7 +1335,7 @@ export function Dashboard() {
                   </BlockStack>
                 )}
 
-                {tab === 7 && (
+                {tab === 10 && (
                   <BlockStack gap="400">
                     <div>
                       <p className="tidysync-section-title">Audit log</p>
@@ -1271,7 +1378,7 @@ export function Dashboard() {
                   </BlockStack>
                 )}
 
-                {tab === 8 && (
+                {tab === 11 && (
                   <BlockStack gap="500">
                     <div>
                       <p className="tidysync-section-title">Schedules</p>
@@ -1372,18 +1479,42 @@ export function Dashboard() {
                                 {s.name}
                               </Text>
                               <Text as="p" variant="bodySm" tone="subdued">
-                                {s.jobType} · {s.schedule}
+                                {s.jobType.replace(/_/g, " ")} · {s.schedule}
+                                {s.nextRunAt
+                                  ? ` · next ${new Date(s.nextRunAt).toLocaleString()}`
+                                  : ""}
                               </Text>
                             </BlockStack>
                           </InlineStack>
-                          <Badge tone="success">Enabled</Badge>
+                          <InlineStack gap="200" blockAlign="center">
+                            <Badge tone={s.enabled ?? true ? "success" : "warning"}>
+                              {s.enabled ?? true ? "Active" : "Paused"}
+                            </Badge>
+                            <Button
+                              size="slim"
+                              onClick={() => handleToggleSchedule(s.id, !(s.enabled ?? true))}
+                              loading={scheduleActionId === s.id}
+                              disabled={scheduleActionId != null && scheduleActionId !== s.id}
+                            >
+                              {s.enabled ?? true ? "Pause" : "Resume"}
+                            </Button>
+                            <Button
+                              size="slim"
+                              tone="critical"
+                              onClick={() => handleDeleteSchedule(s.id)}
+                              loading={scheduleActionId === s.id}
+                              disabled={scheduleActionId != null && scheduleActionId !== s.id}
+                            >
+                              Delete
+                            </Button>
+                          </InlineStack>
                         </div>
                       ))
                     )}
                   </BlockStack>
                 )}
 
-                {tab === 9 && (
+                {tab === 12 && (
                   <BlockStack gap="500">
                     <div className="tidysync-billing-hero">
                       <InlineStack align="space-between" blockAlign="start" wrap>
@@ -1542,16 +1673,20 @@ export function Dashboard() {
                   </BlockStack>
                 )}
 
-                {tab === 10 && (
+                {tab === 13 && (
                   <AgentStudio
                     shop={shop}
                     onUpgrade={goToBilling}
                     onApprove={(jobId) => handleApprove(jobId)}
                     onJobStarted={(jobId, meta) => beginJobProgress(jobId, meta ?? {})}
+                    onFixPreview={(job) => {
+                      setSelectedJob(job as Job);
+                      setPreviewOpen(true);
+                    }}
                   />
                 )}
 
-                {tab === 11 && (
+                {tab === 14 && (
                   <BackupStudio
                     shop={shop}
                     maxBackups={tenant?.plan?.maxBackups ?? 0}

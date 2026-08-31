@@ -1,10 +1,12 @@
 import { prisma, auditRepository, scheduledJobRepository, featureFlagRepository, jobRepository, type JobType } from "@tidysync/database";
 import { getShopifyFieldsForResource, parseNlBulkEdit, type ResourceType } from "@tidysync/shared";
-import { inferColumnMappingsWithAi, parseNlBulkEditWithAi, generateImpactSummary, generateProductSeoInsight, generateProductSeoImprovements, rewriteProductContent } from "@tidysync/ai";
+import { inferColumnMappingsWithAi, parseNlBulkEditWithAi, generateImpactSummary, generateProductSeoInsight, generateProductSeoImprovements, rewriteProductContent, buildSeoImprovementPlanForProductIds, buildDescriptionRewritePlanForProductIds } from "@tidysync/ai";
 import { consumeAiCredit } from "../services/tenant";
-import { catalogScanQueue, exportQueue, bulkEditQueue, agentQueue } from "../queues";
+import { catalogScanQueue, exportQueue, bulkEditQueue, agentQueue, importQueue } from "../queues";
 import { checkBackupAllowed, consumeAgentRun, computeAgentRunsRemaining } from "../services/tenant-limits";
 import { scanStoreHealth } from "../services/store-scan";
+import { findDuplicateProducts } from "../services/duplicate-products";
+import { downloadGoogleSheetCsv, parseSpreadsheetUrl, type GoogleSheetsConfig } from "../services/google-sheets";
 import { parseAgentIntent, buildSeoImprovementPlan } from "@tidysync/ai";
 import { type GraphQLContext, requireMerchant, requireActiveMerchant, requireAdmin } from "../context";
 import { planLimitError } from "./app-error";
@@ -156,6 +158,31 @@ export const extensionTypeDefs = `#graphql
     summary: String!
   }
 
+  type DuplicateProductEntry {
+    id: ID!
+    title: String!
+    handle: String
+    vendor: String
+    imageUrl: String
+    variantCount: Int!
+  }
+
+  type DuplicateProductGroup {
+    id: String!
+    reason: String!
+    matchKey: String!
+    products: [DuplicateProductEntry!]!
+  }
+
+  type TenantIntegration {
+    id: ID!
+    type: String!
+    enabled: Boolean!
+    config: JSON!
+    createdAt: DateTime!
+    updatedAt: DateTime!
+  }
+
   type AgentStatus {
     enabled: Boolean!
     runsUsed: Int!
@@ -192,6 +219,8 @@ export const extensionTypeDefs = `#graphql
     catalogProducts(first: Int = 24, query: String): [CatalogProduct!]!
     storeBackups: [StoreBackup!]!
     agentStatus: AgentStatus!
+    findDuplicateProducts(limit: Int = 250): [DuplicateProductGroup!]!
+    tenantIntegrations: [TenantIntegration!]!
     adminAuditLogs(limit: Int = 100): [AuditLog!]!
     adminFeatureFlags: [FeatureFlag!]!
   }
@@ -207,8 +236,14 @@ export const extensionTypeDefs = `#graphql
     scanStore: StoreScanResult!
     runAgent(prompt: String!): AgentRunResult!
     restoreStoreBackup(id: ID!, options: RestoreOptionsInput): Job!
+    fixScanIssues(category: String!, productIds: [ID!]!): Job!
+    previewMergeProducts(primaryProductId: ID!, duplicateProductIds: [ID!]!): Job!
+    connectGoogleSheet(spreadsheetUrl: String!, sheetName: String): TenantIntegration!
+    syncGoogleSheet(integrationId: ID!): Job!
+    disconnectGoogleSheet(id: ID!): Boolean!
     createScheduledJob(name: String!, jobType: JobType!, schedule: String!, config: JSON): ScheduledJob!
     deleteScheduledJob(id: ID!): Boolean!
+    updateScheduledJob(id: ID!, enabled: Boolean): ScheduledJob!
     updateNotificationSettings(
       email: String
       emailOnComplete: Boolean
@@ -310,6 +345,21 @@ export const extensionResolvers = {
         runsLimit,
         runsRemaining,
       };
+    },
+    findDuplicateProducts: async (
+      _: unknown,
+      args: { limit?: number },
+      ctx: GraphQLContext,
+    ) => {
+      const { shop } = requireActiveMerchant(ctx);
+      return findDuplicateProducts(shop, ctx.sessionToken, args.limit ?? 250);
+    },
+    tenantIntegrations: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
+      const { tenantId } = requireActiveMerchant(ctx);
+      return prisma.tenantIntegration.findMany({
+        where: { tenantId },
+        orderBy: { createdAt: "desc" },
+      });
     },
     adminAuditLogs: async (_: unknown, args: { limit?: number }, ctx: GraphQLContext) => {
       requireAdmin(ctx);
@@ -682,6 +732,149 @@ export const extensionResolvers = {
 
       return job;
     },
+    fixScanIssues: async (
+      _: unknown,
+      args: { category: string; productIds: string[] },
+      ctx: GraphQLContext,
+    ) => {
+      const { tenantId, shop } = requireActiveMerchant(ctx);
+      if (!args.productIds.length) throw new Error("No products selected to fix");
+
+      await consumeAiCredit(tenantId, 1);
+
+      const category = args.category.toLowerCase();
+      let plan;
+      if (category === "seo") {
+        plan = buildSeoImprovementPlanForProductIds(args.productIds);
+      } else if (category === "catalog" || category === "descriptions") {
+        plan = buildDescriptionRewritePlanForProductIds(args.productIds);
+      } else {
+        throw new Error("Unsupported fix category. Use SEO or Catalog.");
+      }
+
+      return createBulkEditPreviewJob(
+        tenantId,
+        shop,
+        `Fix ${args.category} for ${args.productIds.length} products`,
+        plan,
+        ctx.sessionToken,
+      );
+    },
+    previewMergeProducts: async (
+      _: unknown,
+      args: { primaryProductId: string; duplicateProductIds: string[] },
+      ctx: GraphQLContext,
+    ) => {
+      const { tenantId } = requireActiveMerchant(ctx);
+      const duplicateIds = args.duplicateProductIds.filter((id) => id !== args.primaryProductId);
+      if (!duplicateIds.length) throw new Error("Select at least one duplicate product to merge");
+
+      const rows = duplicateIds.map((id, i) => ({
+        resourceType: "product",
+        resourceId: id,
+        productId: id,
+        resourceTitle: `Duplicate product ${i + 1}`,
+        field: "merge",
+        before: id,
+        after: `Merge into primary product`,
+      }));
+
+      const job = await prisma.job.create({
+        data: {
+          tenantId,
+          type: "BULK_EDIT",
+          status: "PREVIEW",
+          nlPrompt: `Merge ${duplicateIds.length} duplicate(s) into primary`,
+          mutationPlan: {
+            action: "merge_products",
+            primaryProductId: args.primaryProductId,
+            duplicateProductIds: duplicateIds,
+          } as object,
+          diffPreview: { rows, totalChanges: duplicateIds.length } as object,
+          impactSummary: `Merge ${duplicateIds.length} duplicate listing(s) into your primary product. Variants combine; duplicates are removed.`,
+          rowCount: duplicateIds.length,
+        },
+        include: { lineItems: { take: 0 } },
+      });
+
+      return { ...job, lineItems: [] };
+    },
+    connectGoogleSheet: async (
+      _: unknown,
+      args: { spreadsheetUrl: string; sheetName?: string },
+      ctx: GraphQLContext,
+    ) => {
+      const { tenantId } = requireActiveMerchant(ctx);
+      const parsed = parseSpreadsheetUrl(args.spreadsheetUrl);
+      if (!parsed) throw new Error("Invalid Google Sheets URL or spreadsheet ID");
+
+      const config: GoogleSheetsConfig = {
+        spreadsheetId: parsed.spreadsheetId,
+        sheetGid: parsed.gid,
+        sheetName: args.sheetName ?? "Sheet1",
+        direction: "import",
+      };
+
+      return prisma.tenantIntegration.upsert({
+        where: { tenantId_type: { tenantId, type: "GOOGLE_SHEETS" } },
+        create: {
+          tenantId,
+          type: "GOOGLE_SHEETS",
+          config: config as object,
+          enabled: true,
+        },
+        update: {
+          config: config as object,
+          enabled: true,
+        },
+      });
+    },
+    syncGoogleSheet: async (_: unknown, args: { integrationId: string }, ctx: GraphQLContext) => {
+      const { tenantId, shop } = requireActiveMerchant(ctx);
+      const integration = await prisma.tenantIntegration.findFirst({
+        where: { id: args.integrationId, tenantId, type: "GOOGLE_SHEETS" },
+      });
+      if (!integration) throw new Error("Google Sheets connection not found");
+
+      const config = integration.config as unknown as GoogleSheetsConfig;
+      const downloaded = await downloadGoogleSheetCsv(config.spreadsheetId, config.sheetGid);
+
+      const syncJob = await prisma.job.create({
+        data: {
+          tenantId,
+          type: "IMPORT",
+          status: "MAPPING",
+          filePath: downloaded.filePath,
+          fileName: downloaded.fileName,
+          resourceType: "products",
+          rowCount: Math.max(0, downloaded.rowEstimate - 1),
+          mutationPlan: {
+            source: "google_sheets",
+            spreadsheetId: config.spreadsheetId,
+            integrationId: integration.id,
+          } as object,
+          impactSummary: `Google Sheet synced — ${Math.max(0, downloaded.rowEstimate - 1)} rows ready to map`,
+        },
+      });
+
+      await importQueue.add("analyze", { jobId: syncJob.id, tenantId, shop });
+
+      await prisma.tenantIntegration.update({
+        where: { id: integration.id },
+        data: {
+          config: { ...config, lastSyncAt: new Date().toISOString() } as object,
+        },
+      });
+
+      return syncJob;
+    },
+    disconnectGoogleSheet: async (_: unknown, args: { id: string }, ctx: GraphQLContext) => {
+      const { tenantId } = requireActiveMerchant(ctx);
+      await prisma.tenantIntegration.deleteMany({
+        where: { id: args.id, tenantId, type: "GOOGLE_SHEETS" },
+      });
+      return true;
+    },
     createScheduledJob: async (
       _: unknown,
       args: { name: string; jobType: string; schedule: string; config?: unknown },
@@ -706,6 +899,22 @@ export const extensionResolvers = {
       const { tenantId } = requireActiveMerchant(ctx);
       await prisma.scheduledJob.deleteMany({ where: { id: args.id, tenantId } });
       return true;
+    },
+    updateScheduledJob: async (
+      _: unknown,
+      args: { id: string; enabled: boolean },
+      ctx: GraphQLContext,
+    ) => {
+      const { tenantId } = requireActiveMerchant(ctx);
+      const existing = await prisma.scheduledJob.findFirst({
+        where: { id: args.id, tenantId },
+      });
+      if (!existing) throw new Error("Schedule not found");
+
+      return prisma.scheduledJob.update({
+        where: { id: existing.id },
+        data: { enabled: args.enabled },
+      });
     },
     updateNotificationSettings: async (
       _: unknown,
@@ -781,6 +990,63 @@ export const extensionResolvers = {
     },
   },
 };
+
+export async function createBulkEditPreviewJob(
+  tenantId: string,
+  shop: string,
+  label: string,
+  plan: object,
+  sessionToken?: string,
+) {
+  const { buildDiffFromMutationPlan } = await import("../services/shopify-products");
+  const { detectAnomalies } = await import("@tidysync/shared");
+
+  const job = await prisma.job.create({
+    data: {
+      tenantId,
+      type: "BULK_EDIT",
+      status: "PREVIEW",
+      nlPrompt: label,
+      isAiGenerated: true,
+      mutationPlan: plan as object,
+    },
+  });
+
+  let diff: { rows: unknown[]; totalChanges: number };
+  try {
+    diff = await buildDiffFromMutationPlan(shop, plan as import("@tidysync/shared").MutationPlan, sessionToken);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await prisma.job.update({
+      where: { id: job.id },
+      data: { status: "FAILED", errorSummary: msg },
+    });
+    throw err;
+  }
+
+  const anomalies = detectAnomalies(
+    diff.rows.map((r) => ({
+      field: (r as { field: string }).field,
+      before: (r as { before: unknown }).before,
+      after: (r as { after: unknown }).after,
+    })),
+  );
+
+  const updated = await prisma.job.update({
+    where: { id: job.id },
+    data: {
+      diffPreview: diff as object,
+      impactSummary:
+        diff.totalChanges > 0
+          ? `${label} — ${diff.totalChanges} change(s) ready for review`
+          : "No matching products found for this fix.",
+      rowCount: diff.totalChanges,
+    },
+    include: { lineItems: { take: 0 } },
+  });
+
+  return { ...updated, lineItems: [], anomalies };
+}
 
 // Patch suggestFieldMappings + generateNlBulkEdit to use AI — exported for schema merge
 export async function suggestMappingsWithAi(

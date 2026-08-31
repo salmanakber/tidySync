@@ -72,6 +72,7 @@ interface AgentStudioProps {
   onApprove?: (jobId: string) => void;
   onUpgrade?: () => void;
   onJobStarted?: (jobId: string, meta?: { isImport?: boolean; rowCount?: number }) => void;
+  onFixPreview?: (job: AgentJob) => void;
 }
 
 const QUICK_ACTIONS = [
@@ -128,7 +129,7 @@ function isScanResult(v: unknown): v is StoreScanResult {
   return Boolean(v && typeof v === "object" && "overallHealthScore" in (v as object));
 }
 
-export function AgentStudio({ shop, onApprove, onUpgrade, onJobStarted }: AgentStudioProps) {
+export function AgentStudio({ shop, onApprove, onUpgrade, onJobStarted, onFixPreview }: AgentStudioProps) {
   const [prompt, setPrompt] = useState("");
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [loading, setLoading] = useState(false);
@@ -140,6 +141,7 @@ export function AgentStudio({ shop, onApprove, onUpgrade, onJobStarted }: AgentS
   const [intent, setIntent] = useState("");
   const [suggestedActions, setSuggestedActions] = useState<string[]>([]);
   const [errorAlert, setErrorAlert] = useState<ReturnType<typeof alertFromError> | null>(null);
+  const [fixLoading, setFixLoading] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -273,6 +275,45 @@ export function AgentStudio({ shop, onApprove, onUpgrade, onJobStarted }: AgentS
       : 0;
 
   const filteredIssues = scan?.issues ?? [];
+
+  const seoProductIds = [
+    ...new Set(
+      (scan?.issues ?? [])
+        .filter((i) => i.category === "SEO" && i.productId)
+        .map((i) => i.productId as string),
+    ),
+  ];
+  const descriptionProductIds = [
+    ...new Set(
+      (scan?.issues ?? [])
+        .filter(
+          (i) =>
+            i.productId &&
+            (i.id.startsWith("desc-") || i.title.toLowerCase().includes("description")),
+        )
+        .map((i) => i.productId as string),
+    ),
+  ];
+
+  const runFixAll = async (category: string, productIds: string[]) => {
+    if (!productIds.length) return;
+    setFixLoading(category);
+    setErrorAlert(null);
+    try {
+      const data = await gqlRequest<{
+        fixScanIssues: AgentJob;
+      }>(MUTATIONS.fixScanIssues, { category, productIds }, shop);
+      setPreviewJob(data.fixScanIssues);
+      setMessage(`Fix plan ready — ${productIds.length} products. Review before apply.`);
+      if (onFixPreview) {
+        onFixPreview(data.fixScanIssues);
+      }
+    } catch (e) {
+      setErrorAlert(alertFromError(e, onUpgrade));
+    } finally {
+      setFixLoading(null);
+    }
+  };
 
   return (
     <div className={`tidysync-agent-pro${loading || scanLoading ? " is-running" : ""}`}>
@@ -431,6 +472,35 @@ export function AgentStudio({ shop, onApprove, onUpgrade, onJobStarted }: AgentS
             <span>{scan.productCount} products scanned</span>
             <span>{scan.issues.length} issues found</span>
           </div>
+
+          {(seoProductIds.length > 0 || descriptionProductIds.length > 0) && (
+            <div className="tidysync-agent-fix-all">
+              <h4>Fix with one click</h4>
+              <p>Creates a preview job — nothing changes until you approve (uses 1 AI credit per action).</p>
+              <div className="tidysync-agent-fix-all-buttons">
+                {seoProductIds.length > 0 && (
+                  <Button
+                    variant="primary"
+                    onClick={() => runFixAll("SEO", seoProductIds)}
+                    loading={fixLoading === "SEO"}
+                    disabled={fixLoading != null && fixLoading !== "SEO"}
+                  >
+                    Fix all SEO ({seoProductIds.length.toString()})
+                  </Button>
+                )}
+                {descriptionProductIds.length > 0 && (
+                  <Button
+                    onClick={() => runFixAll("Catalog", descriptionProductIds)}
+                    loading={fixLoading === "Catalog"}
+                    disabled={fixLoading != null && fixLoading !== "Catalog"}
+                  >
+                    Fix all descriptions ({descriptionProductIds.length.toString()})
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="tidysync-agent-issue-grid">
             {filteredIssues.slice(0, 30).map((issue) => (
               <article key={issue.id} className={`tidysync-agent-issue-v2 ${severityClass(issue.severity)}`}>
@@ -475,6 +545,20 @@ export function AgentStudio({ shop, onApprove, onUpgrade, onJobStarted }: AgentS
             rows={previewJob.diffPreview.rows}
             impactSummary={previewJob.impactSummary}
           />
+          {onApprove && (previewJob.status === "PREVIEW" || previewJob.status === "MAPPING") && (
+            <div className="tidysync-agent-pro-preview-cta">
+              <Button variant="primary" onClick={() => onApprove(previewJob.id)}>
+                Approve and apply to Shopify
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {previewJob?.diffPreview && !previewJob.diffPreview.rows?.length && previewJob.impactSummary && (
+        <div className="tidysync-agent-pro-preview">
+          <h4>Fix plan ready</h4>
+          <p>{previewJob.impactSummary}</p>
           {onApprove && previewJob.status === "PREVIEW" && (
             <div className="tidysync-agent-pro-preview-cta">
               <Button variant="primary" onClick={() => onApprove(previewJob.id)}>

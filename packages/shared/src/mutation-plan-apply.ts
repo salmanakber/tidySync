@@ -61,6 +61,11 @@ export function productMatchesFilter(
     if (!hasSku) return false;
   }
 
+  const productIds = filter.productIds as string[] | undefined;
+  if (productIds?.length) {
+    if (!productIds.includes(product.id)) return false;
+  }
+
   return true;
 }
 

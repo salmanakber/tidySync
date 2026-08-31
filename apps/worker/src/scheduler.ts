@@ -1,5 +1,5 @@
 import { prisma } from "@tidysync/database";
-import { importQueue, exportQueue, bulkEditQueue } from "./queues";
+import { importQueue, exportQueue, bulkEditQueue, catalogScanQueue } from "./queues";
 
 export async function runScheduler() {
   const due = await prisma.scheduledJob.findMany({
@@ -28,9 +28,33 @@ export async function runScheduler() {
 
     const payload = { jobId: job.id, tenantId: tenant.id, shop: tenant.shopDomain };
 
-    if (sched.jobType === "IMPORT") await importQueue.add("import", payload);
-    else if (sched.jobType === "EXPORT") await exportQueue.add("export", payload);
-    else if (sched.jobType === "BULK_EDIT") await bulkEditQueue.add("bulk-edit", payload);
+    switch (sched.jobType) {
+      case "IMPORT":
+        await importQueue.add("import", payload);
+        break;
+      case "EXPORT":
+        await exportQueue.add("export", payload);
+        break;
+      case "BULK_EDIT":
+        await bulkEditQueue.add("bulk-edit", payload);
+        break;
+      case "CATALOG_HEALTH_SCAN":
+        await catalogScanQueue.add("catalog-scan", payload);
+        break;
+      case "BACKUP":
+        await exportQueue.add("backup", payload);
+        break;
+      default:
+        await prisma.job.update({
+          where: { id: job.id },
+          data: {
+            status: "FAILED",
+            finishedAt: new Date(),
+            errorSummary: `Scheduled job type ${sched.jobType} is not supported for automation yet.`,
+          },
+        });
+        continue;
+    }
 
     await prisma.scheduledJob.update({
       where: { id: sched.id },

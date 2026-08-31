@@ -12,6 +12,8 @@ export {
   parseAgentIntent,
   detectAgentIntentRuleBased,
   buildSeoImprovementPlan,
+  buildSeoImprovementPlanForProductIds,
+  buildDescriptionRewritePlanForProductIds,
   parseNlBulkEditWithAiEnhanced,
   type AgentIntent,
   type AgentIntentResult,

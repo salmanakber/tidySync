@@ -320,6 +320,8 @@ export const resolvers = {
     },
     jobs: async (_: unknown, args: { limit?: number }, ctx: GraphQLContext) => {
       const { tenantId } = requireMerchant(ctx);
+      const { reconcileStaleJobsForTenant } = await import("../services/stale-jobs");
+      await reconcileStaleJobsForTenant(tenantId);
       const jobs = await jobRepository.listForTenant(tenantId, args.limit ?? 8);
       return jobs.map(mapJob);
     },

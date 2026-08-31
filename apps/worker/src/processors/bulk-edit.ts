@@ -1,6 +1,6 @@
 import { prisma } from "@tidysync/database";
 import type { ExtendedDiffRow, MutationPlan } from "@tidysync/shared";
-import { generateProductSeoImprovements } from "@tidysync/ai";
+import { generateProductSeoImprovements, rewriteProductContent } from "@tidysync/ai";
 import { getShopGraphqlClient } from "../shopify";
 import { buildDiffFromMutationPlan } from "../shopify-products";
 import { buildVariantBulkInput } from "../shopify-product-create";
@@ -195,9 +195,102 @@ async function processAiSeoImprovements(
   return { success, failed, processed };
 }
 
+async function processAiDescriptionRewrite(
+  jobId: string,
+  tenantId: string,
+  shop: string,
+  plan: MutationPlan,
+  client: Awaited<ReturnType<typeof getShopGraphqlClient>>,
+): Promise<{ success: number; failed: number; processed: number } | null> {
+  const rewriteSteps = plan.steps.filter((s) => s.action === "ai_rewrite_description");
+  if (!rewriteSteps.length) return null;
+
+  const rewritePlan: MutationPlan = { steps: rewriteSteps };
+  const diff = await buildDiffFromMutationPlan(shop, rewritePlan);
+  const productIds = [...new Set(diff.rows.map((r) => (r as ExtendedDiffRow).productId ?? r.resourceId))];
+
+  let success = 0;
+  let failed = 0;
+  let processed = 0;
+  const brandVoice =
+    String(rewriteSteps[0]?.value ?? "professional, helpful, SEO-optimized");
+
+  for (const productId of productIds) {
+    processed++;
+    try {
+      const productRes = (await client.request(
+        `#graphql
+          query ProductForRewrite($id: ID!) {
+            product(id: $id) { id title descriptionHtml }
+          }`,
+        { variables: { id: productId } },
+      )) as {
+        data?: { product?: { id: string; title: string; descriptionHtml?: string } };
+      };
+
+      const product = productRes.data?.product;
+      if (!product) {
+        failed++;
+        continue;
+      }
+
+      const rewritten = await rewriteProductContent(
+        [{ title: product.title, description: product.descriptionHtml ?? "" }],
+        brandVoice,
+      );
+      const newHtml = rewritten[0]?.description ?? product.descriptionHtml ?? "";
+
+      const updateRes = (await client.request(PRODUCT_UPDATE, {
+        variables: { product: { id: productId, descriptionHtml: newHtml } },
+      })) as {
+        data?: { productUpdate?: { userErrors?: Array<{ message: string }> } };
+      };
+
+      const errors = updateRes.data?.productUpdate?.userErrors ?? [];
+      if (errors.length) {
+        failed++;
+      } else {
+        success++;
+        await prisma.jobSnapshot.create({
+          data: {
+            tenantId,
+            jobId,
+            resourceType: "product",
+            resourceId: productId,
+            beforeState: { descriptionHtml: product.descriptionHtml },
+            afterState: { descriptionHtml: newHtml },
+          },
+        });
+      }
+    } catch {
+      failed++;
+    }
+
+    await prisma.job.update({
+      where: { id: jobId },
+      data: { processedCount: processed, successCount: success, failedCount: failed },
+    });
+  }
+
+  return { success, failed, processed };
+}
+
 export async function processBulkEditJob(jobId: string, tenantId: string, shop: string) {
   const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job?.mutationPlan) throw new Error("Bulk edit job missing plan");
+
+  const planRoot = job.mutationPlan as { action?: string; primaryProductId?: string; duplicateProductIds?: string[] };
+  if (planRoot.action === "merge_products" && planRoot.primaryProductId && planRoot.duplicateProductIds) {
+    const { processProductMergeJob } = await import("./product-merge");
+    await processProductMergeJob(
+      jobId,
+      tenantId,
+      shop,
+      planRoot.primaryProductId,
+      planRoot.duplicateProductIds,
+    );
+    return;
+  }
 
   await prisma.job.update({
     where: { id: jobId },
@@ -221,8 +314,22 @@ export async function processBulkEditJob(jobId: string, tenantId: string, shop: 
     return;
   }
 
+  const aiRewriteResult = await processAiDescriptionRewrite(jobId, tenantId, shop, plan, client);
+  if (aiRewriteResult && plan.steps.every((s) => s.action === "ai_rewrite_description")) {
+    await prisma.job.update({
+      where: { id: jobId },
+      data: {
+        status: aiRewriteResult.failed > 0 && aiRewriteResult.success === 0 ? "FAILED" : "COMPLETED",
+        finishedAt: new Date(),
+        rowCount: aiRewriteResult.processed,
+        errorSummary: aiRewriteResult.failed > 0 ? `${aiRewriteResult.failed} description updates failed` : null,
+      },
+    });
+    return;
+  }
+
   const nonSeoPlan: MutationPlan = {
-    steps: plan.steps.filter((s) => s.action !== "ai_improve_seo"),
+    steps: plan.steps.filter((s) => s.action !== "ai_improve_seo" && s.action !== "ai_rewrite_description"),
   };
 
   const diff =

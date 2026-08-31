@@ -159,7 +159,7 @@ export const QUERIES = {
     query Jobs($limit: Int) {
       jobs(limit: $limit) {
         id type status rowCount processedCount successCount failedCount
-        impactSummary errorSummary createdAt finishedAt fileName nlPrompt
+        impactSummary errorSummary createdAt startedAt finishedAt fileName nlPrompt
       }
     }
   `,
@@ -211,6 +211,21 @@ export const QUERIES = {
     query NotificationSettings {
       notificationSettings {
         email emailOnComplete emailOnFailure slackWebhook
+      }
+    }
+  `,
+  findDuplicateProducts: `
+    query FindDuplicateProducts($limit: Int) {
+      findDuplicateProducts(limit: $limit) {
+        id reason matchKey
+        products { id title handle vendor imageUrl variantCount }
+      }
+    }
+  `,
+  tenantIntegrations: `
+    query TenantIntegrations {
+      tenantIntegrations {
+        id type enabled config createdAt updatedAt
       }
     }
   `,
@@ -358,6 +373,54 @@ export const MUTATIONS = {
       createScheduledJob(name: $name, jobType: $jobType, schedule: $schedule, config: $config) {
         id name schedule enabled
       }
+    }
+  `,
+  deleteSchedule: `
+    mutation DeleteSchedule($id: ID!) {
+      deleteScheduledJob(id: $id)
+    }
+  `,
+  updateSchedule: `
+    mutation UpdateSchedule($id: ID!, $enabled: Boolean!) {
+      updateScheduledJob(id: $id, enabled: $enabled) {
+        id name schedule enabled lastRunAt nextRunAt jobType
+      }
+    }
+  `,
+  cancelJob: `
+    mutation CancelJob($jobId: ID!) {
+      cancelJob(jobId: $jobId) { id status }
+    }
+  `,
+  fixScanIssues: `
+    mutation FixScanIssues($category: String!, $productIds: [ID!]!) {
+      fixScanIssues(category: $category, productIds: $productIds) {
+        id status mutationPlan diffPreview impactSummary rowCount
+      }
+    }
+  `,
+  previewMergeProducts: `
+    mutation PreviewMergeProducts($primaryProductId: ID!, $duplicateProductIds: [ID!]!) {
+      previewMergeProducts(primaryProductId: $primaryProductId, duplicateProductIds: $duplicateProductIds) {
+        id status diffPreview impactSummary rowCount
+      }
+    }
+  `,
+  connectGoogleSheet: `
+    mutation ConnectGoogleSheet($spreadsheetUrl: String!, $sheetName: String) {
+      connectGoogleSheet(spreadsheetUrl: $spreadsheetUrl, sheetName: $sheetName) {
+        id type enabled config
+      }
+    }
+  `,
+  syncGoogleSheet: `
+    mutation SyncGoogleSheet($integrationId: ID!) {
+      syncGoogleSheet(integrationId: $integrationId) { id status type rowCount impactSummary }
+    }
+  `,
+  disconnectGoogleSheet: `
+    mutation DisconnectGoogleSheet($id: ID!) {
+      disconnectGoogleSheet(id: $id)
     }
   `,
   updateNotifications: `
