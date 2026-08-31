@@ -77,6 +77,7 @@ export const typeDefs = `#graphql
     multiStore: Boolean!
     priceMonthlyCents: Int!
     isFree: Boolean!
+    shopifyPlanName: String
   }
 
   type Tenant {

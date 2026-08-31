@@ -470,6 +470,21 @@ select.input:focus {
   font-size: 13px;
 }
 
+.alert-attention {
+  background: var(--warning-soft);
+  color: var(--warning);
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(185, 137, 0, 0.35);
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+
+.testing-mode-card {
+  border-color: rgba(0, 128, 96, 0.35);
+  background: linear-gradient(180deg, rgba(0, 128, 96, 0.06), var(--surface));
+}
+
 .alert-success code {
   background: rgba(0, 0, 0, 0.3);
   padding: 2px 6px;

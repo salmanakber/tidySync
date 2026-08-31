@@ -123,6 +123,7 @@ export function AdminConsole() {
   const [grantCredits, setGrantCredits] = useState("10");
   const [grantPaidShop, setGrantPaidShop] = useState("");
   const [grantPaidPlanSlug, setGrantPaidPlanSlug] = useState("");
+  const [testingModeTenantId, setTestingModeTenantId] = useState("");
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
   const [planEdit, setPlanEdit] = useState<Partial<PlanEditFields>>({});
   const [newApiKeyName, setNewApiKeyName] = useState("");
@@ -139,6 +140,7 @@ export function AdminConsole() {
   }, []);
 
   const loadData = async (authToken: string) => {
+    setError(null);
     try {
       const [tenantsData, jobsData, statsData, flagsData, auditData, plansData, healthData, keysData] =
         await Promise.all([
@@ -220,6 +222,11 @@ export function AdminConsole() {
       setLoading(false);
     }
   };
+
+  const testingModeTenant = useMemo(
+    () => tenants.find((t) => t.id === testingModeTenantId),
+    [tenants, testingModeTenantId],
+  );
 
   const filteredTenants = useMemo(() => {
     const q = search.toLowerCase();
@@ -644,10 +651,10 @@ export function AdminConsole() {
                     {t.installApproved === false && <span className="badge badge-attention">Pending</span>}
                     <button
                       type="button"
-                      className="btn btn-ghost btn-sm"
+                      className={t.billingBypass ? "btn btn-secondary btn-sm" : "btn btn-sm"}
                       onClick={() => updateBillingBypass(t.id, !t.billingBypass)}
                     >
-                      {t.billingBypass ? "Disable test" : "Enable test"}
+                      {t.billingBypass ? "Disable testing" : "Enable testing mode"}
                     </button>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => grantTenantCredits(t.id, 10)}>+10 credits</button>
                     <button
@@ -876,16 +883,61 @@ export function AdminConsole() {
       )}
 
       {tab === "billing" && (
+        <>
+        <div className="card testing-mode-card">
+          <h2 className="card-title">Testing mode (development stores)</h2>
+          <p style={{ color: "var(--text-secondary)", marginBottom: 16 }}>
+            <strong>Testing mode</strong> lets a store use TidySync paid features without completing Shopify
+            Billing checkout. Use this for dev stores, demos, and internal QA. The merchant sees
+            &quot;Testing mode&quot; on their plan badge in the embedded app.
+          </p>
+          <div className="flex-row" style={{ marginBottom: 12 }}>
+            <select
+              className="input"
+              value={testingModeTenantId}
+              onChange={(e) => setTestingModeTenantId(e.target.value)}
+              style={{ maxWidth: 320 }}
+            >
+              <option value="">Select a store…</option>
+              {tenants.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.shopDomain}
+                  {t.billingBypass ? " · testing ON" : ""}
+                </option>
+              ))}
+            </select>
+            {testingModeTenant && (
+              <>
+                <span className={`badge ${testingModeTenant.billingBypass ? "badge-success" : "badge-attention"}`}>
+                  {testingModeTenant.billingBypass ? "Testing mode ON" : "Testing mode OFF"}
+                </span>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={loading}
+                  onClick={() => updateBillingBypass(testingModeTenant.id, !testingModeTenant.billingBypass)}
+                >
+                  {testingModeTenant.billingBypass ? "Disable testing mode" : "Enable testing mode"}
+                </button>
+              </>
+            )}
+          </div>
+          <p style={{ color: "var(--text-muted)", fontSize: 13, margin: 0 }}>
+            You can also toggle testing mode from the <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTab("tenants")}>Tenants</button> tab
+            (&quot;Enable test&quot; per row) or on a store&apos;s detail page.
+          </p>
+        </div>
+
         <div className="card">
-          <h2 className="card-title">Billing & testing</h2>
+          <h2 className="card-title">Billing &amp; plans</h2>
           <p style={{ color: "var(--text-secondary)", marginBottom: 16 }}>
             Global Shopify test charges:{" "}
-            <strong>{health.shopifyBillingTest ? "ON (test mode)" : "OFF (live charges)"}</strong>
-            — set <code>SHOPIFY_BILLING_TEST=true</code> in server <code>.env</code> for dev stores.
+            <strong>{health.shopifyBillingTest ? "ON (test charges)" : "OFF (live charges)"}</strong>
+            — set <code>SHOPIFY_BILLING_TEST=true</code> in server <code>.env</code> for all dev-store checkouts.
           </p>
           <p style={{ color: "var(--text-secondary)", marginBottom: 16 }}>
-            <strong>Testing mode</strong> skips Shopify subscription checks. <strong>Grant paid access</strong> assigns a
-            paid plan and activates billing locally (records an admin billing charge) — no Shopify checkout required.
+            <strong>Grant paid access</strong> assigns a paid plan and activates billing locally — no Shopify checkout
+            required (complimentary access for a specific store).
           </p>
 
           <h3 className="card-title">Grant paid access to any store</h3>
@@ -967,15 +1019,23 @@ export function AdminConsole() {
             </button>
           </div>
         </div>
+        </>
       )}
 
       {tab === "plans" && (
         <div className="card">
-          <h2 className="card-title">Plan scope & limits</h2>
+          <h2 className="card-title">Plan scope &amp; limits</h2>
           <p style={{ color: "var(--text-secondary)", marginBottom: 20 }}>
             Adjust product caps, AI credits, backup vault limits, agent runs, and feature flags per plan. Changes apply
             immediately to all tenants on that plan.
           </p>
+          {plans.length === 0 ? (
+            <div className="alert-attention">
+              No plans loaded. Click <strong>Refresh</strong> in the top bar. If the error persists, redeploy the API
+              after pulling the latest code (Plan GraphQL schema must include backup and agent fields).
+            </div>
+          ) : (
+          <>
           <div className="table-wrap">
             <table>
               <thead>
@@ -1150,6 +1210,8 @@ export function AdminConsole() {
                 </button>
               </div>
             </div>
+          )}
+          </>
           )}
         </div>
       )}
