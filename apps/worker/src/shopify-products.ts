@@ -68,6 +68,11 @@ export async function fetchProductsForExport(shop: string, limit = 250) {
   return products;
 }
 
+export async function fetchProductsForFeedMatch(shop: string, limit = 5000): Promise<ProductForMutation[]> {
+  const raw = await fetchProductsForExport(shop, limit);
+  return raw.map((p) => normalizeProduct(p as Record<string, unknown>));
+}
+
 function normalizeProduct(raw: Record<string, unknown>): ProductForMutation {
   const variantsRaw = raw.variants as { edges?: Array<{ node: Record<string, unknown> }> };
   return {

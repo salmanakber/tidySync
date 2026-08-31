@@ -84,6 +84,11 @@ createWorker(QUEUE_NAMES.BULK_EDIT, async (data) => {
   const job = await import("@tidysync/database").then((m) =>
     m.prisma.job.findUnique({ where: { id: data.jobId } }),
   );
+  if (job?.type === "SUPPLIER_FEED_SYNC") {
+    const { processSupplierFeedSync } = await import("./processors/supplier-feed-sync");
+    await processSupplierFeedSync(data.jobId, data.tenantId, data.shop);
+    return;
+  }
   if (job?.type === "CONTENT_REWRITE") {
     await processContentRewrite(data.jobId, data.tenantId, data.shop);
     return;

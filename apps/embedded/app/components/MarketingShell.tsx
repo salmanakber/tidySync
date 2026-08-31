@@ -15,7 +15,7 @@ export function MarketingShell({
         <div className="ts-container ts-nav-inner">
           <Link href="/" className="ts-brand">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/images/logo.png" alt="TidySync" />
+            <img src="/images/logo-icon.png" alt="" width={32} height={32} />
             <span>
               Tidy<span className="ts-brand-accent">Sync</span>
             </span>
@@ -42,6 +42,8 @@ export function MarketingShell({
       <footer className="ts-footer">
         <div className="ts-container ts-footer-inner">
           <div className="ts-footer-brand">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/images/logo-icon.png" alt="" width={28} height={28} style={{ marginBottom: 8 }} />
             <strong>TidySync</strong>
             <div>Bulk catalog operations for Shopify · © {year}</div>
           </div>

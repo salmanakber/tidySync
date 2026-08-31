@@ -218,6 +218,7 @@ enum JobType {
   CONTENT_REWRITE
   BACKUP
   AGENT_RUN
+  SUPPLIER_FEED_SYNC
 }
 
 enum JobStatus {

@@ -7,6 +7,7 @@ import { checkBackupAllowed, consumeAgentRun, computeAgentRunsRemaining } from "
 import { scanStoreHealth } from "../services/store-scan";
 import { findDuplicateProducts } from "../services/duplicate-products";
 import { downloadGoogleSheetCsv, parseSpreadsheetUrl, type GoogleSheetsConfig } from "../services/google-sheets";
+import { enqueueSupplierFeedSync, normalizeFeedSyncMode } from "../services/supplier-feed";
 import { parseAgentIntent, buildSeoImprovementPlan } from "@tidysync/ai";
 import { type GraphQLContext, requireMerchant, requireActiveMerchant, requireAdmin } from "../context";
 import { planLimitError } from "./app-error";
@@ -240,6 +241,14 @@ export const extensionTypeDefs = `#graphql
     previewMergeProducts(primaryProductId: ID!, duplicateProductIds: [ID!]!): Job!
     connectGoogleSheet(spreadsheetUrl: String!, sheetName: String): TenantIntegration!
     syncGoogleSheet(integrationId: ID!): Job!
+    updateGoogleSheetFeed(
+      integrationId: ID!
+      syncMode: String
+      matchField: String
+      schedule: String
+      autoSyncEnabled: Boolean
+      autoApprove: Boolean
+    ): TenantIntegration!
     disconnectGoogleSheet(id: ID!): Boolean!
     createScheduledJob(name: String!, jobType: JobType!, schedule: String!, config: JSON): ScheduledJob!
     deleteScheduledJob(id: ID!): Boolean!
@@ -808,10 +817,16 @@ export const extensionResolvers = {
       const parsed = parseSpreadsheetUrl(args.spreadsheetUrl);
       if (!parsed) throw new Error("Invalid Google Sheets URL or spreadsheet ID");
 
+      const existing = await prisma.tenantIntegration.findUnique({
+        where: { tenantId_type: { tenantId, type: "GOOGLE_SHEETS" } },
+      });
+      const prev = existing?.config as GoogleSheetsConfig | undefined;
+
       const config: GoogleSheetsConfig = {
+        ...(prev ?? {}),
         spreadsheetId: parsed.spreadsheetId,
         sheetGid: parsed.gid,
-        sheetName: args.sheetName ?? "Sheet1",
+        sheetName: args.sheetName ?? prev?.sheetName ?? "Sheet1",
         direction: "import",
       };
 
@@ -837,6 +852,20 @@ export const extensionResolvers = {
       if (!integration) throw new Error("Google Sheets connection not found");
 
       const config = integration.config as unknown as GoogleSheetsConfig;
+      const syncMode = config.syncMode ?? "create";
+      const canLiveFeed =
+        config.savedMappings?.length &&
+        syncMode !== "create" &&
+        (syncMode === "update_by_sku" ||
+          syncMode === "update_by_barcode" ||
+          syncMode === "upsert");
+
+      if (canLiveFeed) {
+        const { jobId } = await enqueueSupplierFeedSync(tenantId, shop, integration.id);
+        const feedJob = await prisma.job.findUniqueOrThrow({ where: { id: jobId } });
+        return feedJob;
+      }
+
       const downloaded = await downloadGoogleSheetCsv(config.spreadsheetId, config.sheetGid);
 
       const syncJob = await prisma.job.create({
@@ -867,6 +896,47 @@ export const extensionResolvers = {
       });
 
       return syncJob;
+    },
+    updateGoogleSheetFeed: async (
+      _: unknown,
+      args: {
+        integrationId: string;
+        syncMode?: string;
+        matchField?: string;
+        schedule?: string;
+        autoSyncEnabled?: boolean;
+        autoApprove?: boolean;
+      },
+      ctx: GraphQLContext,
+    ) => {
+      const { tenantId } = requireActiveMerchant(ctx);
+      const integration = await prisma.tenantIntegration.findFirst({
+        where: { id: args.integrationId, tenantId, type: "GOOGLE_SHEETS" },
+      });
+      if (!integration) throw new Error("Google Sheets connection not found");
+
+      const prev = integration.config as unknown as GoogleSheetsConfig;
+      const syncMode = args.syncMode ? normalizeFeedSyncMode(args.syncMode) : prev.syncMode ?? "create";
+      const matchField =
+        args.matchField === "variants.barcode" || args.matchField === "variants.sku"
+          ? args.matchField
+          : syncMode === "update_by_barcode"
+            ? "variants.barcode"
+            : prev.matchField ?? "variants.sku";
+
+      const updatedConfig: GoogleSheetsConfig = {
+        ...prev,
+        syncMode,
+        matchField,
+        schedule: args.schedule ?? prev.schedule ?? "daily",
+        autoSyncEnabled: args.autoSyncEnabled ?? prev.autoSyncEnabled ?? false,
+        autoApprove: args.autoApprove ?? prev.autoApprove ?? false,
+      };
+
+      return prisma.tenantIntegration.update({
+        where: { id: integration.id },
+        data: { config: updatedConfig as object },
+      });
     },
     disconnectGoogleSheet: async (_: unknown, args: { id: string }, ctx: GraphQLContext) => {
       const { tenantId } = requireActiveMerchant(ctx);

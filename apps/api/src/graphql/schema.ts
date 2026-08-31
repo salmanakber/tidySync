@@ -25,6 +25,7 @@ import {
 import { getShopGraphqlClient, refreshOfflineTokenFromSession } from "../shopify/client";
 import { parseFileHeaders, parseFilePreview } from "../services/file-parser";
 import { fetchProductsForExport, buildDiffFromMutationPlan } from "../services/shopify-products";
+import type { GoogleSheetsConfig } from "../services/google-sheets";
 import {
   type GraphQLContext,
   requireMerchant,
@@ -58,6 +59,7 @@ export const typeDefs = `#graphql
     CONTENT_REWRITE
     BACKUP
     AGENT_RUN
+    SUPPLIER_FEED_SYNC
   }
 
   type Plan {
@@ -635,11 +637,14 @@ export const resolvers = {
       );
       const impactSummary = buildImpactSummary(diffRows.length, diffRows);
 
+      const existingPlan = (job.mutationPlan as Record<string, unknown> | null) ?? {};
+
       const updated = await prisma.job.update({
         where: { id: job.id },
         data: {
           status: "PREVIEW",
           mutationPlan: {
+            ...existingPlan,
             mappings,
             defaults: defaults ?? null,
             aiPolish: aiPolish ?? null,
@@ -651,6 +656,27 @@ export const resolvers = {
         },
         include: { lineItems: { take: 0 } },
       });
+
+      const integrationId =
+        typeof existingPlan.integrationId === "string" ? existingPlan.integrationId : null;
+      if (integrationId && (existingPlan.source === "google_sheets" || mappings.length > 0)) {
+        const integration = await prisma.tenantIntegration.findFirst({
+          where: { id: integrationId, tenantId, type: "GOOGLE_SHEETS" },
+        });
+        if (integration) {
+          const cfg = integration.config as unknown as GoogleSheetsConfig;
+          await prisma.tenantIntegration.update({
+            where: { id: integration.id },
+            data: {
+              config: {
+                ...cfg,
+                savedMappings: mappings,
+                savedDefaults: defaults ?? cfg.savedDefaults,
+              } as object,
+            },
+          });
+        }
+      }
 
       return mapJob(updated);
     },
@@ -693,6 +719,8 @@ export const resolvers = {
           await exportQueue.add(job.type === "BACKUP" ? "backup" : "export", queuePayload);
         } else if (job.type === "BULK_EDIT") {
           await bulkEditQueue.add("bulk-edit", queuePayload);
+        } else if (job.type === "SUPPLIER_FEED_SYNC") {
+          await bulkEditQueue.add("supplier-feed", queuePayload);
         }
       };
 

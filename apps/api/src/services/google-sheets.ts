@@ -2,12 +2,29 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
+export type FeedSyncMode = "create" | "update_by_sku" | "update_by_barcode" | "upsert";
+export type FeedMatchField = "variants.sku" | "variants.barcode";
+
 export interface GoogleSheetsConfig {
   spreadsheetId: string;
   sheetGid?: string;
   sheetName?: string;
   direction?: "import" | "export";
   lastSyncAt?: string;
+  /** Live feed: match existing products instead of only creating new ones */
+  syncMode?: FeedSyncMode;
+  matchField?: FeedMatchField;
+  schedule?: string;
+  autoSyncEnabled?: boolean;
+  autoApprove?: boolean;
+  savedMappings?: Array<{ sourceColumn: string; targetField: string }>;
+  savedDefaults?: {
+    title?: string;
+    price?: string;
+    vendor?: string;
+    status?: string;
+    skuPrefix?: string;
+  };
 }
 
 export function parseSpreadsheetUrl(input: string): { spreadsheetId: string; gid?: string } | null {

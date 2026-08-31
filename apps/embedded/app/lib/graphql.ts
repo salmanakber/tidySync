@@ -418,6 +418,27 @@ export const MUTATIONS = {
       syncGoogleSheet(integrationId: $integrationId) { id status type rowCount impactSummary }
     }
   `,
+  updateGoogleSheetFeed: `
+    mutation UpdateGoogleSheetFeed(
+      $integrationId: ID!
+      $syncMode: String
+      $matchField: String
+      $schedule: String
+      $autoSyncEnabled: Boolean
+      $autoApprove: Boolean
+    ) {
+      updateGoogleSheetFeed(
+        integrationId: $integrationId
+        syncMode: $syncMode
+        matchField: $matchField
+        schedule: $schedule
+        autoSyncEnabled: $autoSyncEnabled
+        autoApprove: $autoApprove
+      ) {
+        id type enabled config updatedAt
+      }
+    }
+  `,
   disconnectGoogleSheet: `
     mutation DisconnectGoogleSheet($id: ID!) {
       disconnectGoogleSheet(id: $id)

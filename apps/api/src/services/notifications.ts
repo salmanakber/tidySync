@@ -55,6 +55,8 @@ function taskLabel(job: JobNotificationContext): string {
       return "Catalog health scan";
     case "CONTENT_REWRITE":
       return "AI content update";
+    case "SUPPLIER_FEED_SYNC":
+      return "Supplier feed sync";
     case "UNDO":
       return "Undo changes";
     default:

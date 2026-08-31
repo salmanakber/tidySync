@@ -237,7 +237,7 @@ export function Dashboard() {
     return () => jobEventCleanupRef.current?.();
   }, []);
 
-  const goToBilling = useCallback(() => setTab(12), []);
+  const goToBilling = useCallback(() => setTab(11), []);
 
   const pushAlert = useCallback((alert: Omit<AppAlertModel, "id">) => {
     const id = `${alert.code ?? "alert"}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -574,21 +574,20 @@ export function Dashboard() {
     { id: "import", content: "Import" },
     { id: "export", content: "Export" },
     { id: "duplicates", content: "Duplicates" },
-    { id: "sheets", content: "Sheets" },
     { id: "ai", content: "AI Edit" },
     { id: "seo", content: "SEO" },
     { id: "health", content: "Health" },
     { id: "audit", content: "Audit" },
     { id: "schedules", content: "Schedules" },
     { id: "settings", content: "Billing" },
-    { id: "agent", content: "AI Agent" },
-    { id: "backups", content: "Backups" },
+    { id: "agent", content: "Agent" },
+    { id: "backups", content: "Vault" },
   ];
 
   useEffect(() => {
     if (!shop) return;
-    if (tab === 10) void loadAudit();
-    if (tab === 11) void loadSchedules();
+    if (tab === 9) void loadAudit();
+    if (tab === 10) void loadSchedules();
   }, [tab, shop]);
 
   const loadAudit = async () => {
@@ -724,7 +723,7 @@ export function Dashboard() {
       }}
       secondaryActions={[
         { content: "Import", onAction: () => setTab(3) },
-        { content: "AI edit", onAction: () => setTab(7) },
+        { content: "AI edit", onAction: () => setTab(6) },
       ]}
     >
       <Layout>
@@ -767,7 +766,7 @@ export function Dashboard() {
             <Banner
               tone="warning"
               title="Complete your subscription"
-              action={{ content: "View plans", onAction: () => setTab(12) }}
+              action={{ content: "View plans", onAction: () => setTab(11) }}
             >
               Choose a plan to unlock imports, exports, and AI bulk edits.
             </Banner>
@@ -817,136 +816,50 @@ export function Dashboard() {
               <div className="tidysync-panel">
                 {tab === 0 && (
                   <BlockStack gap="500">
-                    <div>
-                      <p className="tidysync-section-title">What do you want to do?</p>
-                      <p className="tidysync-section-sub">
-                        Import catalogs, export Shopify data, or describe a change in plain English.
+                    <div className="tidysync-home-intro">
+                      <h2 className="tidysync-home-title">What do you want to do?</h2>
+                      <p className="tidysync-home-sub">
+                        Import, export, AI edits, and agent missions — with preview before anything goes live.
                       </p>
-                      <div className="tidysync-action-grid">
-                        <button type="button" className="tidysync-action-card is-ai" onClick={() => setTab(2)}>
-                          <div className="tidysync-action-icon">
-                            <Icon source={ImportIcon} />
-                          </div>
-                          <p className="tidysync-action-title">Migration wizard</p>
-                          <p className="tidysync-action-desc">
-                            Guided move from WooCommerce, Amazon, Etsy, and more — with vault snapshot.
-                          </p>
-                        </button>
-                        <button type="button" className="tidysync-action-card" onClick={() => setTab(3)}>
-                          <div className="tidysync-action-icon">
-                            <Icon source={ImportIcon} />
-                          </div>
-                          <p className="tidysync-action-title">Import catalog</p>
-                          <p className="tidysync-action-desc">
-                            Drop a CSV/XLSX — we map fields, preview every change, then commit.
-                          </p>
-                        </button>
-                        <button type="button" className="tidysync-action-card" onClick={() => setTab(4)}>
-                          <div className="tidysync-action-icon">
-                            <Icon source={ExportIcon} />
-                          </div>
-                          <p className="tidysync-action-title">Export data</p>
-                          <p className="tidysync-action-desc">
-                            Pull products, collections, customers and more into platform-ready files.
-                          </p>
-                        </button>
-                        <button
-                          type="button"
-                          className="tidysync-action-card is-ai"
-                          onClick={() => setTab(7)}
-                        >
-                          <div className="tidysync-action-icon">
-                            <Icon source={MagicIcon} />
-                          </div>
-                          <p className="tidysync-action-title">AI bulk edit</p>
-                          <p className="tidysync-action-desc">
-                            Describe a change — get a mutation plan and staggered diff before anything runs.
-                          </p>
-                        </button>
-                        <button type="button" className="tidysync-action-card" onClick={() => setTab(8)}>
-                          <div className="tidysync-action-icon">
-                            <Icon source={ProductIcon} />
-                          </div>
-                          <p className="tidysync-action-title">Product SEO</p>
-                          <p className="tidysync-action-desc">
-                            Deep SEO scores, charts, and AI strategist briefings per product (1 credit).
-                          </p>
-                        </button>
-                        <button type="button" className="tidysync-action-card is-ai" onClick={() => setTab(13)}>
-                          <div className="tidysync-action-icon">
-                            <Icon source={AutomationIcon} />
-                          </div>
-                          <p className="tidysync-action-title">AI Agent</p>
-                          <p className="tidysync-action-desc">
-                            Fix my store, improve SEO, bulk edits, and backups — one command center.
-                          </p>
-                        </button>
-                        <button type="button" className="tidysync-action-card" onClick={() => setTab(14)}>
-                          <div className="tidysync-action-icon">
-                            <Icon source={DatabaseIcon} />
-                          </div>
-                          <p className="tidysync-action-title">Catalog vault</p>
-                          <p className="tidysync-action-desc">
-                            Snapshot products before risky imports or bulk changes.
-                          </p>
-                        </button>
-                        <button type="button" className="tidysync-action-card" onClick={() => setTab(9)}>
-                          <div className="tidysync-action-icon">
-                            <Icon source={ProductIcon} />
-                          </div>
-                          <p className="tidysync-action-title">Catalog health</p>
-                          <p className="tidysync-action-desc">
-                            Scan for missing images, thin content, and pricing anomalies.
-                          </p>
-                        </button>
-                      </div>
                     </div>
-
-                    {runningJobs.length > 0 && (
-                      <BlockStack gap="300">
-                        <InlineStack align="space-between" blockAlign="center">
-                          <Text as="h3" variant="headingSm">
-                            Live progress
-                          </Text>
-                          <Badge tone="info">{`${runningJobs.length} running`}</Badge>
-                        </InlineStack>
-                        {runningJobs.map((job) => {
-                          const pct =
-                            job.rowCount > 0
-                              ? Math.round((job.successCount / job.rowCount) * 100)
-                              : 0;
-                          return (
-                            <div key={job.id} className="tidysync-job-live is-running">
-                              <InlineStack align="space-between" blockAlign="center">
-                                <BlockStack gap="100">
-                                  <Text as="span" variant="bodyMd" fontWeight="semibold">
-                                    {job.type} · {job.fileName ?? job.nlPrompt ?? "In progress"}
-                                  </Text>
-                                  <Text as="span" variant="bodySm" tone="subdued">
-                                    {job.successCount.toLocaleString()} in Shopify /{" "}
-                                    {job.rowCount.toLocaleString()} total
-                                  </Text>
-                                </BlockStack>
-                                <Text as="span" variant="headingSm">
-                                  {pct}%
-                                </Text>
-                              </InlineStack>
-                              <div style={{ marginTop: 10 }}>
-                                <ProgressBar progress={pct} size="small" tone="primary" />
-                              </div>
-                              <div className="tidysync-live-counters">
-                                <Text as="span" variant="bodySm">
-                                  Success <strong>{job.successCount}</strong>
-                                </Text>
-                                <Text as="span" variant="bodySm">
-                                  Failed <strong>{job.failedCount}</strong>
-                                </Text>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </BlockStack>
-                    )}
+                    <div className="tidysync-action-grid tidysync-action-grid--home">
+                      <button type="button" className="tidysync-action-card is-ai" onClick={() => setTab(12)}>
+                        <div className="tidysync-action-icon">
+                          <Icon source={AutomationIcon} />
+                        </div>
+                        <p className="tidysync-action-title">Agent</p>
+                        <p className="tidysync-action-desc">Scan, fix SEO, and run multi-step catalog missions.</p>
+                      </button>
+                      <button type="button" className="tidysync-action-card" onClick={() => setTab(2)}>
+                        <div className="tidysync-action-icon">
+                          <Icon source={ImportIcon} />
+                        </div>
+                        <p className="tidysync-action-title">Migrate store</p>
+                        <p className="tidysync-action-desc">Guided wizard from WooCommerce, Amazon, Etsy, and more.</p>
+                      </button>
+                      <button type="button" className="tidysync-action-card" onClick={() => setTab(3)}>
+                        <div className="tidysync-action-icon">
+                          <Icon source={ImportIcon} />
+                        </div>
+                        <p className="tidysync-action-title">Import file</p>
+                        <p className="tidysync-action-desc">CSV/XLSX or Google Sheet — map, preview, then commit.</p>
+                      </button>
+                      <button type="button" className="tidysync-action-card is-ai" onClick={() => setTab(6)}>
+                        <div className="tidysync-action-icon">
+                          <Icon source={MagicIcon} />
+                        </div>
+                        <p className="tidysync-action-title">AI bulk edit</p>
+                        <p className="tidysync-action-desc">Describe a change in plain English — review diffs first.</p>
+                      </button>
+                    </div>
+                    <div className="tidysync-home-links">
+                      <button type="button" onClick={() => setTab(4)}>Export</button>
+                      <button type="button" onClick={() => setTab(5)}>Duplicates</button>
+                      <button type="button" onClick={() => setTab(7)}>SEO studio</button>
+                      <button type="button" onClick={() => setTab(8)}>Health scan</button>
+                      <button type="button" onClick={() => setTab(13)}>Vault</button>
+                      <button type="button" onClick={() => setTab(1)}>All jobs</button>
+                    </div>
 
                     <Divider />
 
@@ -963,7 +876,7 @@ export function Dashboard() {
                         <EmptyState
                           heading="No jobs yet"
                           action={{ content: "Import a file", onAction: () => setTab(3) }}
-                          secondaryAction={{ content: "Try AI edit", onAction: () => setTab(7) }}
+                          secondaryAction={{ content: "Try AI edit", onAction: () => setTab(6) }}
                           image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
                         >
                           <p>Import a catalog or describe a bulk change to get started.</p>
@@ -1128,6 +1041,15 @@ export function Dashboard() {
                       detectedConfidence={detectedConfidence}
                     />
                     <FileDropzone loading={loading} onFile={handleImport} />
+                    <div className="tidysync-import-divider">
+                      <span>Or import from Google Sheets</span>
+                    </div>
+                    <GoogleSheetsStudio
+                      shop={shop}
+                      onUpgrade={goToBilling}
+                      compact
+                      onJobStarted={(jobId) => beginJobProgress(jobId, {})}
+                    />
                   </BlockStack>
                 )}
 
@@ -1211,29 +1133,17 @@ export function Dashboard() {
                 )}
 
                 {tab === 6 && (
-                  <GoogleSheetsStudio
-                    shop={shop}
-                    onUpgrade={goToBilling}
-                    onSyncStarted={(jobId) => {
-                      beginJobProgress(jobId, {});
-                      setTab(3);
-                    }}
-                    onOpenImport={() => setTab(3)}
-                  />
-                )}
-
-                {tab === 7 && (
                   <AiStudio
                     value={nlPrompt}
                     onChange={setNlPrompt}
                     onSubmit={handleNlBulkEdit}
                     loading={aiLoading}
                     creditsRemaining={tenant?.plan?.aiCreditsRemaining}
-                    error={tab === 7 ? error : null}
+                    error={tab === 6 ? error : null}
                   />
                 )}
 
-                {tab === 8 && (
+                {tab === 7 && (
                   <ProductSeoStudio
                     shop={shop}
                     creditsRemaining={tenant?.plan?.aiCreditsRemaining}
@@ -1242,7 +1152,7 @@ export function Dashboard() {
                   />
                 )}
 
-                {tab === 9 && (
+                {tab === 8 && (
                   <BlockStack gap="500">
                     <div>
                       <p className="tidysync-section-title">Catalog health</p>
@@ -1335,7 +1245,7 @@ export function Dashboard() {
                   </BlockStack>
                 )}
 
-                {tab === 10 && (
+                {tab === 9 && (
                   <BlockStack gap="400">
                     <div>
                       <p className="tidysync-section-title">Audit log</p>
@@ -1378,7 +1288,7 @@ export function Dashboard() {
                   </BlockStack>
                 )}
 
-                {tab === 11 && (
+                {tab === 10 && (
                   <BlockStack gap="500">
                     <div>
                       <p className="tidysync-section-title">Schedules</p>
@@ -1514,7 +1424,7 @@ export function Dashboard() {
                   </BlockStack>
                 )}
 
-                {tab === 12 && (
+                {tab === 11 && (
                   <BlockStack gap="500">
                     <div className="tidysync-billing-hero">
                       <InlineStack align="space-between" blockAlign="start" wrap>
@@ -1673,7 +1583,7 @@ export function Dashboard() {
                   </BlockStack>
                 )}
 
-                {tab === 13 && (
+                {tab === 12 && (
                   <AgentStudio
                     shop={shop}
                     onUpgrade={goToBilling}
@@ -1686,7 +1596,7 @@ export function Dashboard() {
                   />
                 )}
 
-                {tab === 14 && (
+                {tab === 13 && (
                   <BackupStudio
                     shop={shop}
                     maxBackups={tenant?.plan?.maxBackups ?? 0}

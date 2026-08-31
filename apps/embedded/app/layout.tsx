@@ -5,7 +5,11 @@ import "./marketing.css";
 export const metadata: Metadata = {
   title: "TidySync — Bulk catalog operations for Shopify",
   description:
-    "Import, export, and bulk-edit your Shopify catalog with preview, undo, and live progress.",
+    "Import, export, bulk-edit, AI agent, supplier feeds, and catalog vault — with preview, undo, and live progress.",
+  icons: {
+    icon: "/images/logo-icon.png",
+    apple: "/images/logo-icon.png",
+  },
 };
 
 export const dynamic = "force-dynamic";

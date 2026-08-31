@@ -6,62 +6,62 @@ const CORE_FEATURES = [
     icon: "↑↓",
     iconClass: "is-brand",
     title: "Import & export",
-    body: "Bring products from CSV, Excel, WooCommerce, BigCommerce, or generic files. Map fields, preview rows, then commit with live progress.",
-    bullets: ["Platform auto-detection", "Conditional import rules", "Scheduled exports"],
+    body: "CSV, Excel, WooCommerce, Amazon, Etsy, or Google Sheets — map fields, preview every row, then commit with live progress.",
+    bullets: ["Migration wizard", "Google Sheets connect", "Scheduled exports"],
   },
   {
-    icon: "✎",
-    iconClass: "",
-    title: "Bulk edit in plain English",
-    body: "Describe catalog changes in everyday language. TidySync builds a plan and shows every diff before anything touches your store.",
-    bullets: ["Price & inventory updates", "Title and description edits", "Approve before run"],
+    icon: "⟳",
+    iconClass: "is-brand",
+    title: "Live supplier feed",
+    body: "Match supplier sheets by SKU or barcode and update price, stock, and titles on a schedule — no duplicate products every run.",
+    bullets: ["Update by SKU / barcode", "Upsert new rows", "Optional auto-sync"],
   },
   {
     icon: "◎",
     iconClass: "is-brand",
-    title: "Command center",
-    body: "One workspace to scan store health, improve SEO, create backups, and run bulk missions without jumping between tabs.",
-    bullets: ["Store health scan", "Quick mission cards", "Preview + approve workflow"],
+    title: "AI Agent",
+    body: "Scan your store, fix SEO gaps, merge duplicates, and run multi-step missions from one command center.",
+    bullets: ["Fix my store scan", "Fix-all buttons", "1 credit per scan"],
+  },
+  {
+    icon: "✎",
+    iconClass: "",
+    title: "AI bulk edit",
+    body: "Describe catalog changes in plain English. TidySync builds a mutation plan and shows every diff before anything runs.",
+    bullets: ["Natural language edits", "Rich HTML descriptions", "Approve before run"],
   },
   {
     icon: "◇",
     iconClass: "is-brand",
-    title: "Product SEO studio",
-    body: "SEO scores per product with suggested titles, meta descriptions, and improvement briefings — applied when you approve.",
-    bullets: ["Score rings & metrics", "Keyword insights", "One-click apply"],
+    title: "SEO studio",
+    body: "Per-product SEO scores, keyword insights, and AI strategist briefings — applied only when you approve.",
+    bullets: ["Score rings & metrics", "Meta title & description", "One-click apply"],
   },
   {
     icon: "▣",
     iconClass: "",
-    title: "Catalog vault (backups)",
-    body: "Snapshot your catalog before risky imports or bulk edits. Plan-scoped retention keeps vaults manageable.",
-    bullets: ["On-demand snapshots", "Status tracking", "Delete when done"],
-  },
-  {
-    icon: "↺",
-    iconClass: "",
-    title: "Undo you can trust",
-    body: "Every committed job stores a snapshot so you can roll back instantly if something looks wrong in the live store.",
-    bullets: ["Per-job undo", "Diff history", "Audit trail"],
+    title: "Catalog vault",
+    body: "Snapshot products before risky imports or bulk edits. Restore with filters when you need to roll back.",
+    bullets: ["On-demand backups", "Filtered restore", "Plan-scoped retention"],
   },
 ];
 
 const OPS_FEATURES = [
   {
-    title: "Live job progress",
-    desc: "Watch success and fail counters tick in real time on large catalogs — no silent black box.",
+    title: "Sticky live progress",
+    desc: "Watch jobs across import, feed sync, agent runs, and bulk edits — cancel stuck work from the bar.",
   },
   {
-    title: "Catalog health scans",
-    desc: "Find missing images, thin content, SKU gaps, and pricing anomalies across your entire catalog.",
+    title: "Duplicate merge",
+    desc: "Find duplicate listings by title or SKU, preview merges, and combine variants safely.",
   },
   {
-    title: "Schedules",
-    desc: "Automate daily exports and weekly health scans so ops keep running without babysitting.",
+    title: "Schedules & automation",
+    desc: "Daily exports, health scans, and supplier feed sync on hourly, daily, or weekly intervals.",
   },
   {
-    title: "Clear plan limits",
-    desc: "Transparent usage for products, credits, backups, and missions — with upgrade prompts when you need more.",
+    title: "Friendly notifications",
+    desc: "Email updates in merchant language — not raw job IDs — when imports and syncs finish or fail.",
   },
 ];
 
@@ -72,14 +72,14 @@ export function MarketingHome() {
         <div className="ts-container">
           <div className="ts-hero-panel">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img className="ts-logo-hero" src="/images/logo.png" alt="TidySync logo" />
+            <img className="ts-logo-hero" src="/images/logo.png" alt="TidySync" />
             <div className="ts-hero-badge">Built for Shopify merchants</div>
             <h1>
-              Bulk catalog ops that feel <span className="accent">native</span> inside Shopify Admin
+              Catalog ops that feel <span className="accent">native</span> inside Shopify Admin
             </h1>
             <p className="ts-hero-lead">
-              Import, export, bulk edit, SEO improvements, and catalog backups — with live progress,
-              full diffs, and one-click undo so you can move fast without breaking the store.
+              Import, live supplier feeds, AI agent missions, bulk edits, SEO, vault backups, and duplicate merge —
+              with preview-first workflows, live progress, and undo when you need it.
             </p>
             <div className="ts-hero-actions">
               <Link href="/docs#install" className="ts-btn ts-btn-primary">
@@ -91,16 +91,16 @@ export function MarketingHome() {
             </div>
             <div className="ts-hero-stats">
               <div className="ts-hero-stat">
+                <strong>Live feeds</strong>
+                <span>SKU-matched sheet sync</span>
+              </div>
+              <div className="ts-hero-stat">
                 <strong>Preview-first</strong>
-                <span>Every change reviewed before run</span>
+                <span>Review diffs before run</span>
               </div>
               <div className="ts-hero-stat">
-                <strong>Embedded</strong>
-                <span>Runs inside Shopify Admin</span>
-              </div>
-              <div className="ts-hero-stat">
-                <strong>Merchant-ready</strong>
-                <span>Bulk edits, SEO, vault &amp; undo</span>
+                <strong>Agent + vault</strong>
+                <span>Fix, backup, and undo</span>
               </div>
             </div>
           </div>
@@ -113,8 +113,8 @@ export function MarketingHome() {
             <span className="ts-section-eyebrow">Platform</span>
             <h2 className="ts-section-title">Everything in one workspace</h2>
             <p className="ts-section-sub">
-              A native experience inside Shopify — not a bolted-on spreadsheet. Sidebar navigation
-              groups catalog, intelligence, vault, and billing so merchants always know where to go.
+              Sidebar groups Overview, Catalog, Intelligence, Vault &amp; health, and Billing — Agent, live feeds,
+              migration wizard, and vault live alongside import and export.
             </p>
           </div>
           <div className="ts-grid ts-grid--3">
@@ -138,41 +138,41 @@ export function MarketingHome() {
         <div className="ts-container ts-feature-row">
           <div>
             <span className="ts-section-eyebrow">Workflow</span>
-            <h2 className="ts-section-title">Store missions &amp; quick actions</h2>
+            <h2 className="ts-section-title">Agent missions &amp; supplier feeds</h2>
             <p className="ts-section-sub">
-              Scan your store, pick a quick mission, or type what you need. TidySync plans the work,
-              shows previews, and runs jobs only after you approve.
+              Scan the store, sync a supplier sheet by SKU, or type a bulk edit. TidySync shows previews and runs only
+              after you approve (unless you enable auto-apply on feeds).
             </p>
             <div className="ts-feature-list">
               <div className="ts-feature-item">
                 <div className="ts-feature-check">1</div>
                 <div>
-                  <strong>Fix my store</strong>
-                  <p>Health scan for SEO gaps, missing SKUs, thin descriptions, and image issues.</p>
+                  <strong>Live supplier feed</strong>
+                  <p>Map columns once, then schedule SKU-matched price and inventory updates from Google Sheets.</p>
                 </div>
               </div>
               <div className="ts-feature-item">
                 <div className="ts-feature-check">2</div>
                 <div>
-                  <strong>Improve SEO</strong>
-                  <p>Targets products that need better titles and meta descriptions.</p>
+                  <strong>Fix my store</strong>
+                  <p>Health scan plus fix-all for missing SEO, thin descriptions, and image gaps.</p>
                 </div>
               </div>
               <div className="ts-feature-item">
                 <div className="ts-feature-check">3</div>
                 <div>
-                  <strong>Vault snapshot</strong>
-                  <p>Creates a catalog backup before risky imports or bulk price changes.</p>
+                  <strong>Vault before risky work</strong>
+                  <p>Snapshot the catalog before large imports or feed syncs — restore with filters if needed.</p>
                 </div>
               </div>
             </div>
           </div>
           <div className="ts-feature-visual">
-            <p className="ts-feature-visual-title">Example requests</p>
-            <div className="ts-code">Fix SEO for products missing meta descriptions</div>
-            <div className="ts-code">Backup my catalog before I import 500 SKUs</div>
-            <div className="ts-code">Increase all variant prices by 10%</div>
-            <p className="ts-code-note">Mission limits depend on your plan. Usage is shown clearly in the app.</p>
+            <p className="ts-feature-visual-title">Example workflows</p>
+            <div className="ts-code">Sync supplier sheet — update prices by SKU every 6 hours</div>
+            <div className="ts-code">Fix SEO for all products missing meta descriptions</div>
+            <div className="ts-code">Merge duplicate listings found by matching title</div>
+            <p className="ts-code-note">Plan limits apply to AI credits, agent runs, and automation.</p>
           </div>
         </div>
       </section>
@@ -211,13 +211,13 @@ export function MarketingHome() {
               },
               {
                 n: "2",
-                t: "Open Apps → TidySync inside Shopify Admin",
-                d: "The embedded dashboard loads inside Admin — no separate merchant login.",
+                t: "Connect a sheet or upload a file",
+                d: "Map columns, preview changes, approve — then enable live SKU sync if needed.",
               },
               {
                 n: "3",
-                t: "Import, export, or run a bulk edit",
-                d: "Review diff previews, approve jobs, and watch live progress. Undo anytime.",
+                t: "Run Agent or schedules",
+                d: "Fix catalog issues, automate exports, and let supplier feeds run on a schedule.",
               },
             ].map((s) => (
               <div key={s.n} className="ts-step">
@@ -243,7 +243,7 @@ export function MarketingHome() {
             <span className="ts-section-eyebrow">Start today</span>
             <h2 className="ts-section-title">Ready to tidy your catalog?</h2>
             <p className="ts-section-sub center">
-              Install TidySync on your store and run your first preview-safe bulk job in minutes.
+              Install TidySync and run your first preview-safe import or supplier feed sync in minutes.
             </p>
             <div className="ts-hero-actions">
               <Link href="/docs#install" className="ts-btn ts-btn-primary">

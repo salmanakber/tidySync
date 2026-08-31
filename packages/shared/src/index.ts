@@ -29,6 +29,17 @@ export {
   type ExtendedDiffRow,
 } from "./mutation-plan-apply";
 
+export {
+  type FeedSyncMode,
+  type FeedMatchField,
+  type SupplierFeedMutationPlan,
+  getMatchKeyFromMapped,
+  buildProductMatchIndex,
+  buildSupplierFeedDiffRows,
+  getProductFieldBefore,
+  valuesEqualForFeed,
+} from "./supplier-feed";
+
 export const QUEUE_NAMES = {
   IMPORT: "tidysync-import",
   EXPORT: "tidysync-export",
