@@ -73,6 +73,38 @@ export async function fetchProductsForExport(
   return products;
 }
 
+const CATALOG_COUNTS_QUERY = `#graphql
+  query TidySyncCatalogCounts {
+    productsCount {
+      count
+    }
+    productVariantsCount {
+      count
+    }
+  }
+`;
+
+export async function fetchShopCatalogCounts(
+  shop: string,
+  sessionToken?: string,
+): Promise<{ productCount: number; skuCount: number }> {
+  const response = (await merchantGraphqlRequest(
+    shop,
+    sessionToken,
+    CATALOG_COUNTS_QUERY,
+  )) as {
+    data?: {
+      productsCount?: { count: number };
+      productVariantsCount?: { count: number };
+    };
+  };
+
+  return {
+    productCount: response.data?.productsCount?.count ?? 0,
+    skuCount: response.data?.productVariantsCount?.count ?? 0,
+  };
+}
+
 function normalizeProduct(raw: Record<string, unknown>): ProductForMutation {
   const variantsRaw = raw.variants as { edges?: Array<{ node: Record<string, unknown> }> };
   return {

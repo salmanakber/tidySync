@@ -261,10 +261,14 @@ export function Dashboard() {
     setError(null);
   }, []);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (options?: { refreshCatalog?: boolean }) => {
     if (!shop) return;
     try {
-      const tenantData = await gqlRequest<{ meTenant: Tenant }>(QUERIES.meTenant, {}, shop);
+      const tenantData = await gqlRequest<{ meTenant: Tenant }>(
+        QUERIES.meTenant,
+        { refreshCatalog: options?.refreshCatalog ?? false },
+        shop,
+      );
       setTenant(tenantData.meTenant);
       if (tenantData.meTenant?.shopDomain) {
         setSessionShop(tenantData.meTenant.shopDomain);
@@ -719,7 +723,7 @@ export function Dashboard() {
       primaryAction={{
         content: "Refresh",
         icon: RefreshIcon,
-        onAction: loadData,
+        onAction: () => loadData({ refreshCatalog: true }),
       }}
       secondaryActions={[
         { content: "Import", onAction: () => setTab(3) },
@@ -786,6 +790,12 @@ export function Dashboard() {
               <div className="tidysync-stat-card tidysync-enter tidysync-enter-delay-2">
                 <div className="tidysync-stat-label">Products</div>
                 <div className="tidysync-stat-value">{tenant.productCount.toLocaleString()}</div>
+                <div className="tidysync-stat-meta">
+                  in your Shopify store
+                  {tenant.plan?.maxProducts ? (
+                    <span> · limit {tenant.plan.maxProducts.toLocaleString()}</span>
+                  ) : null}
+                </div>
                 <div className="tidysync-stat-meta" style={{ marginTop: 10 }}>
                   <ProgressBar progress={productUsage} size="small" />
                 </div>
@@ -816,50 +826,136 @@ export function Dashboard() {
               <div className="tidysync-panel">
                 {tab === 0 && (
                   <BlockStack gap="500">
-                    <div className="tidysync-home-intro">
-                      <h2 className="tidysync-home-title">What do you want to do?</h2>
-                      <p className="tidysync-home-sub">
-                        Import, export, AI edits, and agent missions — with preview before anything goes live.
+                    <div>
+                      <p className="tidysync-section-title">What do you want to do?</p>
+                      <p className="tidysync-section-sub">
+                        Import catalogs, export Shopify data, or describe a change in plain English.
                       </p>
+                      <div className="tidysync-action-grid">
+                        <button type="button" className="tidysync-action-card" onClick={() => setTab(2)}>
+                          <div className="tidysync-action-icon">
+                            <Icon source={ImportIcon} />
+                          </div>
+                          <p className="tidysync-action-title">Migration wizard</p>
+                          <p className="tidysync-action-desc">
+                            Guided move from WooCommerce, Amazon, Etsy, and more — with vault snapshot.
+                          </p>
+                        </button>
+                        <button type="button" className="tidysync-action-card" onClick={() => setTab(3)}>
+                          <div className="tidysync-action-icon">
+                            <Icon source={ImportIcon} />
+                          </div>
+                          <p className="tidysync-action-title">Import catalog</p>
+                          <p className="tidysync-action-desc">
+                            Drop a CSV/XLSX or Google Sheet — map fields, preview every change, then commit.
+                          </p>
+                        </button>
+                        <button type="button" className="tidysync-action-card" onClick={() => setTab(4)}>
+                          <div className="tidysync-action-icon">
+                            <Icon source={ExportIcon} />
+                          </div>
+                          <p className="tidysync-action-title">Export data</p>
+                          <p className="tidysync-action-desc">
+                            Pull products, collections, customers and more into platform-ready files.
+                          </p>
+                        </button>
+                        <button
+                          type="button"
+                          className="tidysync-action-card is-ai"
+                          onClick={() => setTab(6)}
+                        >
+                          <div className="tidysync-action-icon">
+                            <Icon source={MagicIcon} />
+                          </div>
+                          <p className="tidysync-action-title">AI bulk edit</p>
+                          <p className="tidysync-action-desc">
+                            Describe a change — get a mutation plan and staggered diff before anything runs.
+                          </p>
+                        </button>
+                        <button type="button" className="tidysync-action-card" onClick={() => setTab(7)}>
+                          <div className="tidysync-action-icon">
+                            <Icon source={ProductIcon} />
+                          </div>
+                          <p className="tidysync-action-title">Product SEO</p>
+                          <p className="tidysync-action-desc">
+                            Deep SEO scores, charts, and AI strategist briefings per product (1 credit).
+                          </p>
+                        </button>
+                        <button type="button" className="tidysync-action-card is-ai" onClick={() => setTab(12)}>
+                          <div className="tidysync-action-icon">
+                            <Icon source={AutomationIcon} />
+                          </div>
+                          <p className="tidysync-action-title">AI Agent</p>
+                          <p className="tidysync-action-desc">
+                            Fix my store, improve SEO, bulk edits, and backups — one command center.
+                          </p>
+                        </button>
+                        <button type="button" className="tidysync-action-card" onClick={() => setTab(13)}>
+                          <div className="tidysync-action-icon">
+                            <Icon source={DatabaseIcon} />
+                          </div>
+                          <p className="tidysync-action-title">Catalog vault</p>
+                          <p className="tidysync-action-desc">
+                            Snapshot products before risky imports or bulk changes.
+                          </p>
+                        </button>
+                        <button type="button" className="tidysync-action-card" onClick={() => setTab(8)}>
+                          <div className="tidysync-action-icon">
+                            <Icon source={ProductIcon} />
+                          </div>
+                          <p className="tidysync-action-title">Catalog health</p>
+                          <p className="tidysync-action-desc">
+                            Scan for missing images, thin content, and pricing anomalies.
+                          </p>
+                        </button>
+                      </div>
                     </div>
-                    <div className="tidysync-action-grid tidysync-action-grid--home">
-                      <button type="button" className="tidysync-action-card is-ai" onClick={() => setTab(12)}>
-                        <div className="tidysync-action-icon">
-                          <Icon source={AutomationIcon} />
-                        </div>
-                        <p className="tidysync-action-title">Agent</p>
-                        <p className="tidysync-action-desc">Scan, fix SEO, and run multi-step catalog missions.</p>
-                      </button>
-                      <button type="button" className="tidysync-action-card" onClick={() => setTab(2)}>
-                        <div className="tidysync-action-icon">
-                          <Icon source={ImportIcon} />
-                        </div>
-                        <p className="tidysync-action-title">Migrate store</p>
-                        <p className="tidysync-action-desc">Guided wizard from WooCommerce, Amazon, Etsy, and more.</p>
-                      </button>
-                      <button type="button" className="tidysync-action-card" onClick={() => setTab(3)}>
-                        <div className="tidysync-action-icon">
-                          <Icon source={ImportIcon} />
-                        </div>
-                        <p className="tidysync-action-title">Import file</p>
-                        <p className="tidysync-action-desc">CSV/XLSX or Google Sheet — map, preview, then commit.</p>
-                      </button>
-                      <button type="button" className="tidysync-action-card is-ai" onClick={() => setTab(6)}>
-                        <div className="tidysync-action-icon">
-                          <Icon source={MagicIcon} />
-                        </div>
-                        <p className="tidysync-action-title">AI bulk edit</p>
-                        <p className="tidysync-action-desc">Describe a change in plain English — review diffs first.</p>
-                      </button>
-                    </div>
-                    <div className="tidysync-home-links">
-                      <button type="button" onClick={() => setTab(4)}>Export</button>
-                      <button type="button" onClick={() => setTab(5)}>Duplicates</button>
-                      <button type="button" onClick={() => setTab(7)}>SEO studio</button>
-                      <button type="button" onClick={() => setTab(8)}>Health scan</button>
-                      <button type="button" onClick={() => setTab(13)}>Vault</button>
-                      <button type="button" onClick={() => setTab(1)}>All jobs</button>
-                    </div>
+
+                    {runningJobs.length > 0 && (
+                      <BlockStack gap="300">
+                        <InlineStack align="space-between" blockAlign="center">
+                          <Text as="h3" variant="headingSm">
+                            Live progress
+                          </Text>
+                          <Badge tone="info">{`${runningJobs.length} running`}</Badge>
+                        </InlineStack>
+                        {runningJobs.map((job) => {
+                          const pct =
+                            job.rowCount > 0
+                              ? Math.round((job.successCount / job.rowCount) * 100)
+                              : 0;
+                          return (
+                            <div key={job.id} className="tidysync-job-live is-running">
+                              <InlineStack align="space-between" blockAlign="center">
+                                <BlockStack gap="100">
+                                  <Text as="span" variant="bodyMd" fontWeight="semibold">
+                                    {job.type} · {job.fileName ?? job.nlPrompt ?? "In progress"}
+                                  </Text>
+                                  <Text as="span" variant="bodySm" tone="subdued">
+                                    {job.successCount.toLocaleString()} in Shopify /{" "}
+                                    {job.rowCount.toLocaleString()} total
+                                  </Text>
+                                </BlockStack>
+                                <Text as="span" variant="headingSm">
+                                  {pct}%
+                                </Text>
+                              </InlineStack>
+                              <div style={{ marginTop: 10 }}>
+                                <ProgressBar progress={pct} size="small" tone="primary" />
+                              </div>
+                              <div className="tidysync-live-counters">
+                                <Text as="span" variant="bodySm">
+                                  Success <strong>{job.successCount}</strong>
+                                </Text>
+                                <Text as="span" variant="bodySm">
+                                  Failed <strong>{job.failedCount}</strong>
+                                </Text>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </BlockStack>
+                    )}
 
                     <Divider />
 

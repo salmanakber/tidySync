@@ -123,8 +123,8 @@ export async function downloadExport(jobId: string, shop: string) {
 
 export const QUERIES = {
   meTenant: `
-    query MeTenant {
-      meTenant {
+    query MeTenant($refreshCatalog: Boolean) {
+      meTenant(refreshCatalog: $refreshCatalog) {
         id shopDomain shopName productCount aiCreditsUsed extraAiCredits agentRunsUsed agentRunsRemaining
         billingStatus billingBypass installApproved
         plan {

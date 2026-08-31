@@ -244,7 +244,7 @@ export const typeDefs = `#graphql
 
   type Query {
     health: String!
-    meTenant: Tenant
+    meTenant(refreshCatalog: Boolean): Tenant
     availablePlans: [Plan!]!
     jobs(limit: Int = 8): [Job!]!
     job(id: ID!): Job
@@ -314,10 +314,21 @@ export const resolvers = {
   Query: {
     health: () => "ok",
     availablePlans: async () => listAvailablePlans(),
-    meTenant: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
-      const { tenantId } = requireMerchant(ctx);
-      const tenant = await tenantRepository.findById(tenantId);
+    meTenant: async (
+      _: unknown,
+      args: { refreshCatalog?: boolean },
+      ctx: GraphQLContext,
+    ) => {
+      const { tenantId, shop } = requireMerchant(ctx);
+      let tenant = await tenantRepository.findById(tenantId);
       if (!tenant) return null;
+      if (shop) {
+        const forceRefresh = args.refreshCatalog ?? tenant.productCount === 0;
+        tenant =
+          (await import("../services/tenant").then((m) =>
+            m.refreshTenantCatalogCounts(tenantId, shop, ctx.sessionToken, forceRefresh),
+          )) ?? tenant;
+      }
       return mapTenant(tenant);
     },
     jobs: async (_: unknown, args: { limit?: number }, ctx: GraphQLContext) => {

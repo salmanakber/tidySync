@@ -72,3 +72,35 @@ export async function checkCatalogLimit(tenantId: string, additional = 0) {
   if (!tenant?.plan) return true;
   return tenant.productCount + additional <= tenant.plan.maxProducts;
 }
+
+const catalogSyncCache = new Map<string, { at: number; productCount: number; skuCount: number }>();
+const CATALOG_SYNC_TTL_MS = 90_000;
+
+/** Pull live product / variant counts from Shopify and persist on the tenant row. */
+export async function refreshTenantCatalogCounts(
+  tenantId: string,
+  shop: string,
+  sessionToken?: string,
+  force = false,
+): Promise<Awaited<ReturnType<typeof tenantRepository.findById>>> {
+  const now = Date.now();
+  const cached = catalogSyncCache.get(tenantId);
+  if (!force && cached && now - cached.at < CATALOG_SYNC_TTL_MS) {
+    return tenantRepository.update(tenantId, {
+      productCount: cached.productCount,
+      skuCount: cached.skuCount,
+    });
+  }
+
+  try {
+    const { fetchShopCatalogCounts } = await import("./shopify-products");
+    const counts = await fetchShopCatalogCounts(shop, sessionToken);
+    catalogSyncCache.set(tenantId, { at: now, ...counts });
+    return tenantRepository.update(tenantId, {
+      productCount: counts.productCount,
+      skuCount: counts.skuCount,
+    });
+  } catch {
+    return tenantRepository.findById(tenantId);
+  }
+}
