@@ -9,6 +9,7 @@ export const exportQueue = new Queue(QUEUE_NAMES.EXPORT, { connection });
 export const bulkEditQueue = new Queue(QUEUE_NAMES.BULK_EDIT, { connection });
 export const undoQueue = new Queue(QUEUE_NAMES.UNDO, { connection });
 export const catalogScanQueue = new Queue(QUEUE_NAMES.CATALOG_SCAN, { connection });
+export const agentQueue = new Queue(QUEUE_NAMES.AGENT, { connection });
 
 export function getRedisConnection() {
   return connection;

@@ -52,6 +52,7 @@ import { ProductSeoStudio } from "./ProductSeoStudio";
 import { AgentStudio } from "./AgentStudio";
 import { BackupStudio } from "./BackupStudio";
 import { WorkspaceNav } from "./WorkspaceNav";
+import { LiveJobsBar } from "./LiveJobsBar";
 import { AppAlertStack } from "./AppAlert";
 import { subscribeToJobProgress } from "../lib/job-events";
 import {
@@ -582,7 +583,16 @@ export function Dashboard() {
     setSchedules(data.scheduledJobs);
   };
 
-  const runningJobs = useMemo(() => jobs.filter((j) => j.status === "RUNNING"), [jobs]);
+  const runningJobs = useMemo(
+    () => jobs.filter((j) => j.status === "RUNNING" || j.status === "QUEUED"),
+    [jobs],
+  );
+
+  useEffect(() => {
+    if (!shop || runningJobs.length === 0) return;
+    const timer = window.setInterval(() => void loadData(), 3500);
+    return () => window.clearInterval(timer);
+  }, [shop, runningJobs.length, loadData]);
   const productUsage = tenant?.plan?.maxProducts
     ? Math.min(100, Math.round((tenant.productCount / tenant.plan.maxProducts) * 100))
     : 0;
@@ -744,7 +754,9 @@ export function Dashboard() {
         <Layout.Section>
           <div className="tidysync-workspace tidysync-workspace--sidebar">
             <WorkspaceNav tabs={tabs} activeIndex={tab} onSelect={setTab} />
-            <div className="tidysync-panel">
+            <div className="tidysync-workspace-main">
+              <LiveJobsBar jobs={jobs} />
+              <div className="tidysync-panel">
                 {tab === 0 && (
                   <BlockStack gap="500">
                     <div>
@@ -1535,6 +1547,7 @@ export function Dashboard() {
                     shop={shop}
                     onUpgrade={goToBilling}
                     onApprove={(jobId) => handleApprove(jobId)}
+                    onJobStarted={(jobId, meta) => beginJobProgress(jobId, meta ?? {})}
                   />
                 )}
 
@@ -1543,8 +1556,10 @@ export function Dashboard() {
                     shop={shop}
                     maxBackups={tenant?.plan?.maxBackups ?? 0}
                     onUpgrade={goToBilling}
+                    onJobStarted={(jobId, meta) => beginJobProgress(jobId, meta ?? {})}
                   />
                 )}
+              </div>
             </div>
           </div>
         </Layout.Section>

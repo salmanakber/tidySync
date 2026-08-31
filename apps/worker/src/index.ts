@@ -86,9 +86,20 @@ createWorker(QUEUE_NAMES.BULK_EDIT, async (data) => {
   );
   if (job?.type === "CONTENT_REWRITE") {
     await processContentRewrite(data.jobId, data.tenantId, data.shop);
-  } else {
-    await processBulkEditJob(data.jobId, data.tenantId, data.shop);
+    return;
   }
+  const plan = job?.mutationPlan as { action?: string } | null;
+  if (plan?.action === "restore_backup") {
+    const { processRestoreBackupJob } = await import("./processors/restore-backup");
+    await processRestoreBackupJob(data.jobId, data.tenantId, data.shop);
+    return;
+  }
+  await processBulkEditJob(data.jobId, data.tenantId, data.shop);
+});
+
+createWorker(QUEUE_NAMES.AGENT, async (data) => {
+  const { processAgentRun } = await import("./processors/agent-run");
+  await processAgentRun(data.jobId, data.tenantId, data.shop);
 });
 
 createWorker(QUEUE_NAMES.UNDO, async (data) => {

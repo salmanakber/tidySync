@@ -2,7 +2,7 @@ import { prisma, auditRepository, scheduledJobRepository, featureFlagRepository,
 import { getShopifyFieldsForResource, parseNlBulkEdit, type ResourceType } from "@tidysync/shared";
 import { inferColumnMappingsWithAi, parseNlBulkEditWithAi, generateImpactSummary, generateProductSeoInsight, generateProductSeoImprovements, rewriteProductContent } from "@tidysync/ai";
 import { consumeAiCredit } from "../services/tenant";
-import { catalogScanQueue, bulkEditQueue, exportQueue } from "../queues";
+import { catalogScanQueue, exportQueue, bulkEditQueue, agentQueue } from "../queues";
 import { checkBackupAllowed, consumeAgentRun, computeAgentRunsRemaining } from "../services/tenant-limits";
 import { scanStoreHealth } from "../services/store-scan";
 import { parseAgentIntent, buildSeoImprovementPlan } from "@tidysync/ai";
@@ -170,6 +170,19 @@ export const extensionTypeDefs = `#graphql
     previewJob: Job
     agentRunsUsed: Int!
     suggestedActions: [String!]!
+    agentJobId: ID
+  }
+
+  input RestoreFiltersInput {
+    vendor: String
+    titleContains: String
+    tags: [String!]
+    productIds: [ID!]
+  }
+
+  input RestoreOptionsInput {
+    filters: RestoreFiltersInput
+    fields: [String!]
   }
 
   extend type Query {
@@ -193,6 +206,7 @@ export const extensionTypeDefs = `#graphql
     deleteStoreBackup(id: ID!): Boolean!
     scanStore: StoreScanResult!
     runAgent(prompt: String!): AgentRunResult!
+    restoreStoreBackup(id: ID!, options: RestoreOptionsInput): Job!
     createScheduledJob(name: String!, jobType: JobType!, schedule: String!, config: JSON): ScheduledJob!
     deleteScheduledJob(id: ID!): Boolean!
     updateNotificationSettings(
@@ -570,8 +584,20 @@ export const extensionResolvers = {
       return true;
     },
     scanStore: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
-      const { shop } = requireActiveMerchant(ctx);
-      return scanStoreHealth(shop, ctx.sessionToken, 100);
+      const { tenantId, shop } = requireActiveMerchant(ctx);
+      await consumeAiCredit(tenantId, 1);
+      const scan = await scanStoreHealth(shop, ctx.sessionToken, 100);
+      await prisma.aiOperation.create({
+        data: {
+          tenantId,
+          operationType: "CATALOG_HEALTH_SCAN",
+          prompt: "store_scan",
+          generatedPlan: { productCount: scan.productCount } as object,
+          creditsConsumed: 1,
+          modelUsed: "store-scan",
+        },
+      });
+      return scan;
     },
     runAgent: async (_: unknown, args: { prompt: string }, ctx: GraphQLContext) => {
       const { tenantId, shop } = requireActiveMerchant(ctx);
@@ -580,120 +606,81 @@ export const extensionResolvers = {
       const intentResult = await parseAgentIntent(args.prompt);
       const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
 
-      if (intentResult.intent === "FIX_STORE") {
-        const scan = await scanStoreHealth(shop, ctx.sessionToken, 100);
-        await prisma.aiOperation.create({
-          data: {
-            tenantId,
-            operationType: "AGENT_RUN",
-            prompt: args.prompt,
-            generatedPlan: { intent: intentResult.intent, scan } as object,
-            creditsConsumed: 0,
-            modelUsed: intentResult.modelUsed,
-          },
-        });
-        return {
-          intent: intentResult.intent,
-          message: scan.summary,
-          scan,
-          previewJob: null,
-          agentRunsUsed: tenant?.agentRunsUsed ?? 0,
-          suggestedActions: intentResult.suggestedActions,
-        };
-      }
-
-      if (intentResult.intent === "CREATE_BACKUP") {
-        await checkBackupAllowed(tenantId);
-        const label = `Agent backup ${new Date().toLocaleDateString()}`;
-        const job = await prisma.job.create({
-          data: {
-            tenantId,
-            type: "BACKUP",
-            status: "QUEUED",
-            mutationPlan: { label } as object,
-          },
-        });
-        await exportQueue.add("backup", { jobId: job.id, tenantId, shop });
-        return {
-          intent: intentResult.intent,
-          message: "Backup started. It will appear in Backups when complete.",
-          scan: null,
-          previewJob: job,
-          agentRunsUsed: tenant?.agentRunsUsed ?? 0,
-          suggestedActions: intentResult.suggestedActions,
-        };
-      }
-
-      if (intentResult.intent === "IMPORT_WITH_RULES") {
-        return {
-          intent: intentResult.intent,
-          message:
-            "Open the Import tab, upload your file, then add conditional rules in the mapper (e.g. if vendor = Nike → 10% off).",
-          scan: null,
-          previewJob: null,
-          agentRunsUsed: tenant?.agentRunsUsed ?? 0,
-          suggestedActions: [
-            "Go to Import tab",
-            "Upload WooCommerce or other platform file",
-            "Add conditional rules before approving",
-          ],
-        };
-      }
-
-      let previewJob: import("@tidysync/database").Job | null = null;
-      if (intentResult.intent === "IMPROVE_SEO") {
-        const plan = buildSeoImprovementPlan(intentResult.productFilter);
-        const job = await prisma.job.create({
-          data: {
-            tenantId,
-            type: "BULK_EDIT",
-            status: "PREVIEW",
-            nlPrompt: args.prompt,
-            isAiGenerated: true,
-            mutationPlan: plan as object,
-          },
-        });
-        const { buildDiffFromMutationPlan } = await import("../services/shopify-products");
-        const diff = await buildDiffFromMutationPlan(shop, plan, ctx.sessionToken);
-        await prisma.job.update({
-          where: { id: job.id },
-          data: {
-            diffPreview: diff as object,
-            impactSummary: `AI will improve SEO for ${diff.totalChanges} product(s). Review and approve to apply.`,
-            rowCount: diff.totalChanges,
-          },
-        });
-        previewJob = await prisma.job.findUnique({ where: { id: job.id } });
-      } else {
-        previewJob = await generateNlBulkEditWithAi(
-          tenantId,
-          shop,
-          args.prompt,
-          ctx.sessionToken,
-        );
-      }
-
-      await prisma.aiOperation.create({
+      const agentJob = await prisma.job.create({
         data: {
           tenantId,
-          operationType: "AGENT_RUN",
-          prompt: args.prompt,
-          generatedPlan: { intent: intentResult.intent } as object,
-          creditsConsumed: 0,
-          modelUsed: intentResult.modelUsed,
+          type: "AGENT_RUN",
+          status: "QUEUED",
+          nlPrompt: args.prompt,
+          isAiGenerated: true,
+          mutationPlan: {
+            phase: "queued",
+            steps: [
+              { id: "understand", label: "Understanding your mission", status: "pending" },
+              { id: "plan", label: "Building execution plan", status: "pending" },
+              { id: "execute", label: "Running catalog operations", status: "pending" },
+              { id: "finalize", label: "Preparing results for review", status: "pending" },
+            ],
+            intent: intentResult.intent,
+            suggestedActions: intentResult.suggestedActions,
+          } as object,
         },
       });
 
+      await agentQueue.add("agent-run", { jobId: agentJob.id, tenantId, shop });
+
       return {
         intent: intentResult.intent,
-        message: previewJob
-          ? "Review the proposed changes below, then approve to run in Shopify."
-          : "Could not build a plan from your request. Try being more specific.",
+        message:
+          "Agent mission started — watch the thinking steps below. Long tasks run in the background via Redis.",
         scan: null,
-        previewJob,
+        previewJob: agentJob,
+        agentJobId: agentJob.id,
         agentRunsUsed: tenant?.agentRunsUsed ?? 0,
         suggestedActions: intentResult.suggestedActions,
       };
+    },
+    restoreStoreBackup: async (
+      _: unknown,
+      args: {
+        id: string;
+        options?: {
+          filters?: {
+            vendor?: string;
+            titleContains?: string;
+            tags?: string[];
+            productIds?: string[];
+          };
+          fields?: string[];
+        };
+      },
+      ctx: GraphQLContext,
+    ) => {
+      const { tenantId, shop } = requireActiveMerchant(ctx);
+      const backup = await prisma.storeBackup.findFirst({
+        where: { id: args.id, tenantId, status: "COMPLETED" },
+      });
+      if (!backup) throw new Error("Backup not found or not ready");
+
+      const job = await prisma.job.create({
+        data: {
+          tenantId,
+          type: "BULK_EDIT",
+          status: "QUEUED",
+          mutationPlan: {
+            action: "restore_backup",
+            backupId: backup.id,
+            filters: args.options?.filters ?? {},
+            fields: args.options?.fields ?? ["title", "descriptionHtml", "vendor", "tags"],
+            label: `Restore: ${backup.label}`,
+          } as object,
+          impactSummary: `Restoring from backup "${backup.label}"`,
+        },
+      });
+
+      await bulkEditQueue.add("restore-backup", { jobId: job.id, tenantId, shop });
+
+      return job;
     },
     createScheduledJob: async (
       _: unknown,

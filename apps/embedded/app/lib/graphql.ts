@@ -315,19 +315,34 @@ export const MUTATIONS = {
       deleteStoreBackup(id: $id)
     }
   `,
+  scanStore: `
+    mutation ScanStore {
+      scanStore {
+        productCount overallHealthScore seoScore catalogScore summary
+        issues { id severity category title detail productId productTitle score }
+      }
+    }
+  `,
   runAgent: `
     mutation RunAgent($prompt: String!) {
       runAgent(prompt: $prompt) {
-        intent message agentRunsUsed suggestedActions
+        intent message agentRunsUsed suggestedActions agentJobId
         scan {
           productCount overallHealthScore seoScore catalogScore summary
           issues { id severity category title detail productId productTitle score }
         }
         previewJob {
-          id type status nlPrompt impactSummary
-          diffPreview
+          id type status nlPrompt impactSummary mutationPlan diffPreview
         }
       }
+    }
+  `,
+  restoreStoreBackup: `
+    mutation RestoreStoreBackup($id: ID!, $vendor: String, $titleContains: String, $tags: [String!], $productIds: [ID!], $fields: [String!]) {
+      restoreStoreBackup(id: $id, options: {
+        filters: { vendor: $vendor, titleContains: $titleContains, tags: $tags, productIds: $productIds }
+        fields: $fields
+      }) { id status type rowCount impactSummary }
     }
   `,
   polishImportSample: `

@@ -35,6 +35,7 @@ export const QUEUE_NAMES = {
   BULK_EDIT: "tidysync-bulk-edit",
   UNDO: "tidysync-undo",
   CATALOG_SCAN: "tidysync-catalog-scan",
+  AGENT: "tidysync-agent",
 } as const;
 
 export {

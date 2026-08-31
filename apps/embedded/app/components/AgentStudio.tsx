@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Icon, Spinner } from "@shopify/polaris";
 import { AutomationIcon, MagicIcon, AlertTriangleIcon, ProductIcon } from "@shopify/polaris-icons";
 import { gqlRequest, QUERIES, MUTATIONS } from "../lib/graphql";
@@ -35,13 +35,29 @@ interface StoreScanResult {
   summary: string;
 }
 
+interface AgentStep {
+  id: string;
+  label: string;
+  status: string;
+  detail?: string;
+}
+
 interface AgentJob {
   id: string;
   type: string;
   status: string;
+  rowCount?: number;
   nlPrompt?: string;
   impactSummary?: string;
-  diffPreview?: {
+  errorSummary?: string;
+  mutationPlan?: {
+    steps?: AgentStep[];
+    phase?: string;
+    intent?: string;
+    previewJobId?: string;
+    suggestedActions?: string[];
+  };
+  diffPreview?: StoreScanResult & {
     rows?: Array<{
       resourceTitle?: string;
       field: string;
@@ -51,57 +67,52 @@ interface AgentJob {
   };
 }
 
-interface AgentRunResult {
-  intent: string;
-  message: string;
-  scan?: StoreScanResult | null;
-  previewJob?: AgentJob | null;
-  agentRunsUsed: number;
-  suggestedActions: string[];
-}
-
 interface AgentStudioProps {
   shop: string;
   onApprove?: (jobId: string) => void;
   onUpgrade?: () => void;
+  onJobStarted?: (jobId: string, meta?: { isImport?: boolean; rowCount?: number }) => void;
 }
 
 const QUICK_ACTIONS = [
   {
     id: "fix",
     label: "Fix my store",
-    desc: "Full catalog scan — SEO, SKUs, images",
-    prompt: "Fix my store — analyze everything and show what's wrong",
+    desc: "Deep catalog scan (1 AI credit)",
+    mode: "scan" as const,
     icon: AlertTriangleIcon,
     tone: "warn",
   },
   {
     id: "seo",
     label: "Improve product SEO",
-    desc: "Title, meta & description for one product",
-    prompt: "Improve SEO and description for (product name)",
+    desc: "Agent mission · uses 1 agent run",
+    prompt: "Improve SEO and meta descriptions for products missing SEO titles",
+    mode: "agent" as const,
     icon: ProductIcon,
     tone: "seo",
   },
   {
     id: "backup",
     label: "Snapshot catalog",
-    desc: "Save a recoverable backup",
-    prompt: "Create a catalog backup",
+    desc: "Agent mission · vault backup",
+    prompt: "Create a full catalog backup before I make changes",
+    mode: "agent" as const,
     icon: MagicIcon,
     tone: "vault",
   },
   {
     id: "price",
     label: "Bulk price change",
-    desc: "Natural language bulk edit",
-    prompt: "Increase all prices by 10%",
+    desc: "Agent mission · bulk edit plan",
+    prompt: "Increase all variant prices by 10%",
+    mode: "agent" as const,
     icon: AutomationIcon,
     tone: "edit",
   },
 ];
 
-function scoreClass(score: number): string {
+function scoreRingClass(score: number): string {
   if (score >= 75) return "is-good";
   if (score >= 50) return "is-mid";
   return "is-low";
@@ -113,12 +124,23 @@ function severityClass(severity: string): string {
   return "is-info";
 }
 
-export function AgentStudio({ shop, onApprove, onUpgrade }: AgentStudioProps) {
+function isScanResult(v: unknown): v is StoreScanResult {
+  return Boolean(v && typeof v === "object" && "overallHealthScore" in (v as object));
+}
+
+export function AgentStudio({ shop, onApprove, onUpgrade, onJobStarted }: AgentStudioProps) {
   const [prompt, setPrompt] = useState("");
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<AgentRunResult | null>(null);
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scan, setScan] = useState<StoreScanResult | null>(null);
+  const [agentJob, setAgentJob] = useState<AgentJob | null>(null);
+  const [previewJob, setPreviewJob] = useState<AgentJob | null>(null);
+  const [message, setMessage] = useState("");
+  const [intent, setIntent] = useState("");
+  const [suggestedActions, setSuggestedActions] = useState<string[]>([]);
   const [errorAlert, setErrorAlert] = useState<ReturnType<typeof alertFromError> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -133,35 +155,127 @@ export function AgentStudio({ shop, onApprove, onUpgrade }: AgentStudioProps) {
     void loadStatus();
   }, [loadStatus]);
 
-  const run = async (text?: string) => {
+  const clearPoll = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  useEffect(() => () => clearPoll(), []);
+
+  const pollAgentJob = (jobId: string) => {
+    clearPoll();
+    pollRef.current = setInterval(async () => {
+      try {
+        const data = await gqlRequest<{ job: AgentJob }>(QUERIES.job, { id: jobId }, shop);
+        const j = data.job;
+        if (!j) return;
+        setAgentJob(j);
+
+        if (j.status === "COMPLETED" || j.status === "FAILED") {
+          clearPoll();
+          setLoading(false);
+          setMessage(j.impactSummary ?? j.errorSummary ?? "Mission complete");
+          setIntent(j.mutationPlan?.intent ?? "AGENT_MISSION");
+          setSuggestedActions(j.mutationPlan?.suggestedActions ?? []);
+
+          if (j.diffPreview && isScanResult(j.diffPreview)) {
+            setScan(j.diffPreview);
+          }
+
+          const previewId = j.mutationPlan?.previewJobId;
+          if (previewId) {
+            const preview = await gqlRequest<{ job: AgentJob }>(QUERIES.job, { id: previewId }, shop);
+            setPreviewJob(preview.job);
+            if (preview.job?.type === "BACKUP" && onJobStarted) {
+              onJobStarted(previewId, { rowCount: preview.job.rowCount });
+            }
+          }
+          void loadStatus();
+        }
+      } catch {
+        clearPoll();
+        setLoading(false);
+      }
+    }, 1800);
+  };
+
+  const runScan = async () => {
+    setScanLoading(true);
+    setErrorAlert(null);
+    setScan(null);
+    try {
+      const data = await gqlRequest<{ scanStore: StoreScanResult }>(MUTATIONS.scanStore, {}, shop);
+      setScan(data.scanStore);
+      setMessage(data.scanStore.summary);
+      setIntent("STORE_SCAN");
+    } catch (e) {
+      setErrorAlert(alertFromError(e, onUpgrade));
+    } finally {
+      setScanLoading(false);
+    }
+  };
+
+  const runAgentMission = async (text?: string) => {
     const value = (text ?? prompt).trim();
     if (!value) return;
     setPrompt(value);
     setLoading(true);
     setErrorAlert(null);
-    setResult(null);
+    setScan(null);
+    setPreviewJob(null);
+    setAgentJob(null);
+    setMessage("Agent is thinking…");
+
     try {
-      const data = await gqlRequest<{ runAgent: AgentRunResult }>(
-        MUTATIONS.runAgent,
-        { prompt: value },
-        shop,
-      );
-      setResult(data.runAgent);
+      const data = await gqlRequest<{
+        runAgent: {
+          intent: string;
+          message: string;
+          agentJobId?: string;
+          previewJob?: AgentJob;
+          suggestedActions: string[];
+        };
+      }>(MUTATIONS.runAgent, { prompt: value }, shop);
+
+      setIntent(data.runAgent.intent);
+      setMessage(data.runAgent.message);
+      setSuggestedActions(data.runAgent.suggestedActions);
+
+      const jobId = data.runAgent.agentJobId ?? data.runAgent.previewJob?.id;
+      if (jobId) {
+        setAgentJob(data.runAgent.previewJob ?? { id: jobId, type: "AGENT_RUN", status: "QUEUED" });
+        if (onJobStarted) onJobStarted(jobId);
+        pollAgentJob(jobId);
+      } else {
+        setLoading(false);
+      }
       void loadStatus();
     } catch (e) {
       setErrorAlert(alertFromError(e, onUpgrade));
-    } finally {
       setLoading(false);
     }
   };
 
+  const handleQuickAction = (action: typeof QUICK_ACTIONS[number]) => {
+    if (action.mode === "scan") {
+      void runScan();
+    } else {
+      void runAgentMission(action.prompt);
+    }
+  };
+
+  const steps = agentJob?.mutationPlan?.steps ?? [];
   const runsPct =
     status && status.runsLimit > 0
       ? Math.round((status.runsRemaining / status.runsLimit) * 100)
       : 0;
 
+  const filteredIssues = scan?.issues ?? [];
+
   return (
-    <div className={`tidysync-agent-pro${loading ? " is-running" : ""}`}>
+    <div className={`tidysync-agent-pro${loading || scanLoading ? " is-running" : ""}`}>
       <header className="tidysync-agent-pro-hero">
         <div className="tidysync-agent-pro-hero-bg" aria-hidden="true" />
         <div className="tidysync-agent-pro-hero-inner">
@@ -169,20 +283,19 @@ export function AgentStudio({ shop, onApprove, onUpgrade }: AgentStudioProps) {
             <div className="tidysync-agent-pro-badge-row">
               <span className="tidysync-agent-pro-badge">
                 <Icon source={AutomationIcon} />
-                Autonomous agent
+                Catalog agent
               </span>
               {status && (
                 <span className={`tidysync-agent-pro-status${status.enabled ? "" : " is-locked"}`}>
-                  {status.enabled ? "Active on your plan" : "Upgrade to unlock"}
+                  {status.enabled ? "Mission runs available" : "Upgrade for agent missions"}
                 </span>
               )}
             </div>
-            <h2 className="tidysync-agent-pro-title">Command your catalog with natural language</h2>
+            <h2 className="tidysync-agent-pro-title">Deep missions on your catalog</h2>
             <p className="tidysync-agent-pro-sub">
-              Scan store health, improve SEO, run bulk edits, or create backups — always with a review step before Shopify changes.
+              Scans use <strong>1 AI credit</strong>. Full agent missions use <strong>1 agent run</strong> and execute in the background via Redis — multi-step planning, then review before anything goes live.
             </p>
           </div>
-
           {status && (
             <div className="tidysync-agent-pro-usage">
               <div className="tidysync-agent-pro-usage-ring" data-pct={runsPct}>
@@ -198,12 +311,12 @@ export function AgentStudio({ shop, onApprove, onUpgrade }: AgentStudioProps) {
                 </svg>
                 <div className="tidysync-agent-pro-usage-label">
                   <strong>{status.runsRemaining}</strong>
-                  <span>runs left</span>
+                  <span>agent runs</span>
                 </div>
               </div>
               <div className="tidysync-agent-pro-usage-meta">
                 <span>{status.runsUsed} used</span>
-                <span>{status.runsLimit} monthly</span>
+                <span>{status.runsLimit} / month</span>
               </div>
             </div>
           )}
@@ -230,8 +343,8 @@ export function AgentStudio({ shop, onApprove, onUpgrade }: AgentStudioProps) {
               key={action.id}
               type="button"
               className={`tidysync-agent-pro-action is-${action.tone}`}
-              disabled={loading}
-              onClick={() => run(action.prompt)}
+              disabled={loading || scanLoading}
+              onClick={() => handleQuickAction(action)}
             >
               <span className="tidysync-agent-pro-action-icon">
                 <Icon source={action.icon} />
@@ -245,7 +358,7 @@ export function AgentStudio({ shop, onApprove, onUpgrade }: AgentStudioProps) {
 
       <section className="tidysync-agent-pro-composer">
         <label className="tidysync-agent-pro-composer-label" htmlFor="agent-prompt">
-          Custom command
+          Agent command (multi-step mission)
         </label>
         <div className="tidysync-agent-pro-composer-box">
           <textarea
@@ -253,102 +366,123 @@ export function AgentStudio({ shop, onApprove, onUpgrade }: AgentStudioProps) {
             className="tidysync-agent-pro-input"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Describe what you want — e.g. Fix duplicate SKUs and improve thin descriptions"
+            placeholder="Describe a complex mission — e.g. Scan my store, fix SEO on worst products, then snapshot the catalog"
             rows={4}
             disabled={loading}
           />
           <div className="tidysync-agent-pro-composer-footer">
-            <span className="tidysync-agent-pro-hint">Uses 1 agent run · Changes require your approval</span>
-            <Button variant="primary" onClick={() => run()} loading={loading} disabled={!prompt.trim()}>
-              Run agent
+            <span className="tidysync-agent-pro-hint">Uses 1 agent run · Runs in background · Approve changes before apply</span>
+            <Button variant="primary" onClick={() => runAgentMission()} loading={loading} disabled={!prompt.trim()}>
+              Run agent mission
             </Button>
           </div>
         </div>
       </section>
 
-      {loading && (
-        <div className="tidysync-agent-pro-thinking">
-          <div className="tidysync-agent-pro-thinking-orbs" aria-hidden="true">
-            <span /><span /><span />
+      {(loading || scanLoading) && (
+        <div className="tidysync-agent-thinking-panel">
+          <div className="tidysync-agent-thinking-head">
+            <div className="tidysync-agent-thinking-orbs" aria-hidden="true">
+              <span /><span /><span />
+            </div>
+            <div>
+              <strong>{scanLoading ? "Scanning catalog…" : "Agent is working…"}</strong>
+              <p>{scanLoading ? "Using 1 AI credit · analyzing products in Shopify" : message}</p>
+            </div>
+            <Spinner size="small" />
           </div>
-          <Spinner size="small" />
-          <p>Analyzing catalog, building mutation plan, and preparing your briefing…</p>
+          {steps.length > 0 && (
+            <ul className="tidysync-agent-step-timeline">
+              {steps.map((step) => (
+                <li key={step.id} className={`tidysync-agent-step is-${step.status}`}>
+                  <span className="tidysync-agent-step-dot" />
+                  <div>
+                    <strong>{step.label}</strong>
+                    {step.detail && <span>{step.detail}</span>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
-      {result && !loading && (
-        <section className="tidysync-agent-pro-results">
-          <div className="tidysync-agent-pro-result-banner">
-            <span className="tidysync-agent-pro-intent">{result.intent.replace(/_/g, " ")}</span>
-            <p>{result.message}</p>
-          </div>
-
-          {result.suggestedActions.length > 0 && (
-            <div className="tidysync-agent-pro-steps">
-              <h4>Next steps</h4>
-              <ol>
-                {result.suggestedActions.map((a, i) => (
-                  <li key={i}>{a}</li>
-                ))}
-              </ol>
+      {scan && !scanLoading && (
+        <section className="tidysync-agent-scan-v2">
+          <div className="tidysync-agent-scan-v2-header">
+            <div>
+              <h3>Store intelligence</h3>
+              <p>{scan.summary}</p>
             </div>
-          )}
-
-          {result.scan && (
-            <div className="tidysync-agent-pro-scan">
-              <div className="tidysync-agent-pro-scan-header">
-                <h4>Store intelligence report</h4>
-                <p>{result.scan.summary}</p>
-              </div>
-
-              <div className="tidysync-agent-pro-score-row">
-                {[
-                  { label: "Overall", value: result.scan.overallHealthScore },
-                  { label: "SEO", value: result.scan.seoScore },
-                  { label: "Catalog", value: result.scan.catalogScore },
-                  { label: "Products", value: result.scan.productCount, raw: true },
-                ].map((item) => (
-                  <div key={item.label} className={`tidysync-agent-pro-score-card${item.raw ? " is-count" : scoreClass(item.value as number)}`}>
-                    <span className="tidysync-agent-pro-score-value">{item.value}</span>
-                    <span className="tidysync-agent-pro-score-label">{item.label}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="tidysync-agent-pro-issues">
-                {result.scan.issues.slice(0, 24).map((issue) => (
-                  <article key={issue.id} className={`tidysync-agent-pro-issue ${severityClass(issue.severity)}`}>
-                    <div className="tidysync-agent-pro-issue-top">
-                      <span className="tidysync-agent-pro-issue-cat">{issue.category}</span>
-                      <span className="tidysync-agent-pro-issue-sev">{issue.severity}</span>
-                    </div>
-                    <h5>{issue.title}</h5>
-                    <p>{issue.detail}</p>
-                    {issue.productTitle && <span className="tidysync-agent-pro-issue-product">{issue.productTitle}</span>}
-                  </article>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {result.previewJob?.diffPreview?.rows && result.previewJob.diffPreview.rows.length > 0 && (
-            <div className="tidysync-agent-pro-preview">
-              <h4>Proposed Shopify changes</h4>
-              <p className="tidysync-agent-pro-preview-note">Nothing is live until you approve.</p>
-              <DiffPreviewPanel
-                rows={result.previewJob.diffPreview.rows}
-                impactSummary={result.previewJob.impactSummary}
-              />
-              {onApprove && result.previewJob.status === "PREVIEW" && (
-                <div className="tidysync-agent-pro-preview-cta">
-                  <Button variant="primary" onClick={() => onApprove(result.previewJob!.id)}>
-                    Approve and apply to Shopify
-                  </Button>
+            <div className="tidysync-agent-scan-v2-rings">
+              {[
+                { label: "Health", value: scan.overallHealthScore },
+                { label: "SEO", value: scan.seoScore },
+                { label: "Catalog", value: scan.catalogScore },
+              ].map((m) => (
+                <div key={m.label} className={`tidysync-agent-ring ${scoreRingClass(m.value)}`}>
+                  <span className="tidysync-agent-ring-value">{m.value}</span>
+                  <span className="tidysync-agent-ring-label">{m.label}</span>
                 </div>
-              )}
+              ))}
+            </div>
+          </div>
+          <div className="tidysync-agent-scan-v2-stats">
+            <span>{scan.productCount} products scanned</span>
+            <span>{scan.issues.length} issues found</span>
+          </div>
+          <div className="tidysync-agent-issue-grid">
+            {filteredIssues.slice(0, 30).map((issue) => (
+              <article key={issue.id} className={`tidysync-agent-issue-v2 ${severityClass(issue.severity)}`}>
+                <header>
+                  <span className="tidysync-agent-issue-cat">{issue.category}</span>
+                  <span className={`tidysync-agent-issue-sev ${severityClass(issue.severity)}`}>
+                    {issue.severity}
+                  </span>
+                </header>
+                <h4>{issue.title}</h4>
+                <p>{issue.detail}</p>
+                {issue.productTitle && <footer>{issue.productTitle}</footer>}
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {!scanLoading && message && !loading && intent && !scan && (
+        <div className="tidysync-agent-pro-result-banner">
+          <span className="tidysync-agent-pro-intent">{intent.replace(/_/g, " ")}</span>
+          <p>{message}</p>
+        </div>
+      )}
+
+      {suggestedActions.length > 0 && !loading && (
+        <div className="tidysync-agent-pro-steps">
+          <h4>Suggested next steps</h4>
+          <ol>
+            {suggestedActions.map((a, i) => (
+              <li key={i}>{a}</li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      {previewJob?.diffPreview?.rows && previewJob.diffPreview.rows.length > 0 && (
+        <div className="tidysync-agent-pro-preview">
+          <h4>Proposed Shopify changes</h4>
+          <p className="tidysync-agent-pro-preview-note">Nothing is live until you approve.</p>
+          <DiffPreviewPanel
+            rows={previewJob.diffPreview.rows}
+            impactSummary={previewJob.impactSummary}
+          />
+          {onApprove && previewJob.status === "PREVIEW" && (
+            <div className="tidysync-agent-pro-preview-cta">
+              <Button variant="primary" onClick={() => onApprove(previewJob.id)}>
+                Approve and apply to Shopify
+              </Button>
             </div>
           )}
-        </section>
+        </div>
       )}
     </div>
   );
