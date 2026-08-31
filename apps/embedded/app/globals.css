@@ -10,20 +10,25 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Shopify Admin embedded shell — use full primary column (not ~50rem cap) */
+/* Shopify Admin embedded shell — wider than default ~50rem, inset ~10% from edges */
 :root {
-  --pg-layout-width-primary-max: none;
-  --pg-layout-width-primary: 100%;
+  --pg-layout-width-primary-max: 90%;
+  --pg-layout-width-primary: 90%;
 }
 
 .Polaris-Page {
-  max-width: none !important;
+  max-width: 100% !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  padding-bottom: 64px !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
 }
 
 .Polaris-Page-Header,
 .Polaris-Page__Content,
 .Polaris-Layout__Section {
-  max-width: none !important;
+  max-width: 100% !important;
 }
 
 /* ─── Motion system (spec §8b) ─────────────────────────────────────────────── */
@@ -451,16 +456,12 @@ body {
 
 /* App shell spacing — Shopify iframe often clips the bottom */
 .tidysync-page-shell {
-  padding: 0 8px 72px;
-  width: 100%;
-  max-width: none;
+  width: 90%;
+  max-width: 90%;
+  margin-left: auto;
+  margin-right: auto;
+  padding-bottom: 72px;
   box-sizing: border-box;
-}
-
-.Polaris-Page {
-  padding-bottom: 64px !important;
-  padding-left: 0 !important;
-  padding-right: 0 !important;
 }
 
 .tidysync-workspace {

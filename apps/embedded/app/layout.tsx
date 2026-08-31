@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./marketing.css";
 
 export const metadata: Metadata = {
-  title: "TidySync — AI-guided bulk data for Shopify",
+  title: "TidySync — Bulk catalog operations for Shopify",
   description:
-    "Import, export, and AI bulk-edit your Shopify catalog with preview, undo, and live progress.",
+    "Import, export, and bulk-edit your Shopify catalog with preview, undo, and live progress.",
 };
 
 export const dynamic = "force-dynamic";

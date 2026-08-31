@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { MarketingShell } from "../components/MarketingShell";
 
 export const metadata = {
@@ -36,7 +37,7 @@ export default function TermsPage() {
           <p>TidySync provides tools to:</p>
           <ul>
             <li>Import and export catalog resources (products, collections, customers, and related data)</li>
-            <li>Run AI-assisted bulk edits with preview and approval</li>
+            <li>Run bulk edits with preview and approval</li>
             <li>Monitor jobs, schedules, catalog health, and audit history</li>
             <li>Manage plans, credits, and notifications where enabled</li>
           </ul>
@@ -47,8 +48,8 @@ export default function TermsPage() {
 
           <h2>4. Accounts &amp; authentication</h2>
           <p>
-            Merchants authenticate through Shopify OAuth / session tokens. You are responsible for
-            access granted to staff and collaborators on your store.
+            Merchants authenticate through Shopify. You are responsible for access granted to staff
+            and collaborators on your store.
           </p>
 
           <h2>5. Acceptable use</h2>
@@ -57,39 +58,38 @@ export default function TermsPage() {
             <li>Use the App to violate law, Shopify policies, or third-party rights</li>
             <li>Attempt to reverse engineer, abuse rate limits, or disrupt the service</li>
             <li>Upload malware or content you do not have rights to process</li>
-            <li>Circumvent billing, plan limits, or security controls except where we explicitly provide testing tools for authorized operators</li>
+            <li>Circumvent billing, plan limits, or security controls</li>
           </ul>
 
           <h2>6. Data &amp; your content</h2>
           <p>
             You retain ownership of your store data. You grant us a limited license to process that
-            data solely to provide the App (imports, exports, AI operations you initiate, job
-            history, and support). See our{" "}
-            <a href="/privacy" style={{ color: "#6b8fff" }}>
+            data solely to provide the App (imports, exports, bulk edits you initiate, job history,
+            and support). See our{" "}
+            <Link href="/privacy" className="ts-text-link">
               Privacy Policy
-            </a>{" "}
+            </Link>{" "}
             for details.
           </p>
 
-          <h2>7. AI features</h2>
+          <h2>7. Suggestions &amp; previews</h2>
           <p>
-            AI suggestions and generated plans may be incorrect or incomplete. You must review
-            previews before approving changes. You are responsible for the final state of your
-            store after approved jobs.
+            Automated suggestions and generated plans may be incorrect or incomplete. You must review
+            previews before approving changes. You are responsible for the final state of your store
+            after approved jobs.
           </p>
 
           <h2>8. Billing</h2>
           <p>
             Paid plans and credit top-ups are billed through Shopify Billing where configured. Fees,
             renewals, and cancellations follow Shopify&apos;s billing flows and your selected plan.
-            Free or testing modes may be provided at our discretion.
           </p>
 
           <h2>9. Availability &amp; support</h2>
           <p>
             We aim for reliable uptime but do not guarantee uninterrupted service. Large jobs depend
-            on Shopify API limits and your catalog size. Support channels may be listed in the App
-            or documentation.
+            on Shopify API limits and your catalog size. Support channels may be listed in the App or
+            documentation.
           </p>
 
           <h2>10. Disclaimers</h2>
@@ -124,9 +124,9 @@ export default function TermsPage() {
           <p>
             Questions about these Terms: use your TidySync support channel or the contact method
             listed on{" "}
-            <a href="/" style={{ color: "#6b8fff" }}>
+            <Link href="/" className="ts-text-link">
               sync.tidyflowapp.com
-            </a>
+            </Link>
             .
           </p>
         </article>

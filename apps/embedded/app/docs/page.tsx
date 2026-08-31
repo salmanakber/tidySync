@@ -3,7 +3,7 @@ import { MarketingShell } from "../components/MarketingShell";
 
 export const metadata = {
   title: "Documentation & Installation — TidySync",
-  description: "Install TidySync on Shopify and learn how imports, AI edits, and billing work.",
+  description: "Install TidySync on Shopify and learn how imports, bulk edits, exports, and billing work.",
 };
 
 export default function DocsPage() {
@@ -11,65 +11,48 @@ export default function DocsPage() {
     <MarketingShell active="docs">
       <div className="ts-container ts-legal">
         <h1>Documentation</h1>
-        <p className="updated">Installation guide · Merchant docs · Operator notes</p>
+        <p className="updated">Installation guide and merchant help</p>
 
         <nav className="ts-docs-nav">
           <a href="#install">Installation</a>
           <a href="#embedded">Using the app</a>
           <a href="#import">Import &amp; export</a>
-          <a href="#ai">AI bulk edit</a>
+          <a href="#bulk-edit">Bulk edit</a>
           <a href="#billing">Billing &amp; plans</a>
-          <a href="#admin">Internal admin</a>
-          <a href="#troubleshoot">Troubleshooting</a>
+          <a href="#help">Help &amp; support</a>
         </nav>
 
         <article>
           <h2 id="install">Installation guide</h2>
-          <p>Install TidySync on a Shopify development or production store:</p>
+          <p>Install TidySync on your Shopify store:</p>
           <div className="ts-steps" style={{ margin: "20px 0" }}>
             <div className="ts-step">
               <div className="ts-step-num">1</div>
               <div>
-                <h3 style={{ margin: "0 0 6px" }}>Open the install link</h3>
-                <p style={{ margin: 0, color: "var(--ts-muted)" }}>
-                  From Shopify Partners → your app → Select store, or visit:
+                <h3>Install the app</h3>
+                <p>
+                  From the Shopify App Store or your Partner install link, choose your store and
+                  approve the requested permissions.
                 </p>
-                <div className="ts-code">
-                  https://sync.tidyflowapp.com/auth?shop=YOUR-STORE.myshopify.com
-                </div>
               </div>
             </div>
             <div className="ts-step">
               <div className="ts-step-num">2</div>
               <div>
-                <h3 style={{ margin: "0 0 6px" }}>Approve scopes</h3>
-                <p style={{ margin: 0, color: "var(--ts-muted)" }}>
-                  Allow product, inventory, customer, discount, and metaobject permissions so imports
-                  and bulk edits can run.
+                <h3>Approve permissions</h3>
+                <p>
+                  TidySync needs access to products, inventory, and related catalog data so imports,
+                  exports, and bulk updates can run safely.
                 </p>
               </div>
             </div>
             <div className="ts-step">
               <div className="ts-step-num">3</div>
               <div>
-                <h3 style={{ margin: "0 0 6px" }}>Open from Shopify Admin</h3>
-                <p style={{ margin: 0, color: "var(--ts-muted)" }}>
-                  Go to <strong style={{ color: "#fff" }}>Apps → TidySync</strong>. The embedded
-                  dashboard loads inside Admin (do not rely on opening the bare domain alone for
-                  day-to-day use).
-                </p>
-              </div>
-            </div>
-            <div className="ts-step">
-              <div className="ts-step-num">4</div>
-              <div>
-                <h3 style={{ margin: "0 0 6px" }}>Verify the session (optional)</h3>
-                <div className="ts-code">
-                  {`curl "https://sync.tidyflowapp.com/auth/session?shop=YOUR-STORE.myshopify.com"`}
-                </div>
-                <p style={{ margin: 0, color: "var(--ts-muted)" }}>
-                  Expect <code style={{ color: "#c9d4ff" }}>hasOfflineSession: true</code> and{" "}
-                  <code style={{ color: "#c9d4ff" }}>ok: true</code>.
+                <h3>Open from Shopify Admin</h3>
+                <p>
+                  Go to <strong>Apps → TidySync</strong>. Always open the app from Shopify Admin for
+                  the best experience — not by visiting the marketing domain alone.
                 </p>
               </div>
             </div>
@@ -78,80 +61,73 @@ export default function DocsPage() {
           <h2 id="embedded">Using the embedded dashboard</h2>
           <ul>
             <li>
-              <strong style={{ color: "#fff" }}>Home</strong> — quick actions and live jobs
+              <strong>Home</strong> — quick actions, plan usage, and live job progress
             </li>
             <li>
-              <strong style={{ color: "#fff" }}>Import</strong> — drag-and-drop CSV/XLSX, map
-              columns, preview diffs, approve
+              <strong>Import</strong> — upload CSV or Excel, map columns, preview changes, then approve
             </li>
             <li>
-              <strong style={{ color: "#fff" }}>Export</strong> — choose resource + format, download
-              from Jobs when ready
+              <strong>Export</strong> — choose resource and format; download from Jobs when ready
             </li>
             <li>
-              <strong style={{ color: "#fff" }}>AI Edit</strong> — natural language prompt → plan →
-              staggered diff → approve
+              <strong>Bulk edit</strong> — describe a catalog change in plain English, review diffs,
+              then approve
             </li>
             <li>
-              <strong style={{ color: "#fff" }}>Health / Schedules / Billing</strong> — scans,
-              automation, and plans
+              <strong>SEO, Health, Schedules, Vault &amp; Billing</strong> — catalog quality, backups,
+              automation, and your subscription
             </li>
           </ul>
 
           <h2 id="import">Import &amp; export</h2>
           <p>
-            Every import shows field mapping suggestions and a diff preview before commit. Exports
-            run as background jobs with live progress. Completed exports can be downloaded from the
-            Jobs table; most completed mutations support Undo via stored snapshots.
+            Every import shows field mapping suggestions and a diff preview before anything is committed.
+            Exports run as background jobs with live progress. Completed exports can be downloaded from
+            the Jobs tab. Most completed jobs support Undo using stored snapshots.
           </p>
 
-          <h2 id="ai">AI bulk edit</h2>
+          <h2 id="bulk-edit">Bulk edit</h2>
           <p>
-            Describe a change (for example, &quot;Increase Summer Collection prices by 10%&quot;).
-            TidySync builds a mutation plan, shows impacted rows, and waits for your approval. AI
-            actions consume monthly credits according to your plan.
+            Describe a change (for example, &quot;Increase Summer Collection prices by 10%&quot; or
+            &quot;Update meta descriptions for products missing SEO titles&quot;). TidySync builds a
+            plan, shows impacted rows, and waits for your approval before updating Shopify.
           </p>
 
           <h2 id="billing">Billing &amp; plans</h2>
           <p>
-            Paid plans and credit top-ups use Shopify Billing. On development stores, operators can
-            enable <strong style={{ color: "#fff" }}>testing mode</strong> per store in the internal
-            admin to skip live charges while validating flows.
+            Paid plans and optional credit top-ups are handled through Shopify Billing. You can view
+            your current plan, usage, and upgrade options in the Billing tab inside the app. Charges
+            appear on your Shopify invoice like other app subscriptions.
           </p>
 
-          <h2 id="admin">Internal admin</h2>
-          <p>
-            Operators manage tenants at{" "}
-            <Link href="/admin" style={{ color: "#6b8fff" }}>
-              /admin
-            </Link>
-            . Use tenant detail to assign plans, toggle testing mode, approve installs, grant
-            credits, and inspect per-store job analytics.
-          </p>
-
-          <h2 id="troubleshoot">Troubleshooting</h2>
+          <h2 id="help">Help &amp; support</h2>
+          <p>If something does not look right:</p>
           <ul>
             <li>
-              <strong style={{ color: "#fff" }}>idToken unavailable</strong> — reopen from Shopify
-              Admin; confirm OAuth session with <code>/auth/session</code>
+              <strong>App won&apos;t load</strong> — close the tab and reopen TidySync from{" "}
+              <strong>Apps → TidySync</strong> in Shopify Admin.
             </li>
             <li>
-              <strong style={{ color: "#fff" }}>Unauthorized merchant session</strong> — complete{" "}
-              <code>/auth?shop=...</code> so an offline Session row exists
+              <strong>Session or permission errors</strong> — uninstall and reinstall the app from your
+              Shopify admin, then approve permissions again.
             </li>
             <li>
-              <strong style={{ color: "#fff" }}>Empty shopify-api-key</strong> — set{" "}
-              <code>SHOPIFY_API_KEY</code> on the server and redeploy
+              <strong>Job failed</strong> — open the Jobs tab for the error summary; you can retry or
+              undo when supported.
+            </li>
+            <li>
+              <strong>Plan or billing questions</strong> — use the Billing tab in the app or contact
+              your TidySync support channel.
             </li>
           </ul>
 
           <p style={{ marginTop: 28 }}>
             Legal:{" "}
-            <Link href="/terms" style={{ color: "#6b8fff" }}>
+            <Link href="/terms" className="ts-text-link">
               Terms
             </Link>{" "}
             ·{" "}
-            <Link href="/privacy" style={{ color: "#6b8fff" }}>
+            <Link href="/privacy" className="ts-text-link">
               Privacy
             </Link>
           </p>

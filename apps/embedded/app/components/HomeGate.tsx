@@ -55,7 +55,7 @@ export function HomeGate({ forceShopify }: { forceShopify: boolean }) {
   }, [forceShopify]);
 
   if (mode === "loading") {
-    return <div style={{ minHeight: "100vh", background: "#05070d" }} aria-busy="true" />;
+    return <div style={{ minHeight: "100vh", background: "#f4f6fa" }} aria-busy="true" />;
   }
 
   if (mode === "shopify") {

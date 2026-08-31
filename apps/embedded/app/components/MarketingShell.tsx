@@ -1,5 +1,4 @@
 import Link from "next/link";
-import "../marketing.css";
 
 const year = new Date().getFullYear();
 
@@ -18,7 +17,7 @@ export function MarketingShell({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/images/logo.png" alt="TidySync" />
             <span>
-              Tidy<span style={{ color: "#008060" }}>Sync</span>
+              Tidy<span className="ts-brand-accent">Sync</span>
             </span>
           </Link>
           <nav className="ts-nav-links">
@@ -31,7 +30,7 @@ export function MarketingShell({
             <Link href="/docs#install" className="hide-sm">
               Install
             </Link>
-            <Link href="/docs#install" className="ts-btn ts-btn-primary" style={{ padding: "8px 16px" }}>
+            <Link href="/docs#install" className="ts-btn ts-btn-primary">
               Get started
             </Link>
           </nav>
@@ -42,9 +41,9 @@ export function MarketingShell({
 
       <footer className="ts-footer">
         <div className="ts-container ts-footer-inner">
-          <div>
-            <strong style={{ color: "var(--ts-ink)" }}>TidySync</strong>
-            <div>AI-guided bulk data for Shopify · © {year}</div>
+          <div className="ts-footer-brand">
+            <strong>TidySync</strong>
+            <div>Bulk catalog operations for Shopify · © {year}</div>
           </div>
           <div className="ts-footer-links">
             <Link href="/docs">Documentation</Link>
