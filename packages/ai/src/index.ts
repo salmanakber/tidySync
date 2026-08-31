@@ -2,37 +2,24 @@ import type { MutationPlan, FieldMapping } from "@tidysync/shared";
 import { parseNlBulkEdit } from "@tidysync/shared";
 import { chatCompletion, listConfiguredAiProviders } from "./providers";
 
+export {
+  parseAgentIntent,
+  detectAgentIntentRuleBased,
+  buildSeoImprovementPlan,
+  parseNlBulkEditWithAiEnhanced,
+  type AgentIntent,
+  type AgentIntentResult,
+} from "./agent";
+
 export { listConfiguredAiProviders } from "./providers";
 
 export async function parseNlBulkEditWithAi(prompt: string): Promise<{
   plan: MutationPlan;
   modelUsed: string;
+  isSeoAgent?: boolean;
 }> {
-  const result = await chatCompletion(
-    [
-      {
-        role: "system",
-        content:
-          "You convert merchant natural-language bulk edit requests into a JSON mutation plan for Shopify. Return { steps: [{ action, field, value?, filter?, description }], estimatedAffectedCount? }. Fields use dot notation like variants.price, title, tags. Actions: set, multiply, add, custom.",
-      },
-      { role: "user", content: prompt },
-    ],
-    { jsonMode: true },
-  );
-
-  if (result.provider === "rule-based" || !result.text) {
-    return { plan: parseNlBulkEdit(prompt), modelUsed: "rule-based" };
-  }
-
-  try {
-    const parsed = JSON.parse(result.text) as MutationPlan;
-    if (!parsed.steps?.length) {
-      return { plan: parseNlBulkEdit(prompt), modelUsed: "rule-based-fallback" };
-    }
-    return { plan: parsed, modelUsed: result.modelUsed };
-  } catch {
-    return { plan: parseNlBulkEdit(prompt), modelUsed: "rule-based-fallback" };
-  }
+  const { parseNlBulkEditWithAiEnhanced } = await import("./agent");
+  return parseNlBulkEditWithAiEnhanced(prompt);
 }
 
 export async function inferColumnMappingsWithAi(

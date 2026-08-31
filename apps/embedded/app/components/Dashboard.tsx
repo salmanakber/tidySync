@@ -47,6 +47,8 @@ import { DashboardSkeleton } from "./DashboardSkeleton";
 import { PlatformPicker } from "./PlatformPicker";
 import { ImportProgressLoader, type ImportProgressState } from "./ImportProgressLoader";
 import { ProductSeoStudio } from "./ProductSeoStudio";
+import { AgentStudio } from "./AgentStudio";
+import { BackupStudio } from "./BackupStudio";
 import { AppAlertStack } from "./AppAlert";
 import { subscribeToJobProgress } from "../lib/job-events";
 import {
@@ -87,6 +89,8 @@ interface Tenant {
   productCount: number;
   aiCreditsUsed: number;
   extraAiCredits?: number;
+  agentRunsUsed?: number;
+  agentRunsRemaining?: number;
   billingStatus?: string;
   billingBypass?: boolean;
   installApproved?: boolean;
@@ -95,6 +99,9 @@ interface Tenant {
     slug?: string;
     aiCreditsRemaining?: number;
     maxProducts: number;
+    maxBackups?: number;
+    agentEnabled?: boolean;
+    agentRunsPerMonth?: number;
     priceMonthlyCents?: number;
     isFree?: boolean;
   };
@@ -552,6 +559,8 @@ export function Dashboard() {
     { id: "audit", content: "Audit" },
     { id: "schedules", content: "Schedules" },
     { id: "settings", content: "Billing" },
+    { id: "agent", content: "AI Agent" },
+    { id: "backups", content: "Backups" },
   ];
 
   useEffect(() => {
@@ -1508,6 +1517,22 @@ export function Dashboard() {
                       </div>
                     </div>
                   </BlockStack>
+                )}
+
+                {tab === 10 && (
+                  <AgentStudio
+                    shop={shop}
+                    onUpgrade={goToBilling}
+                    onApprove={(jobId) => handleApprove(jobId)}
+                  />
+                )}
+
+                {tab === 11 && (
+                  <BackupStudio
+                    shop={shop}
+                    maxBackups={tenant?.plan?.maxBackups ?? 0}
+                    onUpgrade={goToBilling}
+                  />
                 )}
             </div>
           </div>

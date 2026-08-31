@@ -120,6 +120,32 @@ export function buildDiffFromProducts(
     for (const step of plan.steps) {
       if (!productMatchesFilter(product, step.filter)) continue;
 
+      if (step.action === "ai_improve_seo") {
+        rows.push({
+          resourceType: "product",
+          resourceId: product.id,
+          productId: product.id,
+          resourceTitle: product.title,
+          field: "seo",
+          before: (product.descriptionHtml ?? "").slice(0, 120) || "—",
+          after: "AI: optimized SEO title, meta description, and product description",
+        });
+        continue;
+      }
+
+      if (step.action === "ai_rewrite_description") {
+        rows.push({
+          resourceType: "product",
+          resourceId: product.id,
+          productId: product.id,
+          resourceTitle: product.title,
+          field: "descriptionHtml",
+          before: (product.descriptionHtml ?? "").slice(0, 120) || "—",
+          after: "AI: rewritten product description",
+        });
+        continue;
+      }
+
       if (step.field.startsWith("variants.")) {
         const variantField = step.field.replace("variants.", "");
         for (const variant of product.variants) {

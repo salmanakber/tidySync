@@ -23,7 +23,16 @@ export interface ImportMutationPlan {
   mappings: Array<{ sourceColumn: string; targetField: string }>;
   defaults?: ImportDefaults;
   aiPolish?: ImportAiPolish | null;
+  conditions?: import("./import-conditions").ImportCondition[];
 }
+
+export {
+  applyImportConditions,
+  IMPORT_CONDITION_PRESETS,
+  type ImportCondition,
+  type ImportConditionAction,
+  type ImportConditionOperator,
+} from "./import-conditions";
 
 export const IMPORT_REQUIRED_BY_RESOURCE: Record<string, ImportFieldRequirement[]> = {
   products: [

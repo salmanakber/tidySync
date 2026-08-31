@@ -1172,3 +1172,67 @@ body {
   flex-direction: column;
   gap: 12px;
 }
+
+.tidysync-backup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.tidysync-backup-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  background: #fff;
+  border: 1px solid #e3e3e3;
+  border-radius: 12px;
+}
+
+.tidysync-agent-studio {
+  padding: 4px 0;
+}
+
+.tidysync-agent-hero {
+  padding: 20px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  color: #fff;
+  margin-bottom: 20px;
+}
+
+.tidysync-agent-hero .tidysync-ai-badge {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.tidysync-agent-score-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.tidysync-mapping-conditions {
+  margin-top: 20px;
+  padding: 16px;
+  background: #f9fafb;
+  border-radius: 12px;
+  border: 1px solid #e3e3e3;
+}
+
+.tidysync-condition-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.tidysync-condition-card {
+  padding: 12px;
+  background: #fff;
+  border: 1px solid #e3e3e3;
+  border-radius: 8px;
+}

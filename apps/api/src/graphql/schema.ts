@@ -15,6 +15,7 @@ import {
   listAvailablePlans,
   computeAiCreditsRemaining,
 } from "../services/billing";
+import { computeAgentRunsRemaining } from "../services/tenant-limits";
 import {
   importQueue,
   exportQueue,
@@ -55,6 +56,8 @@ export const typeDefs = `#graphql
     UNDO
     CATALOG_HEALTH_SCAN
     CONTENT_REWRITE
+    BACKUP
+    AGENT_RUN
   }
 
   type Plan {
@@ -64,6 +67,11 @@ export const typeDefs = `#graphql
     maxProducts: Int!
     aiCreditsPerMonth: Int!
     aiCreditsRemaining: Int
+    maxBackups: Int!
+    backupRetentionDays: Int!
+    maxBackupProducts: Int!
+    agentEnabled: Boolean!
+    agentRunsPerMonth: Int!
     scheduledJobs: Boolean!
     crossPlatform: Boolean!
     multiStore: Boolean!
@@ -85,6 +93,8 @@ export const typeDefs = `#graphql
     skuCount: Int!
     aiCreditsUsed: Int!
     extraAiCredits: Int!
+    agentRunsUsed: Int!
+    agentRunsRemaining: Int
     plan: Plan
   }
 
@@ -257,6 +267,10 @@ export const typeDefs = `#graphql
 function mapTenant(tenant: NonNullable<Awaited<ReturnType<typeof tenantRepository.findById>>>) {
   return {
     ...tenant,
+    agentRunsRemaining: computeAgentRunsRemaining({
+      agentRunsUsed: tenant.agentRunsUsed,
+      plan: tenant.plan,
+    }),
     plan: tenant.plan
       ? {
           ...tenant.plan,
@@ -548,6 +562,7 @@ export const resolvers = {
       const mappings = Array.isArray(raw) ? raw : raw.mappings ?? [];
       const defaults = Array.isArray(raw) ? undefined : raw.defaults;
       const aiPolish = Array.isArray(raw) ? undefined : raw.aiPolish;
+      const conditions = Array.isArray(raw) ? undefined : raw.conditions;
 
       if (aiPolish?.descriptions || aiPolish?.titles) {
         await consumeAiCredit(tenantId, 1);
@@ -607,6 +622,7 @@ export const resolvers = {
             mappings,
             defaults: defaults ?? null,
             aiPolish: aiPolish ?? null,
+            conditions: conditions ?? null,
           } as object,
           diffPreview: { rows: diffRows, totalChanges: diffRows.length, anomalies },
           impactSummary,
@@ -652,8 +668,8 @@ export const resolvers = {
       const enqueue = async () => {
         if (job.type === "IMPORT") {
           await importQueue.add("import", queuePayload);
-        } else if (job.type === "EXPORT") {
-          await exportQueue.add("export", queuePayload);
+        } else if (job.type === "EXPORT" || job.type === "BACKUP") {
+          await exportQueue.add(job.type === "BACKUP" ? "backup" : "export", queuePayload);
         } else if (job.type === "BULK_EDIT") {
           await bulkEditQueue.add("bulk-edit", queuePayload);
         }

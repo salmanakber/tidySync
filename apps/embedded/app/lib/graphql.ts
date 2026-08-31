@@ -125,8 +125,26 @@ export const QUERIES = {
   meTenant: `
     query MeTenant {
       meTenant {
-        id shopDomain shopName productCount aiCreditsUsed extraAiCredits billingStatus billingBypass installApproved
-        plan { name slug maxProducts aiCreditsPerMonth aiCreditsRemaining isFree scheduledJobs crossPlatform multiStore priceMonthlyCents }
+        id shopDomain shopName productCount aiCreditsUsed extraAiCredits agentRunsUsed agentRunsRemaining
+        billingStatus billingBypass installApproved
+        plan {
+          name slug maxProducts aiCreditsPerMonth aiCreditsRemaining maxBackups backupRetentionDays
+          agentEnabled agentRunsPerMonth isFree scheduledJobs crossPlatform multiStore priceMonthlyCents
+        }
+      }
+    }
+  `,
+  storeBackups: `
+    query StoreBackups {
+      storeBackups {
+        id label productCount sizeBytes status expiresAt createdAt
+      }
+    }
+  `,
+  agentStatus: `
+    query AgentStatus {
+      agentStatus {
+        enabled runsUsed runsLimit runsRemaining
       }
     }
   `,
@@ -283,6 +301,31 @@ export const MUTATIONS = {
           titleLength metaDescriptionLength descriptionWordCount imageCount imagesWithAlt
           hasCustomSeoTitle hasCustomSeoDescription
           checks { id label status detail score }
+        }
+      }
+    }
+  `,
+  createStoreBackup: `
+    mutation CreateStoreBackup($label: String) {
+      createStoreBackup(label: $label) { id status type createdAt }
+    }
+  `,
+  deleteStoreBackup: `
+    mutation DeleteStoreBackup($id: ID!) {
+      deleteStoreBackup(id: $id)
+    }
+  `,
+  runAgent: `
+    mutation RunAgent($prompt: String!) {
+      runAgent(prompt: $prompt) {
+        intent message agentRunsUsed suggestedActions
+        scan {
+          productCount overallHealthScore seoScore catalogScore summary
+          issues { id severity category title detail productId productTitle score }
+        }
+        previewJob {
+          id type status nlPrompt impactSummary
+          diffPreview
         }
       }
     }

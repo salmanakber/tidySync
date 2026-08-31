@@ -1,5 +1,6 @@
 import { prisma } from "@tidysync/database";
-import type { ExtendedDiffRow } from "@tidysync/shared";
+import type { ExtendedDiffRow, MutationPlan } from "@tidysync/shared";
+import { generateProductSeoImprovements } from "@tidysync/ai";
 import { getShopGraphqlClient } from "../shopify";
 import { buildDiffFromMutationPlan } from "../shopify-products";
 import { buildVariantBulkInput } from "../shopify-product-create";
@@ -53,6 +54,147 @@ function productUpdateInput(row: ExtendedDiffRow): Record<string, unknown> {
   return input;
 }
 
+async function processAiSeoImprovements(
+  jobId: string,
+  tenantId: string,
+  shop: string,
+  plan: MutationPlan,
+  client: Awaited<ReturnType<typeof getShopGraphqlClient>>,
+): Promise<{ success: number; failed: number; processed: number } | null> {
+  const seoSteps = plan.steps.filter((s) => s.action === "ai_improve_seo");
+  if (!seoSteps.length) return null;
+
+  const seoPlan: MutationPlan = { steps: seoSteps };
+  const diff = await buildDiffFromMutationPlan(shop, seoPlan);
+  const productIds = [...new Set(diff.rows.map((r) => (r as ExtendedDiffRow).productId ?? r.resourceId))];
+
+  let success = 0;
+  let failed = 0;
+  let processed = 0;
+
+  for (const productId of productIds) {
+    processed++;
+    try {
+      const productRes = (await client.request(
+        `#graphql
+          query ProductForSeo($id: ID!) {
+            product(id: $id) {
+              id title handle descriptionHtml
+              seo { title description }
+            }
+          }`,
+        { variables: { id: productId } },
+      )) as {
+        data?: {
+          product?: {
+            id: string;
+            title: string;
+            handle?: string;
+            descriptionHtml?: string;
+            seo?: { title?: string; description?: string };
+          };
+        };
+      };
+
+      const product = productRes.data?.product;
+      if (!product) {
+        failed++;
+        continue;
+      }
+
+      const improvements = await generateProductSeoImprovements(
+        {
+          title: product.title,
+          handle: product.handle,
+          descriptionHtml: product.descriptionHtml,
+          seo: product.seo,
+        },
+        {},
+      );
+
+      const productInput: Record<string, unknown> = {
+        id: productId,
+        descriptionHtml: improvements.descriptionHtml,
+        seo: {
+          title: improvements.seoTitle,
+          description: improvements.seoDescription,
+        },
+      };
+
+      const updateRes = (await client.request(PRODUCT_UPDATE, {
+        variables: { product: productInput },
+      })) as {
+        data?: { productUpdate?: { userErrors?: Array<{ message: string }> } };
+      };
+
+      const errors = updateRes.data?.productUpdate?.userErrors ?? [];
+      if (errors.length) {
+        failed++;
+        await prisma.jobLineItem.create({
+          data: {
+            tenantId,
+            jobId,
+            rowIndex: processed,
+            resourceType: "product",
+            resourceId: productId,
+            status: "FAILED",
+            errorMessage: errors.map((e) => e.message).join(", "),
+          },
+        });
+      } else {
+        success++;
+        await prisma.jobSnapshot.create({
+          data: {
+            tenantId,
+            jobId,
+            resourceType: "product",
+            resourceId: productId,
+            beforeState: {
+              seo: product.seo,
+              descriptionHtml: product.descriptionHtml,
+            },
+            afterState: improvements as object,
+          },
+        });
+        await prisma.jobLineItem.create({
+          data: {
+            tenantId,
+            jobId,
+            rowIndex: processed,
+            resourceType: "product",
+            resourceId: productId,
+            status: "SUCCESS",
+            afterValue: {
+              seoTitle: improvements.seoTitle,
+              seoDescription: improvements.seoDescription,
+            },
+          },
+        });
+      }
+    } catch (err) {
+      failed++;
+      await prisma.jobLineItem.create({
+        data: {
+          tenantId,
+          jobId,
+          rowIndex: processed,
+          resourceType: "product",
+          resourceId: productId,
+          status: "FAILED",
+          errorMessage: err instanceof Error ? err.message : "SEO improve failed",
+        },
+      });
+    }
+
+    await prisma.job.update({
+      where: { id: jobId },
+      data: { processedCount: processed, successCount: success, failedCount: failed },
+    });
+  }
+
+  return { success, failed, processed };
+}
+
 export async function processBulkEditJob(jobId: string, tenantId: string, shop: string) {
   const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job?.mutationPlan) throw new Error("Bulk edit job missing plan");
@@ -62,10 +204,32 @@ export async function processBulkEditJob(jobId: string, tenantId: string, shop: 
     data: { status: "RUNNING", startedAt: new Date() },
   });
 
-  const plan = job.mutationPlan as unknown as import("@tidysync/shared").MutationPlan;
-  const diff = await buildDiffFromMutationPlan(shop, plan);
-  const rows = diff.rows as ExtendedDiffRow[];
+  const plan = job.mutationPlan as unknown as MutationPlan;
   const client = await getShopGraphqlClient(shop);
+
+  const aiSeoResult = await processAiSeoImprovements(jobId, tenantId, shop, plan, client);
+  if (aiSeoResult && plan.steps.every((s) => s.action === "ai_improve_seo")) {
+    await prisma.job.update({
+      where: { id: jobId },
+      data: {
+        status: aiSeoResult.failed > 0 && aiSeoResult.success === 0 ? "FAILED" : "COMPLETED",
+        finishedAt: new Date(),
+        rowCount: aiSeoResult.processed,
+        errorSummary: aiSeoResult.failed > 0 ? `${aiSeoResult.failed} SEO updates failed` : null,
+      },
+    });
+    return;
+  }
+
+  const nonSeoPlan: MutationPlan = {
+    steps: plan.steps.filter((s) => s.action !== "ai_improve_seo"),
+  };
+
+  const diff =
+    nonSeoPlan.steps.length > 0
+      ? await buildDiffFromMutationPlan(shop, nonSeoPlan)
+      : { rows: [], totalChanges: 0 };
+  const rows = diff.rows as ExtendedDiffRow[];
 
   let success = 0;
   let failed = 0;

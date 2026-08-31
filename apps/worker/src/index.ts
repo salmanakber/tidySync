@@ -4,6 +4,7 @@ import { QUEUE_NAMES, resolveRedisUrl } from "@tidysync/shared";
 import { processImportJob } from "./processors/import";
 import { processAnalyzeImportJob } from "./processors/import-analyze";
 import { processExportJob } from "./processors/export";
+import { processBackupJob } from "./processors/backup";
 import { processBulkEditJob } from "./processors/bulk-edit";
 import { processUndoJob } from "./processors/undo";
 import { processCatalogHealthScan } from "./processors/catalog-health";
@@ -63,6 +64,13 @@ importWorker.on("failed", (job, err) => {
 });
 
 createWorker(QUEUE_NAMES.EXPORT, async (data) => {
+  const job = await import("@tidysync/database").then((m) =>
+    m.prisma.job.findUnique({ where: { id: data.jobId } }),
+  );
+  if (job?.type === "BACKUP") {
+    await processBackupJob(data.jobId, data.tenantId, data.shop);
+    return;
+  }
   await processExportJob(
     data.jobId,
     data.tenantId,

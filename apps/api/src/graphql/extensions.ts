@@ -2,7 +2,10 @@ import { prisma, auditRepository, scheduledJobRepository, featureFlagRepository,
 import { getShopifyFieldsForResource, parseNlBulkEdit, type ResourceType } from "@tidysync/shared";
 import { inferColumnMappingsWithAi, parseNlBulkEditWithAi, generateImpactSummary, generateProductSeoInsight, generateProductSeoImprovements, rewriteProductContent } from "@tidysync/ai";
 import { consumeAiCredit } from "../services/tenant";
-import { catalogScanQueue, bulkEditQueue } from "../queues";
+import { catalogScanQueue, bulkEditQueue, exportQueue } from "../queues";
+import { checkBackupAllowed, consumeAgentRun, computeAgentRunsRemaining } from "../services/tenant-limits";
+import { scanStoreHealth } from "../services/store-scan";
+import { parseAgentIntent, buildSeoImprovementPlan } from "@tidysync/ai";
 import { type GraphQLContext, requireMerchant, requireActiveMerchant, requireAdmin } from "../context";
 import { planLimitError } from "./app-error";
 import { parseFileHeaders } from "../services/file-parser";
@@ -123,11 +126,59 @@ export const extensionTypeDefs = `#graphql
     creditsUsed: Int!
   }
 
+  type StoreBackup {
+    id: ID!
+    label: String!
+    productCount: Int!
+    sizeBytes: Int!
+    status: String!
+    expiresAt: DateTime
+    createdAt: DateTime!
+  }
+
+  type StoreScanIssue {
+    id: String!
+    severity: String!
+    category: String!
+    title: String!
+    detail: String!
+    productId: String
+    productTitle: String
+    score: Int
+  }
+
+  type StoreScanResult {
+    productCount: Int!
+    overallHealthScore: Int!
+    seoScore: Int!
+    catalogScore: Int!
+    issues: [StoreScanIssue!]!
+    summary: String!
+  }
+
+  type AgentStatus {
+    enabled: Boolean!
+    runsUsed: Int!
+    runsLimit: Int!
+    runsRemaining: Int!
+  }
+
+  type AgentRunResult {
+    intent: String!
+    message: String!
+    scan: StoreScanResult
+    previewJob: Job
+    agentRunsUsed: Int!
+    suggestedActions: [String!]!
+  }
+
   extend type Query {
     auditLogs(limit: Int = 50): [AuditLog!]!
     scheduledJobs: [ScheduledJob!]!
     notificationSettings: NotificationSettings
     catalogProducts(first: Int = 24, query: String): [CatalogProduct!]!
+    storeBackups: [StoreBackup!]!
+    agentStatus: AgentStatus!
     adminAuditLogs(limit: Int = 100): [AuditLog!]!
     adminFeatureFlags: [FeatureFlag!]!
   }
@@ -138,6 +189,10 @@ export const extensionTypeDefs = `#graphql
     polishImportSample(jobId: ID!, brandVoice: String): ImportPolishSample!
     analyzeProductSeo(productId: ID!): ProductSeoInsight!
     applyProductSeo(productId: ID!): ProductSeoApplyResult!
+    createStoreBackup(label: String): Job!
+    deleteStoreBackup(id: ID!): Boolean!
+    scanStore: StoreScanResult!
+    runAgent(prompt: String!): AgentRunResult!
     createScheduledJob(name: String!, jobType: JobType!, schedule: String!, config: JSON): ScheduledJob!
     deleteScheduledJob(id: ID!): Boolean!
     updateNotificationSettings(
@@ -215,6 +270,32 @@ export const extensionResolvers = {
         status: node.status ?? "ACTIVE",
         featuredImageUrl: node.featuredImage?.url ?? null,
       }));
+    },
+    storeBackups: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
+      const { tenantId } = requireActiveMerchant(ctx);
+      return prisma.storeBackup.findMany({
+        where: { tenantId, status: { not: "DELETED" } },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      });
+    },
+    agentStatus: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
+      const { tenantId } = requireActiveMerchant(ctx);
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        include: { plan: true },
+      });
+      const runsLimit = tenant?.plan?.agentRunsPerMonth ?? 0;
+      const runsRemaining = computeAgentRunsRemaining({
+        agentRunsUsed: tenant?.agentRunsUsed ?? 0,
+        plan: tenant?.plan,
+      }) ?? 0;
+      return {
+        enabled: Boolean(tenant?.plan?.agentEnabled),
+        runsUsed: tenant?.agentRunsUsed ?? 0,
+        runsLimit,
+        runsRemaining,
+      };
     },
     adminAuditLogs: async (_: unknown, args: { limit?: number }, ctx: GraphQLContext) => {
       requireAdmin(ctx);
@@ -449,6 +530,169 @@ export const extensionResolvers = {
           descriptionPreview: improvements.descriptionHtml.slice(0, 400),
         },
         creditsUsed: 1,
+      };
+    },
+    createStoreBackup: async (_: unknown, args: { label?: string }, ctx: GraphQLContext) => {
+      const { tenantId, shop } = requireActiveMerchant(ctx);
+      await checkBackupAllowed(tenantId);
+
+      const label = args.label?.trim() || `Backup ${new Date().toLocaleDateString()}`;
+      const job = await prisma.job.create({
+        data: {
+          tenantId,
+          type: "BACKUP",
+          status: "QUEUED",
+          mutationPlan: { label } as object,
+        },
+      });
+
+      await exportQueue.add("backup", { jobId: job.id, tenantId, shop });
+
+      await prisma.aiOperation.create({
+        data: {
+          tenantId,
+          jobId: job.id,
+          operationType: "STORE_BACKUP",
+          prompt: label,
+          creditsConsumed: 0,
+          modelUsed: "backup",
+        },
+      });
+
+      return job;
+    },
+    deleteStoreBackup: async (_: unknown, args: { id: string }, ctx: GraphQLContext) => {
+      const { tenantId } = requireActiveMerchant(ctx);
+      await prisma.storeBackup.updateMany({
+        where: { id: args.id, tenantId },
+        data: { status: "DELETED" },
+      });
+      return true;
+    },
+    scanStore: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
+      const { shop } = requireActiveMerchant(ctx);
+      return scanStoreHealth(shop, ctx.sessionToken, 100);
+    },
+    runAgent: async (_: unknown, args: { prompt: string }, ctx: GraphQLContext) => {
+      const { tenantId, shop } = requireActiveMerchant(ctx);
+      await consumeAgentRun(tenantId, 1);
+
+      const intentResult = await parseAgentIntent(args.prompt);
+      const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+
+      if (intentResult.intent === "FIX_STORE") {
+        const scan = await scanStoreHealth(shop, ctx.sessionToken, 100);
+        await prisma.aiOperation.create({
+          data: {
+            tenantId,
+            operationType: "AGENT_RUN",
+            prompt: args.prompt,
+            generatedPlan: { intent: intentResult.intent, scan } as object,
+            creditsConsumed: 0,
+            modelUsed: intentResult.modelUsed,
+          },
+        });
+        return {
+          intent: intentResult.intent,
+          message: scan.summary,
+          scan,
+          previewJob: null,
+          agentRunsUsed: tenant?.agentRunsUsed ?? 0,
+          suggestedActions: intentResult.suggestedActions,
+        };
+      }
+
+      if (intentResult.intent === "CREATE_BACKUP") {
+        await checkBackupAllowed(tenantId);
+        const label = `Agent backup ${new Date().toLocaleDateString()}`;
+        const job = await prisma.job.create({
+          data: {
+            tenantId,
+            type: "BACKUP",
+            status: "QUEUED",
+            mutationPlan: { label } as object,
+          },
+        });
+        await exportQueue.add("backup", { jobId: job.id, tenantId, shop });
+        return {
+          intent: intentResult.intent,
+          message: "Backup started. It will appear in Backups when complete.",
+          scan: null,
+          previewJob: job,
+          agentRunsUsed: tenant?.agentRunsUsed ?? 0,
+          suggestedActions: intentResult.suggestedActions,
+        };
+      }
+
+      if (intentResult.intent === "IMPORT_WITH_RULES") {
+        return {
+          intent: intentResult.intent,
+          message:
+            "Open the Import tab, upload your file, then add conditional rules in the mapper (e.g. if vendor = Nike → 10% off).",
+          scan: null,
+          previewJob: null,
+          agentRunsUsed: tenant?.agentRunsUsed ?? 0,
+          suggestedActions: [
+            "Go to Import tab",
+            "Upload WooCommerce or other platform file",
+            "Add conditional rules before approving",
+          ],
+        };
+      }
+
+      let previewJob: import("@tidysync/database").Job | null = null;
+      if (intentResult.intent === "IMPROVE_SEO") {
+        const plan = buildSeoImprovementPlan(intentResult.productFilter);
+        const job = await prisma.job.create({
+          data: {
+            tenantId,
+            type: "BULK_EDIT",
+            status: "PREVIEW",
+            nlPrompt: args.prompt,
+            isAiGenerated: true,
+            mutationPlan: plan as object,
+          },
+        });
+        const { buildDiffFromMutationPlan } = await import("../services/shopify-products");
+        const diff = await buildDiffFromMutationPlan(shop, plan, ctx.sessionToken);
+        await prisma.job.update({
+          where: { id: job.id },
+          data: {
+            diffPreview: diff as object,
+            impactSummary: `AI will improve SEO for ${diff.totalChanges} product(s). Review and approve to apply.`,
+            rowCount: diff.totalChanges,
+          },
+        });
+        previewJob = await prisma.job.findUnique({ where: { id: job.id } });
+      } else {
+        previewJob = await generateNlBulkEditWithAi(
+          tenantId,
+          shop,
+          args.prompt,
+          ctx.sessionToken,
+        );
+      }
+
+      await prisma.aiOperation.create({
+        data: {
+          tenantId,
+          operationType: "AGENT_RUN",
+          prompt: args.prompt,
+          generatedPlan: { intent: intentResult.intent } as object,
+          creditsConsumed: 0,
+          modelUsed: intentResult.modelUsed,
+        },
+      });
+
+      return {
+        intent: intentResult.intent,
+        message: previewJob
+          ? "Review the proposed changes below, then approve to run in Shopify."
+          : "Could not build a plan from your request. Try being more specific.",
+        scan: null,
+        previewJob,
+        agentRunsUsed: tenant?.agentRunsUsed ?? 0,
+        suggestedActions: intentResult.suggestedActions,
       };
     },
     createScheduledJob: async (

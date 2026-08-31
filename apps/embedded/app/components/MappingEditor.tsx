@@ -17,7 +17,9 @@ import {
   IMPORT_REQUIRED_BY_RESOURCE,
   isFieldMapped,
   validateImportMappings,
+  IMPORT_CONDITION_PRESETS,
   type ImportDefaults,
+  type ImportCondition,
 } from "@tidysync/shared/import-settings";
 
 interface MappingRow {
@@ -146,6 +148,7 @@ export function MappingEditor({
     Array<{ rowIndex: number; field: string; before: string; after: string }>
   >([]);
   const [polishing, setPolishing] = useState(false);
+  const [conditions, setConditions] = useState<ImportCondition[]>([]);
   const targetOptions = targetsForResource(resourceType);
   const requiredFields = IMPORT_REQUIRED_BY_RESOURCE[resourceType] ?? IMPORT_REQUIRED_BY_RESOURCE.products;
 
@@ -272,6 +275,7 @@ export function MappingEditor({
                     brandVoice,
                   }
                 : null,
+            conditions: conditions.length > 0 ? conditions : null,
           },
         },
         shop,
@@ -433,6 +437,50 @@ export function MappingEditor({
               autoComplete="off"
             />
           </div>
+        </div>
+      )}
+
+      {resourceType === "products" && (
+        <div className="tidysync-mapping-conditions">
+          <Text as="h4" variant="headingSm">Conditional import rules</Text>
+          <Text as="p" variant="bodySm" tone="subdued">
+            Apply actions when row data matches — e.g. if vendor equals Nike, reduce price 10%.
+          </Text>
+          <div className="tidysync-condition-presets">
+            {IMPORT_CONDITION_PRESETS.map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                className="tidysync-chip"
+                onClick={() =>
+                  setConditions((prev) => [
+                    ...prev,
+                    { ...preset.condition, id: `cond-${Date.now()}-${prev.length}` },
+                  ])
+                }
+              >
+                + {preset.label}
+              </button>
+            ))}
+          </div>
+          {conditions.length > 0 && (
+            <BlockStack gap="200">
+              {conditions.map((c) => (
+                <div key={c.id} className="tidysync-condition-card">
+                  <Text as="p" variant="bodySm" fontWeight="semibold">
+                    {c.label ?? `${c.field} ${c.operator} ${c.value}`}
+                  </Text>
+                  <Text as="p" variant="bodySm" tone="subdued">Action: {c.action}</Text>
+                  <Button
+                    size="slim"
+                    onClick={() => setConditions((prev) => prev.filter((x) => x.id !== c.id))}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))}
+            </BlockStack>
+          )}
         </div>
       )}
 

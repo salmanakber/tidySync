@@ -14,6 +14,14 @@ export {
 } from "./import-settings";
 
 export {
+  applyImportConditions,
+  IMPORT_CONDITION_PRESETS,
+  type ImportCondition,
+  type ImportConditionAction,
+  type ImportConditionOperator,
+} from "./import-conditions";
+
+export {
   buildDiffFromProducts,
   productMatchesFilter,
   computeAfterValue,

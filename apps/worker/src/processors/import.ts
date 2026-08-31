@@ -1,5 +1,5 @@
 import { prisma } from "@tidysync/database";
-import { applyMappingsToRow, applyImportDefaults, type ImportMutationPlan } from "@tidysync/shared";
+import { applyMappingsToRow, applyImportDefaults, applyImportConditions, type ImportMutationPlan } from "@tidysync/shared";
 import { rewriteProductContent } from "@tidysync/ai";
 import { streamFileRows, countFileRows } from "../file-parser";
 import { getShopGraphqlClient } from "../shopify";
@@ -48,6 +48,7 @@ export async function processImportJob(jobId: string, tenantId: string, shop: st
   const mutationPlan = job.mutationPlan as ImportMutationPlan | null;
   const mappings = mutationPlan?.mappings ?? [];
   const importDefaults = mutationPlan?.defaults;
+  const importConditions = mutationPlan?.conditions;
   const aiPolish = mutationPlan?.aiPolish;
   const resourceType = job.resourceType ?? "products";
 
@@ -75,11 +76,33 @@ export async function processImportJob(jobId: string, tenantId: string, shop: st
   let processed = 0;
   let success = 0;
   let failed = 0;
+  let skipped = 0;
 
   await streamFileRows(job.filePath, async (row, index) => {
     processed++;
     let mapped = applyMappingsToRow(row, mappings);
     mapped = applyImportDefaults(mapped, importDefaults, index);
+
+    const conditionResult = applyImportConditions(mapped, importConditions);
+    if (conditionResult.skipped) {
+      skipped++;
+      await prisma.jobLineItem.create({
+        data: {
+          tenantId,
+          jobId,
+          rowIndex: index,
+          status: "SKIPPED",
+          errorMessage: "Skipped by import condition rule",
+        },
+      });
+      processed++;
+      await prisma.job.update({
+        where: { id: jobId },
+        data: { processedCount: processed, skippedCount: skipped },
+      });
+      return;
+    }
+    mapped = conditionResult.mapped;
 
     if (resourceType === "products" && aiPolish?.descriptions && mapped.descriptionHtml) {
       try {

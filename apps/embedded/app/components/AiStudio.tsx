@@ -4,6 +4,7 @@ import { BlockStack, Button, InlineStack, Text, TextField } from "@shopify/polar
 
 const PROMPT_CHIPS = [
   "Increase all prices by 10%",
+  "Improve SEO and description for (product name)",
   "Change name of abc to Premium Leather Wallet",
   "Add tag needs-review to products tagged Sale",
   "Set compare-at price 20% above price",

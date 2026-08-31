@@ -44,6 +44,8 @@ model Tenant {
   aiCreditsUsed Int      @default(0) @map("ai_credits_used")
   aiCreditsResetAt DateTime? @map("ai_credits_reset_at")
   extraAiCredits   Int      @default(0) @map("extra_ai_credits")
+  agentRunsUsed    Int      @default(0) @map("agent_runs_used")
+  agentRunsResetAt DateTime? @map("agent_runs_reset_at")
   shopifySubscriptionId String? @map("shopify_subscription_id")
   billingStatus     BillingStatus @default(ACTIVE) @map("billing_status")
   billingBypass     Boolean  @default(false) @map("billing_bypass")
@@ -67,6 +69,7 @@ model Tenant {
   approvalRequests ApprovalRequest[]
   linkedStores  LinkedStore[] @relation("AgencyTenant")
   notificationSettings NotificationSetting?
+  storeBackups      StoreBackup[]
 
   @@map("tenants")
 }
@@ -114,6 +117,11 @@ model Plan {
   slug                  String   @unique
   maxProducts           Int      @map("max_products")
   aiCreditsPerMonth     Int      @map("ai_credits_per_month")
+  maxBackups            Int      @default(0) @map("max_backups")
+  backupRetentionDays   Int      @default(7) @map("backup_retention_days")
+  maxBackupProducts     Int      @default(250) @map("max_backup_products")
+  agentEnabled          Boolean  @default(false) @map("agent_enabled")
+  agentRunsPerMonth     Int      @default(0) @map("agent_runs_per_month")
   scheduledJobs         Boolean  @default(false) @map("scheduled_jobs")
   crossPlatform         Boolean  @default(false) @map("cross_platform")
   multiStore            Boolean  @default(false) @map("multi_store")
@@ -208,6 +216,8 @@ enum JobType {
   UNDO
   CATALOG_HEALTH_SCAN
   CONTENT_REWRITE
+  BACKUP
+  AGENT_RUN
 }
 
 enum JobStatus {
@@ -302,6 +312,28 @@ enum AiOperationType {
   IMPACT_SUMMARY
   ANOMALY_DETECTION
   PRODUCT_SEO_INSIGHT
+  AGENT_RUN
+  STORE_BACKUP
+}
+
+// ─── Store backups (catalog snapshots) ───────────────────────────────────────
+
+model StoreBackup {
+  id            String   @id @default(cuid())
+  tenantId      String   @map("tenant_id")
+  label         String
+  filePath      String   @map("file_path")
+  productCount  Int      @default(0) @map("product_count")
+  sizeBytes     Int      @default(0) @map("size_bytes")
+  status        String   @default("COMPLETED")
+  jobId         String?  @map("job_id")
+  expiresAt     DateTime? @map("expires_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@map("store_backups")
 }
 
 // ─── Audit log ─────────────────────────────────────────────────────────────────
