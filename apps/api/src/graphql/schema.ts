@@ -218,6 +218,22 @@ export const typeDefs = `#graphql
     role: String!
   }
 
+  input PlanUpdateInput {
+    maxProducts: Int
+    aiCreditsPerMonth: Int
+    maxBackups: Int
+    backupRetentionDays: Int
+    maxBackupProducts: Int
+    agentEnabled: Boolean
+    agentRunsPerMonth: Int
+    scheduledJobs: Boolean
+    crossPlatform: Boolean
+    multiStore: Boolean
+    priceMonthlyCents: Int
+    isFree: Boolean
+    shopifyPlanName: String
+  }
+
   type AuthPayload {
     token: String!
     user: AdminUser!
@@ -259,6 +275,8 @@ export const typeDefs = `#graphql
     adminUpdateTenantBillingBypass(tenantId: ID!, billingBypass: Boolean!): Tenant!
     adminUpdateTenantInstallApproved(tenantId: ID!, installApproved: Boolean!): Tenant!
     adminUpdateTenantNotes(tenantId: ID!, notes: String): Tenant!
+    adminUpdatePlan(planId: ID!, input: PlanUpdateInput!): Plan!
+    adminGrantPaidAccess(tenantId: ID, shopDomain: String, planSlug: String!): Tenant!
     adminCreateApiKey(tenantId: ID!, name: String!, scopes: [String!]): ApiKeyCreated!
     adminRevokeApiKey(id: ID!): Boolean!
   }
@@ -866,6 +884,108 @@ export const resolvers = {
           metadata: { installApproved: args.installApproved },
         },
       });
+      return mapTenant(tenant);
+    },
+    adminUpdatePlan: async (
+      _: unknown,
+      args: {
+        planId: string;
+        input: {
+          maxProducts?: number;
+          aiCreditsPerMonth?: number;
+          maxBackups?: number;
+          backupRetentionDays?: number;
+          maxBackupProducts?: number;
+          agentEnabled?: boolean;
+          agentRunsPerMonth?: number;
+          scheduledJobs?: boolean;
+          crossPlatform?: boolean;
+          multiStore?: boolean;
+          priceMonthlyCents?: number;
+          isFree?: boolean;
+          shopifyPlanName?: string | null;
+        };
+      },
+      ctx: GraphQLContext,
+    ) => {
+      requireAdmin(ctx);
+      const existing = await prisma.plan.findUnique({ where: { id: args.planId } });
+      if (!existing) throw new Error("Plan not found");
+
+      const data: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(args.input)) {
+        if (value !== undefined) {
+          data[key] = value;
+        }
+      }
+      if (Object.keys(data).length === 0) throw new Error("No plan fields to update");
+
+      const plan = await prisma.plan.update({
+        where: { id: args.planId },
+        data,
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          action: "admin.plan_updated",
+          metadata: { planId: args.planId, slug: plan.slug, changes: data as object },
+        },
+      });
+
+      return {
+        ...plan,
+        aiCreditsRemaining: null,
+      };
+    },
+    adminGrantPaidAccess: async (
+      _: unknown,
+      args: { tenantId?: string; shopDomain?: string; planSlug: string },
+      ctx: GraphQLContext,
+    ) => {
+      requireAdmin(ctx);
+      if (!args.tenantId && !args.shopDomain) {
+        throw new Error("Provide tenantId or shopDomain");
+      }
+
+      const plan = await prisma.plan.findUnique({ where: { slug: args.planSlug } });
+      if (!plan) throw new Error("Plan not found");
+      if (plan.isFree) throw new Error("Choose a paid plan slug to grant paid access");
+
+      let tenant = args.tenantId
+        ? await tenantRepository.findById(args.tenantId)
+        : await tenantRepository.findByShopDomain(args.shopDomain!.replace(/^https?:\/\//, "").replace(/\/$/, ""));
+
+      if (!tenant) throw new Error("Tenant not found");
+
+      tenant = await tenantRepository.update(tenant.id, {
+        planId: plan.id,
+        billingStatus: "ACTIVE",
+        billingBypass: false,
+      });
+
+      await prisma.billingCharge.create({
+        data: {
+          tenantId: tenant.id,
+          type: "RECURRING",
+          shopifyChargeId: `admin-grant-${tenant.id}-${Date.now()}`,
+          status: "ACTIVE",
+          amountCents: plan.priceMonthlyCents,
+          planId: plan.id,
+          activatedAt: new Date(),
+        },
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          action: "admin.paid_access_granted",
+          tenantId: tenant.id,
+          metadata: {
+            planSlug: args.planSlug,
+            shopDomain: tenant.shopDomain,
+          },
+        },
+      });
+
       return mapTenant(tenant);
     },
     adminUpdateTenantNotes: async (

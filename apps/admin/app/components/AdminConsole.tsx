@@ -54,9 +54,20 @@ interface Plan {
   slug: string;
   maxProducts: number;
   aiCreditsPerMonth: number;
+  maxBackups: number;
+  backupRetentionDays: number;
+  maxBackupProducts: number;
+  agentEnabled: boolean;
+  agentRunsPerMonth: number;
+  scheduledJobs: boolean;
+  crossPlatform: boolean;
+  multiStore: boolean;
   priceMonthlyCents: number;
   isFree: boolean;
+  shopifyPlanName?: string | null;
 }
+
+type PlanEditFields = Omit<Plan, "id" | "name" | "slug">;
 
 interface ApiKey {
   id: string;
@@ -92,7 +103,7 @@ interface AuditLog {
   tenant?: { shopDomain: string };
 }
 
-type Tab = "overview" | "tenants" | "tenant-detail" | "jobs" | "billing" | "flags" | "apikeys" | "health" | "audit";
+type Tab = "overview" | "tenants" | "tenant-detail" | "jobs" | "billing" | "plans" | "flags" | "apikeys" | "health" | "audit";
 
 export function AdminConsole() {
   const [token, setToken] = useState<string | null>(null);
@@ -110,6 +121,10 @@ export function AdminConsole() {
   const [tenantDetail, setTenantDetail] = useState<TenantDetail | null>(null);
   const [tenantNotes, setTenantNotes] = useState("");
   const [grantCredits, setGrantCredits] = useState("10");
+  const [grantPaidShop, setGrantPaidShop] = useState("");
+  const [grantPaidPlanSlug, setGrantPaidPlanSlug] = useState("");
+  const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
+  const [planEdit, setPlanEdit] = useState<Partial<PlanEditFields>>({});
   const [newApiKeyName, setNewApiKeyName] = useState("");
   const [createdApiKey, setCreatedApiKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -153,7 +168,11 @@ export function AdminConsole() {
           authToken,
         ),
         adminGql<{ adminPlans: Plan[] }>(
-          `query { adminPlans { id name slug maxProducts aiCreditsPerMonth priceMonthlyCents isFree } }`,
+          `query { adminPlans {
+            id name slug maxProducts aiCreditsPerMonth maxBackups backupRetentionDays maxBackupProducts
+            agentEnabled agentRunsPerMonth scheduledJobs crossPlatform multiStore
+            priceMonthlyCents isFree shopifyPlanName
+          } }`,
           {},
           authToken,
         ),
@@ -341,6 +360,82 @@ export function AdminConsole() {
     await loadData(token);
   };
 
+  const startEditPlan = (plan: Plan) => {
+    setEditingPlanId(plan.id);
+    setPlanEdit({
+      maxProducts: plan.maxProducts,
+      aiCreditsPerMonth: plan.aiCreditsPerMonth,
+      maxBackups: plan.maxBackups,
+      backupRetentionDays: plan.backupRetentionDays,
+      maxBackupProducts: plan.maxBackupProducts,
+      agentEnabled: plan.agentEnabled,
+      agentRunsPerMonth: plan.agentRunsPerMonth,
+      scheduledJobs: plan.scheduledJobs,
+      crossPlatform: plan.crossPlatform,
+      multiStore: plan.multiStore,
+      priceMonthlyCents: plan.priceMonthlyCents,
+      isFree: plan.isFree,
+      shopifyPlanName: plan.shopifyPlanName ?? "",
+    });
+  };
+
+  const savePlanEdits = async () => {
+    if (!token || !editingPlanId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const input: Record<string, unknown> = { ...planEdit };
+      if (input.shopifyPlanName === "") input.shopifyPlanName = null;
+      await adminGql(
+        `mutation($planId: ID!, $input: PlanUpdateInput!) {
+          adminUpdatePlan(planId: $planId, input: $input) { id slug }
+        }`,
+        { planId: editingPlanId, input },
+        token,
+      );
+      setEditingPlanId(null);
+      setPlanEdit({});
+      await loadData(token);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Plan update failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const grantPaidAccess = async (tenantId?: string, shopDomain?: string) => {
+    if (!token) return;
+    const slug = grantPaidPlanSlug || plans.find((p) => !p.isFree)?.slug;
+    if (!slug) {
+      setError("Select a paid plan");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      await adminGql(
+        `mutation($tenantId: ID, $shopDomain: String, $planSlug: String!) {
+          adminGrantPaidAccess(tenantId: $tenantId, shopDomain: $shopDomain, planSlug: $planSlug) {
+            id shopDomain plan { name }
+          }
+        }`,
+        {
+          tenantId: tenantId ?? null,
+          shopDomain: shopDomain ?? null,
+          planSlug: slug,
+        },
+        token,
+      );
+      setGrantPaidShop("");
+      await loadData(token);
+      if (tenantId && selectedTenantId === tenantId) await loadTenantDetail(tenantId, token);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Grant paid access failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const createApiKey = async () => {
     if (!token || !selectedTenantId || !newApiKeyName.trim()) return;
     const data = await adminGql<{
@@ -406,6 +501,7 @@ export function AdminConsole() {
     { id: "tenants", label: "Tenants" },
     { id: "jobs", label: "Jobs" },
     { id: "billing", label: "Billing" },
+    { id: "plans", label: "Plans" },
     { id: "flags", label: "Feature flags" },
     { id: "apikeys", label: "API keys" },
     { id: "health", label: "System health" },
@@ -554,6 +650,16 @@ export function AdminConsole() {
                       {t.billingBypass ? "Disable test" : "Enable test"}
                     </button>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => grantTenantCredits(t.id, 10)}>+10 credits</button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => {
+                        setGrantPaidPlanSlug(plans.find((p) => !p.isFree)?.slug ?? "");
+                        grantPaidAccess(t.id);
+                      }}
+                    >
+                      Grant paid
+                    </button>
                     </div>
                   </td>
                 </tr>
@@ -626,6 +732,13 @@ export function AdminConsole() {
                 onClick={() => updateBillingBypass(tenantDetail.tenant.id, !tenantDetail.tenant.billingBypass)}
               >
                 {tenantDetail.tenant.billingBypass ? "Disable testing mode" : "Enable testing mode (skip Shopify billing)"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => grantPaidAccess(tenantDetail.tenant.id)}
+              >
+                Grant paid plan access
               </button>
               <button
                 type="button"
@@ -771,17 +884,50 @@ export function AdminConsole() {
             — set <code>SHOPIFY_BILLING_TEST=true</code> in server <code>.env</code> for dev stores.
           </p>
           <p style={{ color: "var(--text-secondary)", marginBottom: 16 }}>
-            Per-store <strong>testing mode</strong> skips Shopify subscription checks and activates billing locally.
-            Use the tenant list or store detail page to toggle it.
+            <strong>Testing mode</strong> skips Shopify subscription checks. <strong>Grant paid access</strong> assigns a
+            paid plan and activates billing locally (records an admin billing charge) — no Shopify checkout required.
           </p>
-          <h3 className="card-title">Plans</h3>
+
+          <h3 className="card-title">Grant paid access to any store</h3>
+          <div className="flex-row" style={{ marginBottom: 20 }}>
+            <input
+              className="input"
+              placeholder="my-store.myshopify.com"
+              value={grantPaidShop}
+              onChange={(e) => setGrantPaidShop(e.target.value)}
+              style={{ maxWidth: 280 }}
+            />
+            <select
+              className="input"
+              value={grantPaidPlanSlug}
+              onChange={(e) => setGrantPaidPlanSlug(e.target.value)}
+              style={{ maxWidth: 180 }}
+            >
+              <option value="">Paid plan…</option>
+              {plans.filter((p) => !p.isFree).map((p) => (
+                <option key={p.slug} value={p.slug}>{p.name}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn"
+              disabled={loading || !grantPaidShop.trim()}
+              onClick={() => grantPaidAccess(undefined, grantPaidShop.trim())}
+            >
+              Grant paid access
+            </button>
+          </div>
+
+          <h3 className="card-title">Plans overview</h3>
           <div className="table-wrap">
           <table>
             <thead>
               <tr>
                 <th>Plan</th>
                 <th>Products</th>
-                <th>AI credits/mo</th>
+                <th>AI credits</th>
+                <th>Backups</th>
+                <th>Agent</th>
                 <th>Price</th>
               </tr>
             </thead>
@@ -791,13 +937,19 @@ export function AdminConsole() {
                   <td>{p.name}</td>
                   <td>{p.maxProducts.toLocaleString()}</td>
                   <td>{p.aiCreditsPerMonth}</td>
+                  <td>{p.maxBackups} · {p.maxBackupProducts} prod</td>
+                  <td>{p.agentEnabled ? `${p.agentRunsPerMonth}/mo` : "—"}</td>
                   <td>{p.isFree ? "Free" : `$${(p.priceMonthlyCents / 100).toFixed(0)}/mo`}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           </div>
-          <h3 className="card-title" style={{ marginTop: 24 }}>Grant credits</h3>
+          <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 12 }}>
+            Edit full plan limits in the <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTab("plans")}>Plans</button> tab.
+          </p>
+
+          <h3 className="card-title" style={{ marginTop: 24 }}>Grant AI credits</h3>
           <div className="flex-row">
             <select className="input" value={selectedTenantId} onChange={(e) => setSelectedTenantId(e.target.value)}>
               <option value="">Select tenant</option>
@@ -814,6 +966,191 @@ export function AdminConsole() {
               Grant credits
             </button>
           </div>
+        </div>
+      )}
+
+      {tab === "plans" && (
+        <div className="card">
+          <h2 className="card-title">Plan scope & limits</h2>
+          <p style={{ color: "var(--text-secondary)", marginBottom: 20 }}>
+            Adjust product caps, AI credits, backup vault limits, agent runs, and feature flags per plan. Changes apply
+            immediately to all tenants on that plan.
+          </p>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Plan</th>
+                  <th>Slug</th>
+                  <th>Products</th>
+                  <th>AI/mo</th>
+                  <th>Backups</th>
+                  <th>Agent</th>
+                  <th>Schedules</th>
+                  <th>Price</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {plans.map((p) => (
+                  <tr key={p.id}>
+                    <td><strong>{p.name}</strong></td>
+                    <td><code>{p.slug}</code></td>
+                    <td>{p.maxProducts.toLocaleString()}</td>
+                    <td>{p.aiCreditsPerMonth}</td>
+                    <td>{p.maxBackups} / {p.maxBackupProducts}</td>
+                    <td>{p.agentEnabled ? p.agentRunsPerMonth : "off"}</td>
+                    <td>{p.scheduledJobs ? "yes" : "no"}</td>
+                    <td>{p.isFree ? "Free" : `$${(p.priceMonthlyCents / 100).toFixed(0)}`}</td>
+                    <td>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => startEditPlan(p)}>
+                        Edit limits
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {editingPlanId && (
+            <div className="plan-editor" style={{ marginTop: 24 }}>
+              <h3 className="card-title">
+                Edit {plans.find((p) => p.id === editingPlanId)?.name ?? "plan"}
+              </h3>
+              <div className="plan-editor-grid">
+                <label className="plan-field">
+                  <span>Max products</span>
+                  <input
+                    className="input"
+                    type="number"
+                    value={planEdit.maxProducts ?? ""}
+                    onChange={(e) => setPlanEdit((s) => ({ ...s, maxProducts: Number(e.target.value) }))}
+                  />
+                </label>
+                <label className="plan-field">
+                  <span>AI credits / month</span>
+                  <input
+                    className="input"
+                    type="number"
+                    value={planEdit.aiCreditsPerMonth ?? ""}
+                    onChange={(e) => setPlanEdit((s) => ({ ...s, aiCreditsPerMonth: Number(e.target.value) }))}
+                  />
+                </label>
+                <label className="plan-field">
+                  <span>Max backups</span>
+                  <input
+                    className="input"
+                    type="number"
+                    value={planEdit.maxBackups ?? ""}
+                    onChange={(e) => setPlanEdit((s) => ({ ...s, maxBackups: Number(e.target.value) }))}
+                  />
+                </label>
+                <label className="plan-field">
+                  <span>Backup retention (days)</span>
+                  <input
+                    className="input"
+                    type="number"
+                    value={planEdit.backupRetentionDays ?? ""}
+                    onChange={(e) => setPlanEdit((s) => ({ ...s, backupRetentionDays: Number(e.target.value) }))}
+                  />
+                </label>
+                <label className="plan-field">
+                  <span>Max products per backup</span>
+                  <input
+                    className="input"
+                    type="number"
+                    value={planEdit.maxBackupProducts ?? ""}
+                    onChange={(e) => setPlanEdit((s) => ({ ...s, maxBackupProducts: Number(e.target.value) }))}
+                  />
+                </label>
+                <label className="plan-field">
+                  <span>Agent runs / month</span>
+                  <input
+                    className="input"
+                    type="number"
+                    value={planEdit.agentRunsPerMonth ?? ""}
+                    onChange={(e) => setPlanEdit((s) => ({ ...s, agentRunsPerMonth: Number(e.target.value) }))}
+                  />
+                </label>
+                <label className="plan-field">
+                  <span>Price (cents / month)</span>
+                  <input
+                    className="input"
+                    type="number"
+                    value={planEdit.priceMonthlyCents ?? ""}
+                    onChange={(e) => setPlanEdit((s) => ({ ...s, priceMonthlyCents: Number(e.target.value) }))}
+                  />
+                </label>
+                <label className="plan-field">
+                  <span>Shopify plan name</span>
+                  <input
+                    className="input"
+                    value={planEdit.shopifyPlanName ?? ""}
+                    onChange={(e) => setPlanEdit((s) => ({ ...s, shopifyPlanName: e.target.value }))}
+                    placeholder="TidySync Growth"
+                  />
+                </label>
+              </div>
+              <div className="plan-editor-toggles">
+                <label className="plan-check">
+                  <input
+                    type="checkbox"
+                    checked={planEdit.isFree ?? false}
+                    onChange={(e) => setPlanEdit((s) => ({ ...s, isFree: e.target.checked }))}
+                  />
+                  Free plan
+                </label>
+                <label className="plan-check">
+                  <input
+                    type="checkbox"
+                    checked={planEdit.agentEnabled ?? false}
+                    onChange={(e) => setPlanEdit((s) => ({ ...s, agentEnabled: e.target.checked }))}
+                  />
+                  AI Agent enabled
+                </label>
+                <label className="plan-check">
+                  <input
+                    type="checkbox"
+                    checked={planEdit.scheduledJobs ?? false}
+                    onChange={(e) => setPlanEdit((s) => ({ ...s, scheduledJobs: e.target.checked }))}
+                  />
+                  Scheduled jobs
+                </label>
+                <label className="plan-check">
+                  <input
+                    type="checkbox"
+                    checked={planEdit.crossPlatform ?? false}
+                    onChange={(e) => setPlanEdit((s) => ({ ...s, crossPlatform: e.target.checked }))}
+                  />
+                  Cross-platform import
+                </label>
+                <label className="plan-check">
+                  <input
+                    type="checkbox"
+                    checked={planEdit.multiStore ?? false}
+                    onChange={(e) => setPlanEdit((s) => ({ ...s, multiStore: e.target.checked }))}
+                  />
+                  Multi-store
+                </label>
+              </div>
+              <div className="flex-row" style={{ marginTop: 16 }}>
+                <button type="button" className="btn" onClick={savePlanEdits} disabled={loading}>
+                  Save plan limits
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setEditingPlanId(null);
+                    setPlanEdit({});
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

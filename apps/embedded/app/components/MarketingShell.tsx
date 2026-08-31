@@ -18,7 +18,7 @@ export function MarketingShell({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/images/logo.png" alt="TidySync" />
             <span>
-              Tidy<span style={{ color: "#6b8fff" }}>Sync</span>
+              Tidy<span style={{ color: "#008060" }}>Sync</span>
             </span>
           </Link>
           <nav className="ts-nav-links">
@@ -43,7 +43,7 @@ export function MarketingShell({
       <footer className="ts-footer">
         <div className="ts-container ts-footer-inner">
           <div>
-            <strong style={{ color: "#fff" }}>TidySync</strong>
+            <strong style={{ color: "var(--ts-ink)" }}>TidySync</strong>
             <div>AI-guided bulk data for Shopify · © {year}</div>
           </div>
           <div className="ts-footer-links">

@@ -650,6 +650,7 @@ export function Dashboard() {
   return (
     <div className="tidysync-page-shell">
     <Page
+      fullWidth
       title="TidySync"
       subtitle={tenant?.shopName ?? tenant?.shopDomain ?? shop}
       primaryAction={{
