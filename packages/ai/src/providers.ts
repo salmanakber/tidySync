@@ -13,6 +13,18 @@ export interface ChatCompletionResult {
   provider: AiProviderName;
 }
 
+export interface ChatCompletionOptions {
+  jsonMode?: boolean;
+  maxTokens?: number;
+  temperature?: number;
+}
+
+interface ProviderCallOptions {
+  jsonMode: boolean;
+  maxTokens?: number;
+  temperature: number;
+}
+
 function parseFallbackOrder(): AiProviderName[] {
   const raw = process.env.AI_FALLBACK_ORDER ?? "groq,gemini,openai";
   const names = raw
@@ -42,13 +54,14 @@ async function chatOpenAICompatible(
   client: OpenAI,
   model: string,
   messages: ChatMessage[],
-  jsonMode: boolean,
+  options: ProviderCallOptions,
   provider: AiProviderName,
 ): Promise<ChatCompletionResult> {
   const response = await client.chat.completions.create({
     model,
-    temperature: 0.2,
-    response_format: jsonMode ? { type: "json_object" } : undefined,
+    temperature: options.temperature,
+    max_tokens: options.maxTokens,
+    response_format: options.jsonMode ? { type: "json_object" } : undefined,
     messages,
   });
   const text = response.choices[0]?.message?.content ?? "";
@@ -61,7 +74,7 @@ async function chatOpenAICompatible(
 
 async function chatGemini(
   messages: ChatMessage[],
-  jsonMode: boolean,
+  options: ProviderCallOptions,
 ): Promise<ChatCompletionResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY not set");
@@ -72,13 +85,16 @@ async function chatGemini(
   const userText = userParts.join("\n\n");
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-  const body = {
+  const body: Record<string, unknown> = {
     contents: [{ role: "user", parts: [{ text: `${system}\n\n${userText}` }] }],
     generationConfig: {
-      temperature: 0.2,
-      responseMimeType: jsonMode ? "application/json" : "text/plain",
+      temperature: options.temperature,
+      responseMimeType: options.jsonMode ? "application/json" : "text/plain",
     },
   };
+  if (options.maxTokens) {
+    (body.generationConfig as Record<string, unknown>).maxOutputTokens = options.maxTokens;
+  }
 
   const res = await fetch(url, {
     method: "POST",
@@ -101,7 +117,7 @@ async function chatGemini(
 async function chatWithProvider(
   provider: AiProviderName,
   messages: ChatMessage[],
-  jsonMode: boolean,
+  options: ProviderCallOptions,
 ): Promise<ChatCompletionResult> {
   if (provider === "groq" && process.env.GROQ_API_KEY) {
     const client = openaiCompatibleClient(
@@ -109,17 +125,17 @@ async function chatWithProvider(
       process.env.GROQ_API_KEY,
     );
     const model = process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile";
-    return chatOpenAICompatible(client, model, messages, jsonMode, "groq");
+    return chatOpenAICompatible(client, model, messages, options, "groq");
   }
 
   if (provider === "openai" && process.env.OPENAI_API_KEY) {
     const client = openaiCompatibleClient("https://api.openai.com/v1", process.env.OPENAI_API_KEY);
     const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
-    return chatOpenAICompatible(client, model, messages, jsonMode, "openai");
+    return chatOpenAICompatible(client, model, messages, options, "openai");
   }
 
   if (provider === "gemini" && process.env.GEMINI_API_KEY) {
-    return chatGemini(messages, jsonMode);
+    return chatGemini(messages, options);
   }
 
   throw new Error(`Provider ${provider} not configured`);
@@ -127,14 +143,18 @@ async function chatWithProvider(
 
 export async function chatCompletion(
   messages: ChatMessage[],
-  options?: { jsonMode?: boolean },
+  options?: ChatCompletionOptions,
 ): Promise<ChatCompletionResult> {
-  const jsonMode = options?.jsonMode ?? false;
+  const callOptions: ProviderCallOptions = {
+    jsonMode: options?.jsonMode ?? false,
+    maxTokens: options?.maxTokens,
+    temperature: options?.temperature ?? 0.2,
+  };
   const providers = configuredProviders();
 
   for (const provider of providers) {
     try {
-      return await chatWithProvider(provider, messages, jsonMode);
+      return await chatWithProvider(provider, messages, callOptions);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (process.env.NODE_ENV !== "production") {

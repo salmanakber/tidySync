@@ -1,6 +1,12 @@
 import type { MutationPlan, FieldMapping } from "@tidysync/shared";
 import { parseNlBulkEdit } from "@tidysync/shared";
 import { chatCompletion, listConfiguredAiProviders } from "./providers";
+import {
+  SHOPIFY_DESCRIPTION_HTML_INSTRUCTIONS,
+  buildRichDescriptionFallback,
+  finalizeShopifyDescriptionHtml,
+  stripHtml,
+} from "./description-html";
 
 export {
   parseAgentIntent,
@@ -104,14 +110,13 @@ export async function generateProductSeoImprovements(
   modelUsed: string;
 }> {
   const title = String(product.title ?? "Product");
-  const desc = String(product.descriptionHtml ?? "").replace(/<[^>]+>/g, " ").trim();
+  const descPlain = stripHtml(String(product.descriptionHtml ?? ""));
+
   const fallback = {
     seoTitle: title.slice(0, 60),
-    seoDescription: desc.slice(0, 155) || `Shop ${title} — premium quality and fast delivery.`,
-    descriptionHtml:
-      desc.length >= 120
-        ? `<p>${desc}</p>`
-        : `<p>${title} — crafted for quality and discoverability. Add rich details about materials, benefits, and use cases.</p>`,
+    seoDescription:
+      descPlain.slice(0, 155) || `Shop ${title} — premium quality, fast delivery, and trusted service.`,
+    descriptionHtml: buildRichDescriptionFallback(title, descPlain),
     modelUsed: "rule-based",
   };
 
@@ -119,12 +124,20 @@ export async function generateProductSeoImprovements(
     [
       {
         role: "system",
-        content:
-          "You optimize Shopify product SEO. Return JSON only: { seoTitle (40-60 chars), seoDescription (120-160 chars), descriptionHtml (HTML, 150+ words, keyword-rich, scannable headings/bullets) }. Be truthful to the product. No markdown fences.",
+        content: `You are an expert Shopify copywriter and SEO specialist.
+
+Return JSON only (no markdown fences):
+{
+  "seoTitle": "40-60 characters, compelling, includes primary keyword",
+  "seoDescription": "120-160 characters meta description with CTA",
+  "descriptionHtml": "full rich HTML product description"
+}
+
+${SHOPIFY_DESCRIPTION_HTML_INSTRUCTIONS}`,
       },
       { role: "user", content: JSON.stringify({ product, metrics }) },
     ],
-    { jsonMode: true },
+    { jsonMode: true, maxTokens: 2500, temperature: 0.35 },
   );
 
   if (result.provider === "rule-based" || !result.text) {
@@ -137,10 +150,16 @@ export async function generateProductSeoImprovements(
       seoDescription?: string;
       descriptionHtml?: string;
     };
+    const descriptionHtml = finalizeShopifyDescriptionHtml(
+      parsed.descriptionHtml ?? "",
+      title,
+      { minWords: 200, plainFallback: descPlain },
+    );
+
     return {
       seoTitle: (parsed.seoTitle ?? fallback.seoTitle).slice(0, 70),
       seoDescription: (parsed.seoDescription ?? fallback.seoDescription).slice(0, 320),
-      descriptionHtml: parsed.descriptionHtml ?? fallback.descriptionHtml,
+      descriptionHtml,
       modelUsed: result.modelUsed,
     };
   } catch {
@@ -148,7 +167,9 @@ export async function generateProductSeoImprovements(
   }
 }
 
-export async function rewriteProductContent(
+const REWRITE_CHUNK_SIZE = 3;
+
+async function rewriteProductContentChunk(
   products: Array<{ title: string; description?: string }>,
   brandVoice: string,
 ): Promise<Array<{ title: string; description: string }>> {
@@ -156,26 +177,72 @@ export async function rewriteProductContent(
     [
       {
         role: "system",
-        content: `Rewrite product titles/descriptions in brand voice: ${brandVoice}. Return JSON { items: [{ title, description }] } same order.`,
+        content: `You rewrite Shopify product copy in this brand voice: ${brandVoice}.
+
+Return JSON only: { "items": [{ "title": "...", "descriptionHtml": "..." }] }
+- Same number of items as input, same order.
+- title: polished product title (max 70 chars), optional light improvement only.
+- descriptionHtml: full Shopify rich HTML description (NOT plain text, NOT markdown).
+
+${SHOPIFY_DESCRIPTION_HTML_INSTRUCTIONS}`,
       },
-      { role: "user", content: JSON.stringify(products) },
+      { role: "user", content: JSON.stringify({ products }) },
     ],
-    { jsonMode: true },
+    { jsonMode: true, maxTokens: 4096, temperature: 0.4 },
   );
 
   if (result.provider === "rule-based" || !result.text) {
     return products.map((p) => ({
       title: p.title,
-      description: p.description ?? "",
+      description: finalizeShopifyDescriptionHtml(p.description ?? "", p.title, {
+        minWords: 180,
+        plainFallback: stripHtml(p.description ?? ""),
+      }),
     }));
   }
 
   try {
     const parsed = JSON.parse(result.text) as {
-      items?: Array<{ title: string; description: string }>;
+      items?: Array<{ title?: string; description?: string; descriptionHtml?: string }>;
     };
-    return parsed.items ?? products.map((p) => ({ title: p.title, description: p.description ?? "" }));
+    const items = parsed.items ?? [];
+
+    return products.map((p, i) => {
+      const item = items[i];
+      const rawHtml = item?.descriptionHtml ?? item?.description ?? p.description ?? "";
+      return {
+        title: (item?.title ?? p.title).slice(0, 120),
+        description: finalizeShopifyDescriptionHtml(rawHtml, p.title, {
+          minWords: 180,
+          plainFallback: stripHtml(p.description ?? ""),
+        }),
+      };
+    });
   } catch {
-    return products.map((p) => ({ title: p.title, description: p.description ?? "" }));
+    return products.map((p) => ({
+      title: p.title,
+      description: finalizeShopifyDescriptionHtml(p.description ?? "", p.title, {
+        minWords: 180,
+        plainFallback: stripHtml(p.description ?? ""),
+      }),
+    }));
   }
+}
+
+/** Rewrite titles and descriptionHtml for products (chunked for full-length rich HTML). */
+export async function rewriteProductContent(
+  products: Array<{ title: string; description?: string }>,
+  brandVoice: string,
+): Promise<Array<{ title: string; description: string }>> {
+  if (products.length === 0) return [];
+
+  const results: Array<{ title: string; description: string }> = [];
+
+  for (let i = 0; i < products.length; i += REWRITE_CHUNK_SIZE) {
+    const chunk = products.slice(i, i + REWRITE_CHUNK_SIZE);
+    const rewritten = await rewriteProductContentChunk(chunk, brandVoice);
+    results.push(...rewritten);
+  }
+
+  return results;
 }
