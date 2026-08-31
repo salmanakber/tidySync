@@ -1,15 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import {
-  Badge,
-  BlockStack,
-  Button,
-  InlineStack,
-  Spinner,
-  Text,
-  TextField,
-} from "@shopify/polaris";
+import { Button, Icon, Spinner } from "@shopify/polaris";
+import { AutomationIcon, MagicIcon, AlertTriangleIcon, ProductIcon } from "@shopify/polaris-icons";
 import { gqlRequest, QUERIES, MUTATIONS } from "../lib/graphql";
 import { alertFromError } from "../lib/graphql-errors";
 import { AppAlert } from "./AppAlert";
@@ -73,18 +66,51 @@ interface AgentStudioProps {
   onUpgrade?: () => void;
 }
 
-const AGENT_CHIPS = [
-  "Fix my store — analyze everything",
-  "Improve SEO and description for (product name)",
-  "Create a catalog backup",
-  "Increase all prices by 10%",
-  "Import with Nike brand 10% discount rule",
+const QUICK_ACTIONS = [
+  {
+    id: "fix",
+    label: "Fix my store",
+    desc: "Full catalog scan — SEO, SKUs, images",
+    prompt: "Fix my store — analyze everything and show what's wrong",
+    icon: AlertTriangleIcon,
+    tone: "warn",
+  },
+  {
+    id: "seo",
+    label: "Improve product SEO",
+    desc: "Title, meta & description for one product",
+    prompt: "Improve SEO and description for (product name)",
+    icon: ProductIcon,
+    tone: "seo",
+  },
+  {
+    id: "backup",
+    label: "Snapshot catalog",
+    desc: "Save a recoverable backup",
+    prompt: "Create a catalog backup",
+    icon: MagicIcon,
+    tone: "vault",
+  },
+  {
+    id: "price",
+    label: "Bulk price change",
+    desc: "Natural language bulk edit",
+    prompt: "Increase all prices by 10%",
+    icon: AutomationIcon,
+    tone: "edit",
+  },
 ];
 
-function severityTone(severity: string): "critical" | "warning" | "info" {
-  if (severity === "critical") return "critical";
-  if (severity === "warning") return "warning";
-  return "info";
+function scoreClass(score: number): string {
+  if (score >= 75) return "is-good";
+  if (score >= 50) return "is-mid";
+  return "is-low";
+}
+
+function severityClass(severity: string): string {
+  if (severity === "critical") return "is-critical";
+  if (severity === "warning") return "is-warning";
+  return "is-info";
 }
 
 export function AgentStudio({ shop, onApprove, onUpgrade }: AgentStudioProps) {
@@ -107,15 +133,17 @@ export function AgentStudio({ shop, onApprove, onUpgrade }: AgentStudioProps) {
     void loadStatus();
   }, [loadStatus]);
 
-  const run = async () => {
-    if (!prompt.trim()) return;
+  const run = async (text?: string) => {
+    const value = (text ?? prompt).trim();
+    if (!value) return;
+    setPrompt(value);
     setLoading(true);
     setErrorAlert(null);
     setResult(null);
     try {
       const data = await gqlRequest<{ runAgent: AgentRunResult }>(
         MUTATIONS.runAgent,
-        { prompt: prompt.trim() },
+        { prompt: value },
         shop,
       );
       setResult(data.runAgent);
@@ -127,153 +155,200 @@ export function AgentStudio({ shop, onApprove, onUpgrade }: AgentStudioProps) {
     }
   };
 
+  const runsPct =
+    status && status.runsLimit > 0
+      ? Math.round((status.runsRemaining / status.runsLimit) * 100)
+      : 0;
+
   return (
-    <div className={`tidysync-agent-studio${loading ? " is-generating" : ""}`}>
-      <div className="tidysync-agent-hero">
-        <BlockStack gap="200">
-          <InlineStack gap="200" blockAlign="center">
-            <span className="tidysync-ai-badge">AGENT</span>
-            <Text as="h3" variant="headingMd">TidySync AI Agent</Text>
-          </InlineStack>
-          <Text as="p" variant="bodySm" tone="subdued">
-            Autonomous store operations: scan health, improve SEO, run bulk edits, create backups — with plan-scoped agent runs.
-          </Text>
+    <div className={`tidysync-agent-pro${loading ? " is-running" : ""}`}>
+      <header className="tidysync-agent-pro-hero">
+        <div className="tidysync-agent-pro-hero-bg" aria-hidden="true" />
+        <div className="tidysync-agent-pro-hero-inner">
+          <div className="tidysync-agent-pro-hero-copy">
+            <div className="tidysync-agent-pro-badge-row">
+              <span className="tidysync-agent-pro-badge">
+                <Icon source={AutomationIcon} />
+                Autonomous agent
+              </span>
+              {status && (
+                <span className={`tidysync-agent-pro-status${status.enabled ? "" : " is-locked"}`}>
+                  {status.enabled ? "Active on your plan" : "Upgrade to unlock"}
+                </span>
+              )}
+            </div>
+            <h2 className="tidysync-agent-pro-title">Command your catalog with natural language</h2>
+            <p className="tidysync-agent-pro-sub">
+              Scan store health, improve SEO, run bulk edits, or create backups — always with a review step before Shopify changes.
+            </p>
+          </div>
+
           {status && (
-            <InlineStack gap="200" wrap>
-              <Badge tone={status.enabled ? "success" : "warning"}>
-                {status.enabled ? "Agent enabled" : "Upgrade to unlock"}
-              </Badge>
-              <Badge tone="info">{`${status.runsRemaining} / ${status.runsLimit} runs left`}</Badge>
-            </InlineStack>
+            <div className="tidysync-agent-pro-usage">
+              <div className="tidysync-agent-pro-usage-ring" data-pct={runsPct}>
+                <svg viewBox="0 0 120 120" className="tidysync-agent-pro-usage-svg">
+                  <circle cx="60" cy="60" r="52" className="tidysync-agent-pro-usage-track" />
+                  <circle
+                    cx="60"
+                    cy="60"
+                    r="52"
+                    className="tidysync-agent-pro-usage-fill"
+                    strokeDasharray={`${(runsPct / 100) * 326} 326`}
+                  />
+                </svg>
+                <div className="tidysync-agent-pro-usage-label">
+                  <strong>{status.runsRemaining}</strong>
+                  <span>runs left</span>
+                </div>
+              </div>
+              <div className="tidysync-agent-pro-usage-meta">
+                <span>{status.runsUsed} used</span>
+                <span>{status.runsLimit} monthly</span>
+              </div>
+            </div>
           )}
-        </BlockStack>
-      </div>
+        </div>
+      </header>
 
       {errorAlert && (
-        <AppAlert
-          tone={errorAlert.tone}
-          title={errorAlert.title}
-          message={errorAlert.message}
-          primaryAction={errorAlert.primaryAction}
-          onDismiss={() => setErrorAlert(null)}
-        />
+        <div className="tidysync-agent-pro-alert">
+          <AppAlert
+            tone={errorAlert.tone}
+            title={errorAlert.title}
+            message={errorAlert.message}
+            primaryAction={errorAlert.primaryAction}
+            onDismiss={() => setErrorAlert(null)}
+          />
+        </div>
       )}
 
-      <TextField
-        label="What should the agent do?"
-        labelHidden
-        value={prompt}
-        onChange={setPrompt}
-        placeholder="e.g. Fix my store, or improve SEO for (Leather Wallet)"
-        autoComplete="off"
-        multiline={4}
-        disabled={loading}
-      />
+      <section className="tidysync-agent-pro-actions">
+        <h3 className="tidysync-agent-pro-section-title">Quick missions</h3>
+        <div className="tidysync-agent-pro-action-grid">
+          {QUICK_ACTIONS.map((action) => (
+            <button
+              key={action.id}
+              type="button"
+              className={`tidysync-agent-pro-action is-${action.tone}`}
+              disabled={loading}
+              onClick={() => run(action.prompt)}
+            >
+              <span className="tidysync-agent-pro-action-icon">
+                <Icon source={action.icon} />
+              </span>
+              <span className="tidysync-agent-pro-action-label">{action.label}</span>
+              <span className="tidysync-agent-pro-action-desc">{action.desc}</span>
+            </button>
+          ))}
+        </div>
+      </section>
 
-      <div className="tidysync-prompt-chips">
-        {AGENT_CHIPS.map((chip) => (
-          <button
-            key={chip}
-            type="button"
-            className="tidysync-chip"
+      <section className="tidysync-agent-pro-composer">
+        <label className="tidysync-agent-pro-composer-label" htmlFor="agent-prompt">
+          Custom command
+        </label>
+        <div className="tidysync-agent-pro-composer-box">
+          <textarea
+            id="agent-prompt"
+            className="tidysync-agent-pro-input"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="Describe what you want — e.g. Fix duplicate SKUs and improve thin descriptions"
+            rows={4}
             disabled={loading}
-            onClick={() => setPrompt(chip)}
-          >
-            {chip}
-          </button>
-        ))}
-      </div>
-
-      <div style={{ marginTop: 16 }}>
-        <Button variant="primary" onClick={() => run()} loading={loading} disabled={!prompt.trim()}>
-          Run agent (1 agent run)
-        </Button>
-      </div>
+          />
+          <div className="tidysync-agent-pro-composer-footer">
+            <span className="tidysync-agent-pro-hint">Uses 1 agent run · Changes require your approval</span>
+            <Button variant="primary" onClick={() => run()} loading={loading} disabled={!prompt.trim()}>
+              Run agent
+            </Button>
+          </div>
+        </div>
+      </section>
 
       {loading && (
-        <div className="tidysync-agent-thinking" style={{ marginTop: 24 }}>
+        <div className="tidysync-agent-pro-thinking">
+          <div className="tidysync-agent-pro-thinking-orbs" aria-hidden="true">
+            <span /><span /><span />
+          </div>
           <Spinner size="small" />
-          <Text as="p" variant="bodySm">Agent is analyzing your store and planning actions…</Text>
+          <p>Analyzing catalog, building mutation plan, and preparing your briefing…</p>
         </div>
       )}
 
       {result && !loading && (
-        <div style={{ marginTop: 24 }}>
-        <BlockStack gap="400">
-          <div className="tidysync-agent-result-header">
-            <Badge tone="info">{result.intent.replace(/_/g, " ")}</Badge>
-            <Text as="p" variant="bodyMd">{result.message}</Text>
+        <section className="tidysync-agent-pro-results">
+          <div className="tidysync-agent-pro-result-banner">
+            <span className="tidysync-agent-pro-intent">{result.intent.replace(/_/g, " ")}</span>
+            <p>{result.message}</p>
           </div>
 
           {result.suggestedActions.length > 0 && (
-            <BlockStack gap="100">
-              <Text as="p" variant="headingSm">Suggested next steps</Text>
-              {result.suggestedActions.map((a, i) => (
-                <Text key={i} as="p" variant="bodySm" tone="subdued">• {a}</Text>
-              ))}
-            </BlockStack>
+            <div className="tidysync-agent-pro-steps">
+              <h4>Next steps</h4>
+              <ol>
+                {result.suggestedActions.map((a, i) => (
+                  <li key={i}>{a}</li>
+                ))}
+              </ol>
+            </div>
           )}
 
           {result.scan && (
-            <div className="tidysync-agent-scan">
-              <div className="tidysync-agent-score-grid">
-                <div className="tidysync-seo-kpi">
-                  <span className="tidysync-seo-kpi-value">{result.scan.overallHealthScore}</span>
-                  <span className="tidysync-seo-kpi-label">Health</span>
-                </div>
-                <div className="tidysync-seo-kpi">
-                  <span className="tidysync-seo-kpi-value">{result.scan.seoScore}</span>
-                  <span className="tidysync-seo-kpi-label">SEO</span>
-                </div>
-                <div className="tidysync-seo-kpi">
-                  <span className="tidysync-seo-kpi-value">{result.scan.catalogScore}</span>
-                  <span className="tidysync-seo-kpi-label">Catalog</span>
-                </div>
-                <div className="tidysync-seo-kpi">
-                  <span className="tidysync-seo-kpi-value">{result.scan.productCount}</span>
-                  <span className="tidysync-seo-kpi-label">Products</span>
-                </div>
+            <div className="tidysync-agent-pro-scan">
+              <div className="tidysync-agent-pro-scan-header">
+                <h4>Store intelligence report</h4>
+                <p>{result.scan.summary}</p>
               </div>
 
-              <Text as="p" variant="bodySm" tone="subdued">{result.scan.summary}</Text>
-
-              <BlockStack gap="200">
-                <Text as="h4" variant="headingSm">Issues found</Text>
-                {result.scan.issues.slice(0, 20).map((issue) => (
-                  <div key={issue.id} className={`tidysync-seo-check is-${issue.severity}`}>
-                    <Badge tone={severityTone(issue.severity)}>
-                      {issue.category}
-                    </Badge>
-                    <Text as="p" variant="bodyMd" fontWeight="semibold">{issue.title}</Text>
-                    <Text as="p" variant="bodySm">{issue.detail}</Text>
-                    {issue.productTitle && (
-                      <Text as="p" variant="bodySm" tone="subdued">{issue.productTitle}</Text>
-                    )}
+              <div className="tidysync-agent-pro-score-row">
+                {[
+                  { label: "Overall", value: result.scan.overallHealthScore },
+                  { label: "SEO", value: result.scan.seoScore },
+                  { label: "Catalog", value: result.scan.catalogScore },
+                  { label: "Products", value: result.scan.productCount, raw: true },
+                ].map((item) => (
+                  <div key={item.label} className={`tidysync-agent-pro-score-card${item.raw ? " is-count" : scoreClass(item.value as number)}`}>
+                    <span className="tidysync-agent-pro-score-value">{item.value}</span>
+                    <span className="tidysync-agent-pro-score-label">{item.label}</span>
                   </div>
                 ))}
-              </BlockStack>
+              </div>
+
+              <div className="tidysync-agent-pro-issues">
+                {result.scan.issues.slice(0, 24).map((issue) => (
+                  <article key={issue.id} className={`tidysync-agent-pro-issue ${severityClass(issue.severity)}`}>
+                    <div className="tidysync-agent-pro-issue-top">
+                      <span className="tidysync-agent-pro-issue-cat">{issue.category}</span>
+                      <span className="tidysync-agent-pro-issue-sev">{issue.severity}</span>
+                    </div>
+                    <h5>{issue.title}</h5>
+                    <p>{issue.detail}</p>
+                    {issue.productTitle && <span className="tidysync-agent-pro-issue-product">{issue.productTitle}</span>}
+                  </article>
+                ))}
+              </div>
             </div>
           )}
 
           {result.previewJob?.diffPreview?.rows && result.previewJob.diffPreview.rows.length > 0 && (
-            <BlockStack gap="300">
-              <Text as="h4" variant="headingSm">Proposed changes — confirm before apply</Text>
+            <div className="tidysync-agent-pro-preview">
+              <h4>Proposed Shopify changes</h4>
+              <p className="tidysync-agent-pro-preview-note">Nothing is live until you approve.</p>
               <DiffPreviewPanel
                 rows={result.previewJob.diffPreview.rows}
                 impactSummary={result.previewJob.impactSummary}
               />
               {onApprove && result.previewJob.status === "PREVIEW" && (
-                <Button
-                  variant="primary"
-                  onClick={() => onApprove(result.previewJob!.id)}
-                >
-                  Approve and run in Shopify
-                </Button>
+                <div className="tidysync-agent-pro-preview-cta">
+                  <Button variant="primary" onClick={() => onApprove(result.previewJob!.id)}>
+                    Approve and apply to Shopify
+                  </Button>
+                </div>
               )}
-            </BlockStack>
+            </div>
           )}
-        </BlockStack>
-        </div>
+        </section>
       )}
     </div>
   );

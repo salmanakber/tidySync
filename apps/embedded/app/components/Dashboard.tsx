@@ -30,6 +30,8 @@ import {
   CalendarIcon,
   CashDollarIcon,
   AlertTriangleIcon,
+  AutomationIcon,
+  DatabaseIcon,
 } from "@shopify/polaris-icons";
 import {
   gqlRequest,
@@ -49,6 +51,7 @@ import { ImportProgressLoader, type ImportProgressState } from "./ImportProgress
 import { ProductSeoStudio } from "./ProductSeoStudio";
 import { AgentStudio } from "./AgentStudio";
 import { BackupStudio } from "./BackupStudio";
+import { WorkspaceNav } from "./WorkspaceNav";
 import { AppAlertStack } from "./AppAlert";
 import { subscribeToJobProgress } from "../lib/job-events";
 import {
@@ -738,19 +741,8 @@ export function Dashboard() {
         )}
 
         <Layout.Section>
-          <div className="tidysync-workspace">
-            <nav className="tidysync-nav" aria-label="TidySync sections">
-              {tabs.map((t, index) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  className={`tidysync-nav-btn${tab === index ? " is-active" : ""}`}
-                  onClick={() => setTab(index)}
-                >
-                  {t.content}
-                </button>
-              ))}
-            </nav>
+          <div className="tidysync-workspace tidysync-workspace--sidebar">
+            <WorkspaceNav tabs={tabs} activeIndex={tab} onSelect={setTab} />
             <div className="tidysync-panel">
                 {tab === 0 && (
                   <BlockStack gap="500">
@@ -798,6 +790,24 @@ export function Dashboard() {
                           <p className="tidysync-action-title">Product SEO</p>
                           <p className="tidysync-action-desc">
                             Deep SEO scores, charts, and AI strategist briefings per product (1 credit).
+                          </p>
+                        </button>
+                        <button type="button" className="tidysync-action-card is-ai" onClick={() => setTab(10)}>
+                          <div className="tidysync-action-icon">
+                            <Icon source={AutomationIcon} />
+                          </div>
+                          <p className="tidysync-action-title">AI Agent</p>
+                          <p className="tidysync-action-desc">
+                            Fix my store, improve SEO, bulk edits, and backups — one command center.
+                          </p>
+                        </button>
+                        <button type="button" className="tidysync-action-card" onClick={() => setTab(11)}>
+                          <div className="tidysync-action-icon">
+                            <Icon source={DatabaseIcon} />
+                          </div>
+                          <p className="tidysync-action-title">Catalog vault</p>
+                          <p className="tidysync-action-desc">
+                            Snapshot products before risky imports or bulk changes.
                           </p>
                         </button>
                         <button type="button" className="tidysync-action-card" onClick={() => setTab(6)}>
