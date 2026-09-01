@@ -114,6 +114,15 @@ export function alertFromError(
         primaryAction: onBilling ? { content: "View plans", onAction: onBilling } : undefined,
       };
     }
+    if (error.code === "BILLING_REQUIRED") {
+      return {
+        tone: "warning",
+        title: "Subscription required",
+        message: error.message,
+        code: error.code,
+        primaryAction: onBilling ? { content: "Complete subscription", onAction: onBilling } : undefined,
+      };
+    }
     if (error.code === "UNAUTHORIZED" || error.code === "FORBIDDEN") {
       return {
         tone: "critical",

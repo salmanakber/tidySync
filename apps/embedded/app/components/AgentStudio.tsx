@@ -6,6 +6,7 @@ import { AutomationIcon, AlertTriangleIcon, ProductIcon } from "@shopify/polaris
 import { gqlRequest, QUERIES, MUTATIONS } from "../lib/graphql";
 import { alertFromError } from "../lib/graphql-errors";
 import { AppAlert } from "./AppAlert";
+import { PlanUpgradePanel } from "./PlanUpgradePanel";
 import { DiffPreviewPanel } from "./DiffPreviewPanel";
 import { ProductMentionTextarea, mentionValueToPrompt } from "./ProductMentionTextarea";
 
@@ -289,6 +290,10 @@ export function AgentStudio({
   };
 
   const handleQuickAction = (action: typeof QUICK_ACTIONS[number]) => {
+    if (action.mode === "agent" && missionsLocked) {
+      onUpgrade?.();
+      return;
+    }
     if (action.mode === "scan") {
       void runScan();
     } else {
@@ -297,12 +302,18 @@ export function AgentStudio({
   };
 
   const seoAutoStarted = useRef(false);
+  const missionsLocked = status != null && !status.enabled;
+
   useEffect(() => {
     if (!autoStartSeo) {
       seoAutoStarted.current = false;
       return;
     }
     if (seoAutoStarted.current) return;
+    if (missionsLocked) {
+      onAutoStartSeoConsumed?.();
+      return;
+    }
     seoAutoStarted.current = true;
     onAutoStartSeoConsumed?.();
     const seoAction = QUICK_ACTIONS.find((a) => a.id === "seo");
@@ -310,7 +321,7 @@ export function AgentStudio({
       void runAgentMission(seoAction.prompt);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot from SEO studio bulk button
-  }, [autoStartSeo]);
+  }, [autoStartSeo, missionsLocked]);
 
   const steps = agentJob?.mutationPlan?.steps ?? [];
   const runsPct =
@@ -420,6 +431,15 @@ export function AgentStudio({
         </div>
       )}
 
+      {missionsLocked && (
+        <PlanUpgradePanel
+          title="Agent missions need Starter or higher"
+          message="Upgrade to run autonomous multi-step missions. Quick store scans below still use AI credits from your plan."
+          upgradeLabel="Upgrade to Starter"
+          onUpgrade={onUpgrade}
+        />
+      )}
+
       <section className="tidysync-agent-pro-actions">
         <h3 className="tidysync-agent-pro-section-title">Quick missions</h3>
         <div className="tidysync-agent-pro-action-grid">
@@ -427,8 +447,8 @@ export function AgentStudio({
             <button
               key={action.id}
               type="button"
-              className={`tidysync-agent-pro-action is-${action.tone}`}
-              disabled={loading || scanLoading}
+              className={`tidysync-agent-pro-action is-${action.tone}${action.mode === "agent" && missionsLocked ? " is-locked" : ""}`}
+              disabled={loading || scanLoading || (action.mode === "agent" && missionsLocked)}
               onClick={() => handleQuickAction(action)}
             >
               <span className="tidysync-agent-pro-action-icon">
@@ -453,13 +473,22 @@ export function AgentStudio({
             onChange={setPrompt}
             placeholder="Describe a mission — e.g. Scan my store, polish thin descriptions, or improve SEO for @Product Name"
             rows={4}
-            disabled={loading}
+            disabled={loading || missionsLocked}
             hint="Type @ to mention a product by name"
           />
           <div className="tidysync-agent-pro-composer-footer">
-            <span className="tidysync-agent-pro-hint">Uses 1 agent run · Runs in background · Approve changes before apply</span>
-            <Button variant="primary" onClick={() => runAgentMission()} loading={loading} disabled={!mentionValueToPrompt(prompt).trim()}>
-              Run agent mission
+            <span className="tidysync-agent-pro-hint">
+              {missionsLocked
+                ? "Agent missions are not on your plan — upgrade to unlock."
+                : "Uses 1 agent run · Runs in background · Approve changes before apply"}
+            </span>
+            <Button
+              variant="primary"
+              onClick={() => (missionsLocked ? onUpgrade?.() : runAgentMission())}
+              loading={loading}
+              disabled={missionsLocked || !mentionValueToPrompt(prompt).trim()}
+            >
+              {missionsLocked ? "Upgrade plan" : "Run agent mission"}
             </Button>
           </div>
         </div>

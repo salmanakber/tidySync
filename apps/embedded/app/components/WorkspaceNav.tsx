@@ -33,7 +33,14 @@ interface WorkspaceNavProps {
   onSelect: (index: number) => void;
   collapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
+  lockedTabIds?: Record<string, boolean>;
 }
+
+const LOCKED_TAB_LABELS: Record<string, string> = {
+  agent: "Starter+",
+  schedules: "Starter+",
+  backups: "Starter+",
+};
 
 const TAB_ICONS: Record<string, typeof ImportIcon> = {
   home: ProductIcon,
@@ -66,6 +73,7 @@ export function WorkspaceNav({
   onSelect,
   collapsed = false,
   onCollapsedChange,
+  lockedTabIds = {},
 }: WorkspaceNavProps) {
   const groups: NavGroup[] = NAV_GROUPS.map((group) => ({
     label: group.label,
@@ -114,22 +122,34 @@ export function WorkspaceNav({
             <ul className="tidysync-sidebar-list">
               {group.items.map(({ index, tab, icon }) => {
                 const active = activeIndex === index;
-                const isPremium = tab.id === "agent" || tab.id === "backups";
+                const isPremium = tab.id === "agent" || tab.id === "backups" || tab.id === "schedules";
+                const locked = Boolean(lockedTabIds[tab.id]);
                 return (
                   <li key={tab.id}>
                     <button
                       type="button"
-                      className={`tidysync-sidebar-link${active ? " is-active" : ""}${isPremium ? " is-premium" : ""}`}
+                      className={`tidysync-sidebar-link${active ? " is-active" : ""}${isPremium ? " is-premium" : ""}${locked ? " is-locked" : ""}`}
                       onClick={() => onSelect(index)}
                       aria-current={active ? "page" : undefined}
-                      title={collapsed ? tab.content : undefined}
+                      title={
+                        collapsed
+                          ? locked
+                            ? `${tab.content} (${LOCKED_TAB_LABELS[tab.id] ?? "Upgrade"})`
+                            : tab.content
+                          : undefined
+                      }
                     >
                       <span className="tidysync-sidebar-link-icon">
                         <Icon source={icon} />
                       </span>
                       <span className="tidysync-sidebar-link-text">{tab.content}</span>
-                      {tab.id === "agent" && (
+                      {tab.id === "agent" && !locked && (
                         <span className="tidysync-sidebar-pill">AI</span>
+                      )}
+                      {locked && (
+                        <span className="tidysync-sidebar-pill is-lock">
+                          {LOCKED_TAB_LABELS[tab.id] ?? "Upgrade"}
+                        </span>
                       )}
                     </button>
                   </li>

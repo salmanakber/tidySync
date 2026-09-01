@@ -4169,3 +4169,82 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* Plan gating */
+.tidysync-plan-gate {
+  margin-bottom: 16px;
+  border: 1px solid #c9cccf;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f6f8fb 0%, #eef2ff 100%);
+  padding: 20px 22px;
+}
+
+.tidysync-plan-gate-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 640px;
+}
+
+.tidysync-plan-gate-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(92, 106, 196, 0.12);
+  color: #5c6ac4;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.tidysync-plan-gate-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #202223;
+}
+
+.tidysync-plan-gate-message {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #454f5b;
+}
+
+.tidysync-action-card.is-locked {
+  cursor: pointer;
+  border-color: #d2d5d8;
+  background: #f9fafb;
+  opacity: 0.92;
+}
+
+.tidysync-action-card.is-locked:hover {
+  border-color: #5c6ac4;
+  transform: translateY(-1px);
+}
+
+.tidysync-action-card.is-locked .tidysync-action-icon {
+  background: rgba(92, 106, 196, 0.12);
+  color: #5c6ac4;
+}
+
+.tidysync-sidebar-link.is-locked {
+  opacity: 0.88;
+}
+
+.tidysync-sidebar-link.is-locked:not(.is-active) {
+  background: rgba(92, 106, 196, 0.06);
+}
+
+.tidysync-sidebar-pill.is-lock {
+  background: rgba(92, 106, 196, 0.14);
+  color: #5c6ac4;
+  font-size: 10px;
+}
+
+.tidysync-agent-pro-action.is-locked {
+  opacity: 0.65;
+  cursor: not-allowed;
+}

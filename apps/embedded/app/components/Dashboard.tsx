@@ -66,6 +66,14 @@ import {
   type AppAlertModel,
   errorMessage,
 } from "../lib/graphql-errors";
+import {
+  isAgentPlanLocked,
+  isBackupsPlanLocked,
+  isSchedulesPlanLocked,
+  catalogAtLimit,
+  upgradePlanLabel,
+} from "../lib/plan-features";
+import { PlanUpgradePanel } from "./PlanUpgradePanel";
 import { useShop } from "../providers";
 
 const IMPORT_PLATFORMS = [
@@ -111,6 +119,7 @@ interface Tenant {
     maxBackups?: number;
     agentEnabled?: boolean;
     agentRunsPerMonth?: number;
+    scheduledJobs?: boolean;
     priceMonthlyCents?: number;
     isFree?: boolean;
   };
@@ -893,6 +902,27 @@ export function Dashboard() {
     tenant.billingStatus !== "ACTIVE" &&
     !tenant.plan?.isFree;
 
+  const planGates = useMemo(() => {
+    const plan = tenant?.plan;
+    return {
+      agent: isAgentPlanLocked(plan),
+      schedules: isSchedulesPlanLocked(plan),
+      backups: isBackupsPlanLocked(plan),
+      catalogFull: tenant ? catalogAtLimit(tenant) : false,
+    };
+  }, [tenant]);
+
+  const lockedNavTabs = useMemo(
+    () => ({
+      agent: planGates.agent,
+      schedules: planGates.schedules,
+      backups: planGates.backups,
+    }),
+    [planGates],
+  );
+
+  const upgradeLabel = upgradePlanLabel(tenant?.plan);
+
   const planAlerts = useMemo(() => {
     if (!tenant) return [] as AppAlertModel[];
     return planUsageAlerts(tenant, goToBilling)
@@ -1080,6 +1110,7 @@ export function Dashboard() {
               onSelect={setTab}
               collapsed={sidebarCollapsed}
               onCollapsedChange={setSidebarCollapsed}
+              lockedTabIds={lockedNavTabs}
             />
             <div className="tidysync-workspace-main">
               {stickyProgress && <StickyJobProgress state={stickyProgress} />}
@@ -1146,16 +1177,26 @@ export function Dashboard() {
                             Deep SEO scores, charts, and AI strategist briefings per product (1 credit).
                           </p>
                         </button>
-                        <button type="button" className="tidysync-action-card is-ai" onClick={() => setTab(12)}>
+                        <button
+                          type="button"
+                          className={`tidysync-action-card is-ai${planGates.agent ? " is-locked" : ""}`}
+                          onClick={() => (planGates.agent ? goToBilling() : setTab(12))}
+                        >
                           <div className="tidysync-action-icon">
                             <Icon source={AutomationIcon} />
                           </div>
                           <p className="tidysync-action-title">AI Agent</p>
                           <p className="tidysync-action-desc">
-                            Fix my store, improve SEO, bulk edits, and backups — one command center.
+                            {planGates.agent
+                              ? "Upgrade to Starter for autonomous catalog missions."
+                              : "Fix my store, improve SEO, bulk edits, and backups — one command center."}
                           </p>
                         </button>
-                        <button type="button" className="tidysync-action-card" onClick={() => setTab(13)}>
+                        <button
+                          type="button"
+                          className={`tidysync-action-card${planGates.backups ? " is-locked" : ""}`}
+                          onClick={() => (planGates.backups ? goToBilling() : setTab(13))}
+                        >
                           <div className="tidysync-action-icon">
                             <Icon source={DatabaseIcon} />
                           </div>
@@ -1380,6 +1421,14 @@ export function Dashboard() {
 
                 {tab === 3 && (
                   <BlockStack gap="400">
+                    {planGates.catalogFull && (
+                      <PlanUpgradePanel
+                        title="Product limit reached"
+                        message={`Your ${tenant?.plan?.name ?? "plan"} allows ${tenant?.plan?.maxProducts?.toLocaleString() ?? "—"} products. Upgrade to import more.`}
+                        upgradeLabel={upgradeLabel}
+                        onUpgrade={goToBilling}
+                      />
+                    )}
                     <div>
                       <p className="tidysync-section-title">Import</p>
                       <p className="tidysync-section-sub">
@@ -1408,6 +1457,7 @@ export function Dashboard() {
                     <GoogleSheetsStudio
                       shop={shop}
                       onUpgrade={goToBilling}
+                      scheduledJobsEnabled={tenant?.plan?.scheduledJobs ?? false}
                       compact
                       onJobStarted={handleGoogleSheetJobStarted}
                     />
@@ -1549,6 +1599,10 @@ export function Dashboard() {
                     onCreditsRefresh={() => loadData()}
                     onUpgrade={goToBilling}
                     onBulkApplySeo={() => {
+                      if (planGates.agent) {
+                        goToBilling();
+                        return;
+                      }
                       setAgentAutoStartSeo(true);
                       setTab(12);
                     }}
@@ -1693,6 +1747,15 @@ export function Dashboard() {
 
                 {tab === 10 && (
                   <BlockStack gap="500">
+                    {planGates.schedules ? (
+                      <PlanUpgradePanel
+                        title="Scheduled automation is a paid feature"
+                        message="Daily exports, weekly health scans, and Google Sheets auto-sync need Starter or higher."
+                        upgradeLabel={upgradeLabel}
+                        onUpgrade={goToBilling}
+                      />
+                    ) : (
+                      <>
                     <div>
                       <p className="tidysync-section-title">Schedules</p>
                       <p className="tidysync-section-sub">
@@ -1823,6 +1886,8 @@ export function Dashboard() {
                           </InlineStack>
                         </div>
                       ))
+                    )}
+                      </>
                     )}
                   </BlockStack>
                 )}
@@ -1987,6 +2052,14 @@ export function Dashboard() {
                 )}
 
                 {tab === 12 && (
+                  planGates.agent ? (
+                    <PlanUpgradePanel
+                      title="AI Agent requires Starter or higher"
+                      message="Autonomous catalog missions (SEO polish, bulk edits, multi-step plans) are not included on the Free plan. Store scans still use AI credits from AI Edit or SEO tabs."
+                      upgradeLabel={upgradeLabel}
+                      onUpgrade={goToBilling}
+                    />
+                  ) : (
                   <AgentStudio
                     shop={shop}
                     onUpgrade={goToBilling}
@@ -2006,9 +2079,18 @@ export function Dashboard() {
                     autoStartSeo={agentAutoStartSeo}
                     onAutoStartSeoConsumed={() => setAgentAutoStartSeo(false)}
                   />
+                  )
                 )}
 
                 {tab === 13 && (
+                  planGates.backups ? (
+                    <PlanUpgradePanel
+                      title="Catalog backups require a paid plan"
+                      message="Point-in-time product snapshots and restore are included on Starter and above."
+                      upgradeLabel={upgradeLabel}
+                      onUpgrade={goToBilling}
+                    />
+                  ) : (
                   <BackupStudio
                     shop={shop}
                     maxBackups={tenant?.plan?.maxBackups ?? 0}
@@ -2017,6 +2099,7 @@ export function Dashboard() {
                       beginJobProgress(jobId, { ...meta, kind: "backup" })
                     }
                   />
+                  )
                 )}
               </div>
             </div>

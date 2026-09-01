@@ -11,7 +11,11 @@ import { previewImportJobMappings } from "../services/import-preview";
 import { enqueueSupplierFeedSync, normalizeFeedSyncMode } from "../services/supplier-feed";
 import { parseAgentIntent, buildSeoImprovementPlan } from "@tidysync/ai";
 import { type GraphQLContext, requireMerchant, requireActiveMerchant, requireAdmin } from "../context";
-import { planLimitError } from "./app-error";
+import {
+  assertCatalogCapacity,
+  assertScheduledJobsAllowed,
+  requirePaidMerchant,
+} from "../services/plan-guard";
 import { parseFileHeaders } from "../services/file-parser";
 import { parseFilePreview } from "../services/file-parser";
 import { merchantGraphqlRequest } from "../shopify/client";
@@ -444,7 +448,7 @@ export const extensionResolvers = {
   },
   Mutation: {
     runCatalogHealthScan: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
-      const { tenantId, shop } = requireActiveMerchant(ctx);
+      const { tenantId, shop } = await requirePaidMerchant(ctx);
       await consumeAiCredit(tenantId, 1);
       const job = await prisma.job.create({
         data: { tenantId, type: "CATALOG_HEALTH_SCAN", status: "QUEUED" },
@@ -453,7 +457,7 @@ export const extensionResolvers = {
       return { ...job, lineItems: [] };
     },
     runContentRewrite: async (_: unknown, args: { brandVoice: string }, ctx: GraphQLContext) => {
-      const { tenantId, shop } = requireActiveMerchant(ctx);
+      const { tenantId, shop } = await requirePaidMerchant(ctx);
       await consumeAiCredit(tenantId, 1);
       const job = await prisma.job.create({
         data: {
@@ -471,7 +475,7 @@ export const extensionResolvers = {
       args: { jobId: string; brandVoice?: string },
       ctx: GraphQLContext,
     ) => {
-      const { tenantId } = requireActiveMerchant(ctx);
+      const { tenantId } = await requirePaidMerchant(ctx);
       await consumeAiCredit(tenantId, 1);
 
       const job = await prisma.job.findFirst({ where: { id: args.jobId, tenantId } });
@@ -523,7 +527,7 @@ export const extensionResolvers = {
       return { rows: samples, creditsUsed: 1 };
     },
     analyzeProductSeo: async (_: unknown, args: { productId: string }, ctx: GraphQLContext) => {
-      const { tenantId, shop } = requireActiveMerchant(ctx);
+      const { tenantId, shop } = await requirePaidMerchant(ctx);
       await consumeAiCredit(tenantId, 1);
 
       const response = (await merchantGraphqlRequest(
@@ -608,7 +612,7 @@ export const extensionResolvers = {
       };
     },
     applyProductSeo: async (_: unknown, args: { productId: string }, ctx: GraphQLContext) => {
-      const { tenantId, shop } = requireActiveMerchant(ctx);
+      const { tenantId, shop } = await requirePaidMerchant(ctx);
 
       const source = await fetchProductSeoSource(shop, ctx.sessionToken, args.productId);
       const beforeMetrics = analyzeProductSeoMetrics(productSeoMetricsInput(source));
@@ -715,7 +719,7 @@ export const extensionResolvers = {
       };
     },
     createStoreBackup: async (_: unknown, args: { label?: string }, ctx: GraphQLContext) => {
-      const { tenantId, shop } = requireActiveMerchant(ctx);
+      const { tenantId, shop } = await requirePaidMerchant(ctx);
       await checkBackupAllowed(tenantId);
 
       const label = args.label?.trim() || `Backup ${new Date().toLocaleDateString()}`;
@@ -744,7 +748,7 @@ export const extensionResolvers = {
       return job;
     },
     deleteStoreBackup: async (_: unknown, args: { id: string }, ctx: GraphQLContext) => {
-      const { tenantId } = requireActiveMerchant(ctx);
+      const { tenantId } = await requirePaidMerchant(ctx);
       await prisma.storeBackup.updateMany({
         where: { id: args.id, tenantId },
         data: { status: "DELETED" },
@@ -752,7 +756,7 @@ export const extensionResolvers = {
       return true;
     },
     scanStore: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
-      const { tenantId, shop } = requireActiveMerchant(ctx);
+      const { tenantId, shop } = await requirePaidMerchant(ctx);
       await consumeAiCredit(tenantId, 1);
       const scan = await scanStoreHealth(shop, ctx.sessionToken, 100);
       await prisma.aiOperation.create({
@@ -768,7 +772,7 @@ export const extensionResolvers = {
       return scan;
     },
     runAgent: async (_: unknown, args: { prompt: string }, ctx: GraphQLContext) => {
-      const { tenantId, shop } = requireActiveMerchant(ctx);
+      const { tenantId, shop } = await requirePaidMerchant(ctx);
       const intentResult = await parseAgentIntent(args.prompt);
       const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
 
@@ -854,7 +858,7 @@ export const extensionResolvers = {
       },
       ctx: GraphQLContext,
     ) => {
-      const { tenantId, shop } = requireActiveMerchant(ctx);
+      const { tenantId, shop } = await requirePaidMerchant(ctx);
       const backup = await prisma.storeBackup.findFirst({
         where: { id: args.id, tenantId, status: "COMPLETED" },
       });
@@ -885,7 +889,7 @@ export const extensionResolvers = {
       args: { category: string; productIds: string[] },
       ctx: GraphQLContext,
     ) => {
-      const { tenantId, shop } = requireActiveMerchant(ctx);
+      const { tenantId, shop } = await requirePaidMerchant(ctx);
       if (!args.productIds.length) throw new Error("No products selected to fix");
 
       await consumeAiCredit(tenantId, 1);
@@ -913,7 +917,7 @@ export const extensionResolvers = {
       args: { primaryProductId: string; duplicateProductIds: string[] },
       ctx: GraphQLContext,
     ) => {
-      const { tenantId } = requireActiveMerchant(ctx);
+      const { tenantId } = await requirePaidMerchant(ctx);
       const duplicateIds = args.duplicateProductIds.filter((id) => id !== args.primaryProductId);
       if (!duplicateIds.length) throw new Error("Select at least one duplicate product to merge");
 
@@ -952,7 +956,7 @@ export const extensionResolvers = {
       args: { merges: Array<{ primaryProductId: string; duplicateProductIds: string[] }> },
       ctx: GraphQLContext,
     ) => {
-      const { tenantId } = requireActiveMerchant(ctx);
+      const { tenantId } = await requirePaidMerchant(ctx);
       const merges = args.merges
         .map((m) => ({
           primaryProductId: m.primaryProductId,
@@ -999,7 +1003,7 @@ export const extensionResolvers = {
       args: { spreadsheetUrl: string; sheetName?: string },
       ctx: GraphQLContext,
     ) => {
-      const { tenantId } = requireActiveMerchant(ctx);
+      const { tenantId } = await requirePaidMerchant(ctx);
       const parsed = parseSpreadsheetUrl(args.spreadsheetUrl);
       if (!parsed) throw new Error("Invalid Google Sheets URL or spreadsheet ID");
 
@@ -1036,7 +1040,7 @@ export const extensionResolvers = {
       args: { integrationId: string; forceMapping?: boolean },
       ctx: GraphQLContext,
     ) => {
-      const { tenantId, shop } = requireActiveMerchant(ctx);
+      const { tenantId, shop } = await requirePaidMerchant(ctx);
       const integration = await prisma.tenantIntegration.findFirst({
         where: { id: args.integrationId, tenantId, type: "GOOGLE_SHEETS" },
       });
@@ -1120,7 +1124,7 @@ export const extensionResolvers = {
       },
       ctx: GraphQLContext,
     ) => {
-      const { tenantId } = requireActiveMerchant(ctx);
+      const { tenantId } = await requirePaidMerchant(ctx);
       const integration = await prisma.tenantIntegration.findFirst({
         where: { id: args.integrationId, tenantId, type: "GOOGLE_SHEETS" },
       });
@@ -1144,13 +1148,17 @@ export const extensionResolvers = {
         autoApprove: args.autoApprove ?? prev.autoApprove ?? false,
       };
 
+      if (updatedConfig.autoSyncEnabled) {
+        await assertScheduledJobsAllowed(tenantId);
+      }
+
       return prisma.tenantIntegration.update({
         where: { id: integration.id },
         data: { config: updatedConfig as object },
       });
     },
     disconnectGoogleSheet: async (_: unknown, args: { id: string }, ctx: GraphQLContext) => {
-      const { tenantId } = requireActiveMerchant(ctx);
+      const { tenantId } = await requirePaidMerchant(ctx);
       await prisma.tenantIntegration.deleteMany({
         where: { id: args.id, tenantId, type: "GOOGLE_SHEETS" },
       });
@@ -1161,11 +1169,8 @@ export const extensionResolvers = {
       args: { name: string; jobType: string; schedule: string; config?: unknown },
       ctx: GraphQLContext,
     ) => {
-      const { tenantId } = requireActiveMerchant(ctx);
-      const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, include: { plan: true } });
-      if (!tenant?.plan?.scheduledJobs) {
-        throw planLimitError("Scheduled jobs are not available on your plan. Upgrade to unlock automation.");
-      }
+      const { tenantId } = await requirePaidMerchant(ctx);
+      await assertScheduledJobsAllowed(tenantId);
       return prisma.scheduledJob.create({
         data: {
           tenantId,
@@ -1177,7 +1182,7 @@ export const extensionResolvers = {
       });
     },
     deleteScheduledJob: async (_: unknown, args: { id: string }, ctx: GraphQLContext) => {
-      const { tenantId } = requireActiveMerchant(ctx);
+      const { tenantId } = await requirePaidMerchant(ctx);
       await prisma.scheduledJob.deleteMany({ where: { id: args.id, tenantId } });
       return true;
     },
@@ -1186,7 +1191,7 @@ export const extensionResolvers = {
       args: { id: string; enabled: boolean },
       ctx: GraphQLContext,
     ) => {
-      const { tenantId } = requireActiveMerchant(ctx);
+      const { tenantId } = await requirePaidMerchant(ctx);
       const existing = await prisma.scheduledJob.findFirst({
         where: { id: args.id, tenantId },
       });
@@ -1226,7 +1231,7 @@ export const extensionResolvers = {
       });
     },
     pauseJob: async (_: unknown, args: { jobId: string }, ctx: GraphQLContext) => {
-      const { tenantId } = requireActiveMerchant(ctx);
+      const { tenantId } = await requirePaidMerchant(ctx);
       const job = await prisma.job.findFirst({ where: { id: args.jobId, tenantId, status: "RUNNING" } });
       if (!job) throw new Error("Running job not found");
       const updated = await jobRepository.update(job.id, { status: "PAUSED" });

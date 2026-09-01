@@ -31,6 +31,7 @@ interface TenantIntegration {
 interface GoogleSheetsStudioProps {
   shop: string;
   onUpgrade?: () => void;
+  scheduledJobsEnabled?: boolean;
   onJobStarted?: (
     jobId: string,
     meta?: {
@@ -63,6 +64,7 @@ const SCHEDULE_OPTIONS = [
 export function GoogleSheetsStudio({
   shop,
   onUpgrade,
+  scheduledJobsEnabled = false,
   onJobStarted,
   compact = false,
 }: GoogleSheetsStudioProps) {
@@ -84,6 +86,7 @@ export function GoogleSheetsStudio({
   const cfg = sheetsIntegration?.config;
   const hasMapping = Boolean(cfg?.savedMappings?.length);
   const isLiveMode = syncMode !== "create";
+  const autoSyncLocked = !scheduledJobsEnabled;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -98,7 +101,8 @@ export function GoogleSheetsStudio({
       if (sheets?.config) {
         setSyncMode((sheets.config.syncMode as FeedSyncMode) ?? "create");
         setSchedule(sheets.config.schedule ?? "daily");
-        setAutoSyncEnabled(sheets.config.autoSyncEnabled ?? false);
+        const savedAutoSync = sheets.config.autoSyncEnabled ?? false;
+        setAutoSyncEnabled(autoSyncLocked ? false : savedAutoSync);
         setAutoApprove(sheets.config.autoApprove ?? false);
         if (sheets.config.syncMode && sheets.config.syncMode !== "create") {
           setFeedOpen(true);
@@ -110,7 +114,7 @@ export function GoogleSheetsStudio({
     } finally {
       setLoading(false);
     }
-  }, [shop, onUpgrade]);
+  }, [shop, onUpgrade, autoSyncLocked]);
 
   useEffect(() => {
     void load();
@@ -178,7 +182,7 @@ export function GoogleSheetsStudio({
           syncMode,
           matchField,
           schedule,
-          autoSyncEnabled,
+          autoSyncEnabled: autoSyncLocked ? false : autoSyncEnabled,
           autoApprove,
         },
         shop,
@@ -228,13 +232,29 @@ export function GoogleSheetsStudio({
           )}
           {isLiveMode && hasMapping && (
             <>
-              <Select label="Schedule" options={SCHEDULE_OPTIONS} value={schedule} onChange={setSchedule} />
+              <Select
+                label="Schedule"
+                options={SCHEDULE_OPTIONS}
+                value={schedule}
+                onChange={setSchedule}
+                disabled={autoSyncLocked}
+              />
               <Checkbox
                 label="Auto-sync on schedule"
                 checked={autoSyncEnabled}
                 onChange={setAutoSyncEnabled}
-                helpText="Runs on your worker schedule (hourly check)."
+                disabled={autoSyncLocked}
+                helpText={
+                  autoSyncLocked
+                    ? "Scheduled auto-sync needs Starter or higher. Upgrade in Billing."
+                    : "Runs on your worker schedule (hourly check)."
+                }
               />
+              {autoSyncLocked && onUpgrade && (
+                <Button variant="plain" onClick={onUpgrade}>
+                  Upgrade for scheduled sync
+                </Button>
+              )}
               <Checkbox
                 label="Auto-apply without preview"
                 checked={autoApprove}

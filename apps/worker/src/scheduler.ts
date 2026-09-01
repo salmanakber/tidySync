@@ -33,11 +33,13 @@ function parseFeedScheduleInterval(schedule: string): number | null {
 async function runSupplierFeedScheduler() {
   const integrations = await prisma.tenantIntegration.findMany({
     where: { type: "GOOGLE_SHEETS", enabled: true },
-    include: { tenant: true },
+    include: { tenant: { include: { plan: true } } },
   });
   const now = Date.now();
 
   for (const integration of integrations) {
+    if (!integration.tenant.plan?.scheduledJobs) continue;
+
     const config = integration.config as {
       spreadsheetId?: string;
       sheetGid?: string;
@@ -114,12 +116,14 @@ async function runSupplierFeedScheduler() {
 export async function runScheduler() {
   const due = await prisma.scheduledJob.findMany({
     where: { enabled: true },
-    include: { tenant: true },
+    include: { tenant: { include: { plan: true } } },
   });
 
   const now = Date.now();
 
   for (const sched of due) {
+    if (!sched.tenant.plan?.scheduledJobs) continue;
+
     const intervalMs = parseScheduleInterval(sched.schedule);
     if (!intervalMs) continue;
 

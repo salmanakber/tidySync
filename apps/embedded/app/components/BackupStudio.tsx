@@ -6,6 +6,7 @@ import { DatabaseIcon, DeleteIcon, RefreshIcon, UndoIcon } from "@shopify/polari
 import { gqlRequest, QUERIES, MUTATIONS } from "../lib/graphql";
 import { alertFromError } from "../lib/graphql-errors";
 import { AppAlert } from "./AppAlert";
+import { PlanUpgradePanel } from "./PlanUpgradePanel";
 
 interface StoreBackup {
   id: string;
@@ -179,8 +180,19 @@ export function BackupStudio({ shop, maxBackups = 0, onUpgrade, onJobStarted }: 
   const totalProducts = backups.reduce((sum, b) => sum + b.productCount, 0);
   const totalSize = backups.reduce((sum, b) => sum + b.sizeBytes, 0);
 
+  const atBackupLimit = maxBackups > 0 && backups.length >= maxBackups;
+  const backupsUnavailable = maxBackups <= 0;
+
   return (
     <div className="tidysync-vault">
+      {backupsUnavailable && (
+        <PlanUpgradePanel
+          title="Catalog backups require a paid plan"
+          message="Upgrade to Starter or higher to save point-in-time product snapshots."
+          upgradeLabel="View plans"
+          onUpgrade={onUpgrade}
+        />
+      )}
       <header className="tidysync-vault-hero">
         <div className="tidysync-vault-hero-pattern" aria-hidden="true" />
         <div className="tidysync-vault-hero-inner">
@@ -227,7 +239,7 @@ export function BackupStudio({ shop, maxBackups = 0, onUpgrade, onJobStarted }: 
         <button
           type="button"
           className="tidysync-vault-create"
-          disabled={creating || maxBackups <= 0 || backups.length >= maxBackups}
+          disabled={creating || backupsUnavailable || atBackupLimit}
           onClick={() => createBackup()}
         >
           {creating ? (
@@ -245,6 +257,9 @@ export function BackupStudio({ shop, maxBackups = 0, onUpgrade, onJobStarted }: 
             </>
           )}
         </button>
+        {atBackupLimit && onUpgrade && (
+          <Button onClick={onUpgrade}>Upgrade for more backups</Button>
+        )}
         <Button icon={RefreshIcon} onClick={() => load()} disabled={loading}>
           Refresh
         </Button>

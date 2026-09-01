@@ -17,6 +17,10 @@ import {
 } from "../services/billing";
 import { computeAgentRunsRemaining } from "../services/tenant-limits";
 import {
+  assertCatalogCapacity,
+  requirePaidMerchant,
+} from "../services/plan-guard";
+import {
   importQueue,
   exportQueue,
   bulkEditQueue,
@@ -497,7 +501,7 @@ export const resolvers = {
       args: { format?: string; platformKey?: string; resourceType?: string },
       ctx: GraphQLContext,
     ) => {
-      const { tenantId, shop } = requireActiveMerchant(ctx);
+      const { tenantId, shop } = await requirePaidMerchant(ctx);
       const resourceType = args.resourceType ?? "products";
 
       const job = await prisma.job.create({
@@ -524,7 +528,7 @@ export const resolvers = {
       args: { filePath: string; fileName: string; resourceType?: string },
       ctx: GraphQLContext,
     ) => {
-      const { tenantId } = requireActiveMerchant(ctx);
+      const { tenantId } = await requirePaidMerchant(ctx);
       const resourceType = args.resourceType ?? "products";
 
       // Fast sync path: headers + platform detect + small preview (streaming — avoids 504 / worker hangs)
@@ -581,7 +585,7 @@ export const resolvers = {
       args: { jobId: string; platformKey: string; useAi?: boolean },
       ctx: GraphQLContext,
     ) => {
-      const { tenantId } = requireActiveMerchant(ctx);
+      const { tenantId } = await requirePaidMerchant(ctx);
       const { suggestMappingsWithAi } = await import("./extensions");
       return suggestMappingsWithAi(tenantId, args.jobId, args.platformKey, args.useAi ?? false);
     },
@@ -590,7 +594,7 @@ export const resolvers = {
       args: { jobId: string; mappings: unknown },
       ctx: GraphQLContext,
     ) => {
-      const { tenantId } = requireActiveMerchant(ctx);
+      const { tenantId } = await requirePaidMerchant(ctx);
 
       const job = await prisma.job.findFirst({ where: { id: args.jobId, tenantId } });
       if (!job?.filePath) throw new Error("Job not found");
@@ -701,16 +705,20 @@ export const resolvers = {
       args: { prompt: string },
       ctx: GraphQLContext,
     ) => {
-      const { tenantId, shop } = requireActiveMerchant(ctx);
+      const { tenantId, shop } = await requirePaidMerchant(ctx);
       const { generateNlBulkEditWithAi } = await import("./extensions");
       return generateNlBulkEditWithAi(tenantId, shop, args.prompt, ctx.sessionToken);
     },
     approveJob: async (_: unknown, args: { jobId: string }, ctx: GraphQLContext) => {
-      const { tenantId, shop } = requireActiveMerchant(ctx);
+      const { tenantId, shop } = await requirePaidMerchant(ctx);
 
       const job = await prisma.job.findFirst({ where: { id: args.jobId, tenantId } });
       if (!job) throw new Error("Job not found");
       if (job.status !== "PREVIEW") throw new Error("Job must be in PREVIEW status to approve");
+
+      if (job.type === "IMPORT" && job.resourceType === "products") {
+        await assertCatalogCapacity(tenantId, job.rowCount ?? 0);
+      }
 
       if (ctx.sessionToken) {
         try {
@@ -773,7 +781,7 @@ export const resolvers = {
       return mapJob(updated);
     },
     undoJob: async (_: unknown, args: { jobId: string }, ctx: GraphQLContext) => {
-      const { tenantId, shop } = requireActiveMerchant(ctx);
+      const { tenantId, shop } = await requirePaidMerchant(ctx);
 
       const originalJob = await prisma.job.findFirst({
         where: { id: args.jobId, tenantId, status: "COMPLETED" },
@@ -803,7 +811,7 @@ export const resolvers = {
       args: { name: string; platformKey: string; mappings: unknown },
       ctx: GraphQLContext,
     ) => {
-      const { tenantId } = requireActiveMerchant(ctx);
+      const { tenantId } = await requirePaidMerchant(ctx);
 
       return prisma.mappingTemplate.create({
         data: {
