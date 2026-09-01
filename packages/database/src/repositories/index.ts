@@ -134,6 +134,28 @@ export const auditRepository = {
     });
   },
 
+  async listForTenantPaged(tenantId: string, limit = 20, offset = 0) {
+    const pageSize = Math.min(Math.max(limit, 1), 100);
+    const skip = Math.max(offset, 0);
+    const [items, totalCount] = await Promise.all([
+      prisma.auditLog.findMany({
+        where: { tenantId },
+        orderBy: { createdAt: "desc" },
+        take: pageSize,
+        skip,
+      }),
+      prisma.auditLog.count({ where: { tenantId } }),
+    ]);
+    const page = Math.floor(skip / pageSize) + 1;
+    return {
+      items,
+      totalCount,
+      page,
+      pageSize,
+      hasMore: skip + items.length < totalCount,
+    };
+  },
+
   listForAdmin(limit = 100) {
     return prisma.auditLog.findMany({
       orderBy: { createdAt: "desc" },

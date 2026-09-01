@@ -123,6 +123,7 @@ model Plan {
   agentEnabled          Boolean  @default(false) @map("agent_enabled")
   agentRunsPerMonth     Int      @default(0) @map("agent_runs_per_month")
   scheduledJobs         Boolean  @default(false) @map("scheduled_jobs")
+  auditLogEnabled       Boolean  @default(false) @map("audit_log_enabled")
   crossPlatform         Boolean  @default(false) @map("cross_platform")
   multiStore            Boolean  @default(false) @map("multi_store")
   priceMonthlyCents     Int      @map("price_monthly_cents")

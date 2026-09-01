@@ -129,7 +129,7 @@ export const QUERIES = {
         billingStatus billingBypass installApproved
         plan {
           name slug maxProducts aiCreditsPerMonth aiCreditsRemaining maxBackups backupRetentionDays
-          agentEnabled agentRunsPerMonth isFree scheduledJobs crossPlatform multiStore priceMonthlyCents
+          agentEnabled agentRunsPerMonth isFree scheduledJobs auditLogEnabled crossPlatform multiStore priceMonthlyCents
         }
       }
     }
@@ -151,7 +151,7 @@ export const QUERIES = {
   availablePlans: `
     query AvailablePlans {
       availablePlans {
-        id name slug maxProducts aiCreditsPerMonth priceMonthlyCents isFree scheduledJobs crossPlatform multiStore
+        id name slug maxProducts aiCreditsPerMonth priceMonthlyCents isFree scheduledJobs auditLogEnabled agentEnabled crossPlatform multiStore
       }
     }
   `,
@@ -194,9 +194,15 @@ export const QUERIES = {
     }
   `,
   auditLogs: `
-    query AuditLogs($limit: Int) {
-      auditLogs(limit: $limit) {
-        id action resourceType resourceId metadata createdAt
+    query AuditLogs($limit: Int, $offset: Int) {
+      auditLogs(limit: $limit, offset: $offset) {
+        totalCount
+        page
+        pageSize
+        hasMore
+        items {
+          id action resourceType resourceId metadata createdAt
+        }
       }
     }
   `,

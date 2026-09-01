@@ -433,6 +433,7 @@ export function AgentStudio({
 
       {missionsLocked && (
         <PlanUpgradePanel
+          feature="agent"
           title="Agent missions need Starter or higher"
           message="Upgrade to run autonomous multi-step missions. Quick store scans below still use AI credits from your plan."
           upgradeLabel="Upgrade to Starter"

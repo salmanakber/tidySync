@@ -69,6 +69,7 @@ import {
 import {
   isAgentPlanLocked,
   isBackupsPlanLocked,
+  isAuditPlanLocked,
   isSchedulesPlanLocked,
   catalogAtLimit,
   upgradePlanLabel,
@@ -120,6 +121,7 @@ interface Tenant {
     agentEnabled?: boolean;
     agentRunsPerMonth?: number;
     scheduledJobs?: boolean;
+    auditLogEnabled?: boolean;
     priceMonthlyCents?: number;
     isFree?: boolean;
   };
@@ -133,6 +135,9 @@ interface PlanOption {
   aiCreditsPerMonth: number;
   priceMonthlyCents: number;
   isFree: boolean;
+  scheduledJobs?: boolean;
+  auditLogEnabled?: boolean;
+  agentEnabled?: boolean;
 }
 
 interface Job {
@@ -229,7 +234,11 @@ export function Dashboard() {
       matchReason?: string | null;
     }>
   >([]);
-  const [auditLogs, setAuditLogs] = useState<Array<{ id: string; action: string; createdAt: string }>>([]);
+  const [auditLogs, setAuditLogs] = useState<Array<{ id: string; action: string; createdAt: string; resourceType?: string }>>([]);
+  const [auditTotal, setAuditTotal] = useState(0);
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const AUDIT_PAGE_SIZE = 20;
   const [schedules, setSchedules] = useState<
     Array<{
       id: string;
@@ -775,15 +784,26 @@ export function Dashboard() {
     { id: "backups", content: "Backups" },
   ];
 
-  useEffect(() => {
-    if (!shop) return;
-    if (tab === 9) void loadAudit();
-    if (tab === 10) void loadSchedules();
-  }, [tab, shop]);
-
-  const loadAudit = async () => {
-    const data = await gqlRequest<{ auditLogs: typeof auditLogs }>(QUERIES.auditLogs, { limit: 50 }, shop);
-    setAuditLogs(data.auditLogs);
+  const loadAudit = async (page = 1) => {
+    setAuditLoading(true);
+    try {
+      const offset = (page - 1) * AUDIT_PAGE_SIZE;
+      const data = await gqlRequest<{
+        auditLogs: {
+          items: typeof auditLogs;
+          totalCount: number;
+          page: number;
+          hasMore: boolean;
+        };
+      }>(QUERIES.auditLogs, { limit: AUDIT_PAGE_SIZE, offset }, shop);
+      setAuditLogs(data.auditLogs.items);
+      setAuditTotal(data.auditLogs.totalCount);
+      setAuditPage(data.auditLogs.page);
+    } catch (e) {
+      showOperationalError(e, "Could not load audit log");
+    } finally {
+      setAuditLoading(false);
+    }
   };
 
   const loadSchedules = async () => {
@@ -908,15 +928,23 @@ export function Dashboard() {
       agent: isAgentPlanLocked(plan),
       schedules: isSchedulesPlanLocked(plan),
       backups: isBackupsPlanLocked(plan),
+      audit: isAuditPlanLocked(plan),
       catalogFull: tenant ? catalogAtLimit(tenant) : false,
     };
   }, [tenant]);
+
+  useEffect(() => {
+    if (!shop) return;
+    if (tab === 9 && !planGates.audit) void loadAudit(auditPage);
+    if (tab === 10) void loadSchedules();
+  }, [tab, shop, auditPage, planGates.audit]);
 
   const lockedNavTabs = useMemo(
     () => ({
       agent: planGates.agent,
       schedules: planGates.schedules,
       backups: planGates.backups,
+      audit: planGates.audit,
     }),
     [planGates],
   );
@@ -1423,9 +1451,11 @@ export function Dashboard() {
                   <BlockStack gap="400">
                     {planGates.catalogFull && (
                       <PlanUpgradePanel
+                        feature="catalog"
                         title="Product limit reached"
                         message={`Your ${tenant?.plan?.name ?? "plan"} allows ${tenant?.plan?.maxProducts?.toLocaleString() ?? "—"} products. Upgrade to import more.`}
                         upgradeLabel={upgradeLabel}
+                        currentPlan={tenant?.plan?.name}
                         onUpgrade={goToBilling}
                       />
                     )}
@@ -1703,6 +1733,16 @@ export function Dashboard() {
                 )}
 
                 {tab === 9 && (
+                  planGates.audit ? (
+                    <PlanUpgradePanel
+                      feature="audit"
+                      title="Audit log is a paid feature"
+                      message="Track every import, export, AI edit, and undo with a searchable history and CSV export for compliance."
+                      upgradeLabel={upgradeLabel}
+                      currentPlan={tenant?.plan?.name}
+                      onUpgrade={goToBilling}
+                    />
+                  ) : (
                   <BlockStack gap="400">
                     <div>
                       <p className="tidysync-section-title">Audit log</p>
@@ -1710,13 +1750,22 @@ export function Dashboard() {
                         Every import, export, AI edit, and undo is recorded for support and compliance.
                       </p>
                     </div>
-                    <InlineStack gap="200">
-                      <Button icon={RefreshIcon} onClick={loadAudit}>
+                    <InlineStack gap="200" blockAlign="center" wrap>
+                      <Button icon={RefreshIcon} onClick={() => loadAudit(auditPage)} loading={auditLoading}>
                         Refresh
                       </Button>
                       <Button onClick={() => downloadAuditExport(shop)}>Export CSV</Button>
+                      {auditTotal > 0 && (
+                        <Text as="span" variant="bodySm" tone="subdued">
+                          {auditTotal.toLocaleString()} events total
+                        </Text>
+                      )}
                     </InlineStack>
-                    {auditLogs.length === 0 ? (
+                    {auditLoading && auditLogs.length === 0 ? (
+                      <div className="tidysync-empty-block">
+                        <Text as="p" variant="bodyMd">Loading audit events…</Text>
+                      </div>
+                    ) : auditLogs.length === 0 ? (
                       <div className="tidysync-empty-block">
                         <Text as="p" variant="bodyMd" fontWeight="semibold">
                           No audit events yet
@@ -1726,32 +1775,62 @@ export function Dashboard() {
                         </Text>
                       </div>
                     ) : (
-                      auditLogs.map((log) => (
-                        <div key={log.id} className="tidysync-job-live">
-                          <InlineStack align="space-between" blockAlign="center">
-                            <BlockStack gap="100">
-                              <Text as="p" variant="bodyMd" fontWeight="semibold">
-                                {log.action}
-                              </Text>
-                              <Text as="p" variant="bodySm" tone="subdued">
-                                {new Date(log.createdAt).toLocaleString()}
-                              </Text>
-                            </BlockStack>
-                            <Badge>Event</Badge>
-                          </InlineStack>
+                      <>
+                        <div className="tidysync-audit-list">
+                          {auditLogs.map((log) => (
+                            <div key={log.id} className="tidysync-audit-row">
+                              <div className="tidysync-audit-row-main">
+                                <Text as="p" variant="bodyMd" fontWeight="semibold">
+                                  {log.action}
+                                </Text>
+                                <Text as="p" variant="bodySm" tone="subdued">
+                                  {new Date(log.createdAt).toLocaleString()}
+                                  {log.resourceType ? ` · ${log.resourceType}` : ""}
+                                </Text>
+                              </div>
+                              <Badge>Event</Badge>
+                            </div>
+                          ))}
                         </div>
-                      ))
+                        {auditTotal > AUDIT_PAGE_SIZE && (
+                          <InlineStack align="space-between" blockAlign="center">
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              Page {auditPage} of {Math.max(1, Math.ceil(auditTotal / AUDIT_PAGE_SIZE))}
+                            </Text>
+                            <InlineStack gap="200">
+                              <Button
+                                disabled={auditPage <= 1 || auditLoading}
+                                onClick={() => setAuditPage((p) => Math.max(1, p - 1))}
+                              >
+                                Previous
+                              </Button>
+                              <Button
+                                disabled={
+                                  auditLoading ||
+                                  auditPage >= Math.ceil(auditTotal / AUDIT_PAGE_SIZE)
+                                }
+                                onClick={() => setAuditPage((p) => p + 1)}
+                              >
+                                Next
+                              </Button>
+                            </InlineStack>
+                          </InlineStack>
+                        )}
+                      </>
                     )}
                   </BlockStack>
+                  )
                 )}
 
                 {tab === 10 && (
                   <BlockStack gap="500">
                     {planGates.schedules ? (
                       <PlanUpgradePanel
+                        feature="schedules"
                         title="Scheduled automation is a paid feature"
                         message="Daily exports, weekly health scans, and Google Sheets auto-sync need Starter or higher."
                         upgradeLabel={upgradeLabel}
+                        currentPlan={tenant?.plan?.name}
                         onUpgrade={goToBilling}
                       />
                     ) : (
@@ -1946,7 +2025,15 @@ export function Dashboard() {
                             <ul className="tidysync-checklist">
                               <li>{plan.maxProducts.toLocaleString()} products</li>
                               <li>{plan.aiCreditsPerMonth} AI credits / month</li>
-                              <li>{plan.isFree ? "Core import & export" : "Priority AI + scheduled jobs"}</li>
+                              {plan.isFree ? (
+                                <li>Import, export & 1 backup</li>
+                              ) : (
+                                <>
+                                  {plan.agentEnabled && <li>AI Agent missions</li>}
+                                  {plan.scheduledJobs && <li>Scheduled automation</li>}
+                                  {plan.auditLogEnabled && <li>Audit log & CSV export</li>}
+                                </>
+                              )}
                             </ul>
                             <div style={{ marginTop: "auto", paddingTop: 8 }}>
                               {isCurrent ? (
@@ -2054,9 +2141,11 @@ export function Dashboard() {
                 {tab === 12 && (
                   planGates.agent ? (
                     <PlanUpgradePanel
+                      feature="agent"
                       title="AI Agent requires Starter or higher"
-                      message="Autonomous catalog missions (SEO polish, bulk edits, multi-step plans) are not included on the Free plan. Store scans still use AI credits from AI Edit or SEO tabs."
+                      message="Autonomous catalog missions (SEO polish, bulk edits, multi-step plans) are not included on the Free plan."
                       upgradeLabel={upgradeLabel}
+                      currentPlan={tenant?.plan?.name}
                       onUpgrade={goToBilling}
                     />
                   ) : (
@@ -2085,9 +2174,11 @@ export function Dashboard() {
                 {tab === 13 && (
                   planGates.backups ? (
                     <PlanUpgradePanel
+                      feature="backups"
                       title="Catalog backups require a paid plan"
                       message="Point-in-time product snapshots and restore are included on Starter and above."
                       upgradeLabel={upgradeLabel}
+                      currentPlan={tenant?.plan?.name}
                       onUpgrade={goToBilling}
                     />
                   ) : (

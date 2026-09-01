@@ -12,8 +12,8 @@ import { enqueueSupplierFeedSync, normalizeFeedSyncMode } from "../services/supp
 import { parseAgentIntent, buildSeoImprovementPlan } from "@tidysync/ai";
 import { type GraphQLContext, requireMerchant, requireActiveMerchant, requireAdmin } from "../context";
 import {
-  assertCatalogCapacity,
   assertScheduledJobsAllowed,
+  assertAuditLogAllowed,
   requirePaidMerchant,
 } from "../services/plan-guard";
 import { parseFileHeaders } from "../services/file-parser";
@@ -40,6 +40,14 @@ export const extensionTypeDefs = `#graphql
 
   type AuditLogTenant {
     shopDomain: String!
+  }
+
+  type AuditLogPage {
+    items: [AuditLog!]!
+    totalCount: Int!
+    page: Int!
+    pageSize: Int!
+    hasMore: Boolean!
   }
 
   type ScheduledJob {
@@ -271,7 +279,7 @@ export const extensionTypeDefs = `#graphql
   }
 
   extend type Query {
-    auditLogs(limit: Int = 50): [AuditLog!]!
+    auditLogs(limit: Int = 20, offset: Int = 0): AuditLogPage!
     scheduledJobs: [ScheduledJob!]!
     notificationSettings: NotificationSettings
     catalogProducts(first: Int = 24, query: String): [CatalogProduct!]!
@@ -328,9 +336,18 @@ export const extensionTypeDefs = `#graphql
 
 export const extensionResolvers = {
   Query: {
-    auditLogs: async (_: unknown, args: { limit?: number }, ctx: GraphQLContext) => {
+    auditLogs: async (
+      _: unknown,
+      args: { limit?: number; offset?: number },
+      ctx: GraphQLContext,
+    ) => {
       const { tenantId } = requireMerchant(ctx);
-      return auditRepository.listForTenant(tenantId, args.limit ?? 50);
+      await assertAuditLogAllowed(tenantId);
+      return auditRepository.listForTenantPaged(
+        tenantId,
+        args.limit ?? 20,
+        args.offset ?? 0,
+      );
     },
     scheduledJobs: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
       const { tenantId } = requireMerchant(ctx);
@@ -1149,6 +1166,9 @@ export const extensionResolvers = {
       };
 
       if (updatedConfig.autoSyncEnabled) {
+        await assertScheduledJobsAllowed(tenantId);
+      }
+      if (updatedConfig.autoApprove) {
         await assertScheduledJobsAllowed(tenantId);
       }
 

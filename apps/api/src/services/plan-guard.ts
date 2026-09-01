@@ -49,6 +49,17 @@ export async function assertScheduledJobsAllowed(tenantId: string) {
   return tenant;
 }
 
+export async function assertAuditLogAllowed(tenantId: string) {
+  const { tenant, plan } = await loadTenantWithPlan(tenantId);
+  if (!plan.auditLogEnabled) {
+    throw planLimitError(
+      "Audit log and compliance exports are not available on your plan. Upgrade to Starter or higher.",
+      { feature: "audit" },
+    );
+  }
+  return tenant;
+}
+
 export async function assertCatalogCapacity(tenantId: string, additional = 0) {
   const { tenant, plan } = await loadTenantWithPlan(tenantId);
   if (await checkCatalogLimit(tenantId, additional)) return tenant;

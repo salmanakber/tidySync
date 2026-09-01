@@ -187,6 +187,7 @@ export function BackupStudio({ shop, maxBackups = 0, onUpgrade, onJobStarted }: 
     <div className="tidysync-vault">
       {backupsUnavailable && (
         <PlanUpgradePanel
+          feature="backups"
           title="Catalog backups require a paid plan"
           message="Upgrade to Starter or higher to save point-in-time product snapshots."
           upgradeLabel="View plans"

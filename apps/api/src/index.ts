@@ -235,9 +235,16 @@ app.get("/audit/export/all", async (req, res) => {
     res.status(401).send("Unauthorized");
     return;
   }
-  const tenant = await prisma.tenant.findUnique({ where: { shopDomain: shop } });
+  const tenant = await prisma.tenant.findUnique({
+    where: { shopDomain: shop },
+    include: { plan: true },
+  });
   if (!tenant) {
     res.status(404).send("Tenant not found");
+    return;
+  }
+  if (!tenant.plan?.auditLogEnabled) {
+    res.status(403).send("Audit log export is not available on your plan. Upgrade to Starter or higher.");
     return;
   }
   const logs = await prisma.auditLog.findMany({

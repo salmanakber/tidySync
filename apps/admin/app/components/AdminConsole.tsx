@@ -60,6 +60,7 @@ interface Plan {
   agentEnabled: boolean;
   agentRunsPerMonth: number;
   scheduledJobs: boolean;
+  auditLogEnabled: boolean;
   crossPlatform: boolean;
   multiStore: boolean;
   priceMonthlyCents: number;
@@ -210,7 +211,7 @@ export function AdminConsole() {
         adminGql<{ adminPlans: Plan[] }>(
           `query { adminPlans {
             id name slug maxProducts aiCreditsPerMonth maxBackups backupRetentionDays maxBackupProducts
-            agentEnabled agentRunsPerMonth scheduledJobs crossPlatform multiStore
+            agentEnabled agentRunsPerMonth scheduledJobs auditLogEnabled crossPlatform multiStore
             priceMonthlyCents isFree shopifyPlanName
           } }`,
           {},
@@ -529,6 +530,7 @@ export function AdminConsole() {
       agentEnabled: plan.agentEnabled,
       agentRunsPerMonth: plan.agentRunsPerMonth,
       scheduledJobs: plan.scheduledJobs,
+      auditLogEnabled: plan.auditLogEnabled,
       crossPlatform: plan.crossPlatform,
       multiStore: plan.multiStore,
       priceMonthlyCents: plan.priceMonthlyCents,
@@ -1328,6 +1330,14 @@ export function AdminConsole() {
                     onChange={(e) => setPlanEdit((s) => ({ ...s, scheduledJobs: e.target.checked }))}
                   />
                   Scheduled jobs
+                </label>
+                <label className="plan-check">
+                  <input
+                    type="checkbox"
+                    checked={planEdit.auditLogEnabled ?? false}
+                    onChange={(e) => setPlanEdit((s) => ({ ...s, auditLogEnabled: e.target.checked }))}
+                  />
+                  Audit log
                 </label>
                 <label className="plan-check">
                   <input

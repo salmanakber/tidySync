@@ -79,6 +79,7 @@ export const typeDefs = `#graphql
     agentEnabled: Boolean!
     agentRunsPerMonth: Int!
     scheduledJobs: Boolean!
+    auditLogEnabled: Boolean!
     crossPlatform: Boolean!
     multiStore: Boolean!
     priceMonthlyCents: Int!
@@ -234,6 +235,7 @@ export const typeDefs = `#graphql
     agentEnabled: Boolean
     agentRunsPerMonth: Int
     scheduledJobs: Boolean
+    auditLogEnabled: Boolean
     crossPlatform: Boolean
     multiStore: Boolean
     priceMonthlyCents: Int
@@ -954,6 +956,7 @@ export const resolvers = {
           agentEnabled?: boolean;
           agentRunsPerMonth?: number;
           scheduledJobs?: boolean;
+          auditLogEnabled?: boolean;
           crossPlatform?: boolean;
           multiStore?: boolean;
           priceMonthlyCents?: number;

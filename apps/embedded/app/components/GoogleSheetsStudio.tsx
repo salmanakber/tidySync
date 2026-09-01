@@ -183,7 +183,7 @@ export function GoogleSheetsStudio({
           matchField,
           schedule,
           autoSyncEnabled: autoSyncLocked ? false : autoSyncEnabled,
-          autoApprove,
+          autoApprove: autoSyncLocked ? false : autoApprove,
         },
         shop,
       );
@@ -259,7 +259,12 @@ export function GoogleSheetsStudio({
                 label="Auto-apply without preview"
                 checked={autoApprove}
                 onChange={setAutoApprove}
-                helpText="Only enable if you fully trust the supplier file."
+                disabled={autoSyncLocked}
+                helpText={
+                  autoSyncLocked
+                    ? "Auto-apply needs Starter or higher (scheduled automation)."
+                    : "Only enable if you fully trust the supplier file."
+                }
               />
             </>
           )}

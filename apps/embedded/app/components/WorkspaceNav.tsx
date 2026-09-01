@@ -40,6 +40,7 @@ const LOCKED_TAB_LABELS: Record<string, string> = {
   agent: "Starter+",
   schedules: "Starter+",
   backups: "Starter+",
+  audit: "Starter+",
 };
 
 const TAB_ICONS: Record<string, typeof ImportIcon> = {
@@ -122,7 +123,11 @@ export function WorkspaceNav({
             <ul className="tidysync-sidebar-list">
               {group.items.map(({ index, tab, icon }) => {
                 const active = activeIndex === index;
-                const isPremium = tab.id === "agent" || tab.id === "backups" || tab.id === "schedules";
+                const isPremium =
+                  tab.id === "agent" ||
+                  tab.id === "backups" ||
+                  tab.id === "schedules" ||
+                  tab.id === "audit";
                 const locked = Boolean(lockedTabIds[tab.id]);
                 return (
                   <li key={tab.id}>

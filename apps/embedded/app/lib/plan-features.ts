@@ -5,6 +5,7 @@ export interface TenantPlanFeatures {
   maxBackups?: number;
   agentEnabled?: boolean;
   scheduledJobs?: boolean;
+  auditLogEnabled?: boolean;
   isFree?: boolean;
   aiCreditsRemaining?: number;
 }
@@ -22,6 +23,10 @@ export function isAgentPlanLocked(plan?: TenantPlanFeatures | null): boolean {
 
 export function isSchedulesPlanLocked(plan?: TenantPlanFeatures | null): boolean {
   return !plan?.scheduledJobs;
+}
+
+export function isAuditPlanLocked(plan?: TenantPlanFeatures | null): boolean {
+  return !plan?.auditLogEnabled;
 }
 
 export function isBackupsPlanLocked(plan?: TenantPlanFeatures | null): boolean {
