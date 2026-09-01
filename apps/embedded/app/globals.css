@@ -142,11 +142,22 @@ body {
 
 .tidysync-ai-studio {
   position: relative;
-  border-radius: 14px;
-  padding: 20px;
+  border-radius: 18px;
+  padding: 22px;
   background: #fff;
   border: 1px solid #e1e3e5;
   overflow: visible;
+  box-shadow: 0 8px 28px rgba(32, 34, 35, 0.06);
+}
+
+.tidysync-ai-studio-aura {
+  position: absolute;
+  inset: 0;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(92, 106, 196, 0.12), transparent 45%),
+    radial-gradient(circle at 100% 100%, rgba(0, 128, 96, 0.08), transparent 40%);
+  pointer-events: none;
 }
 
 .tidysync-ai-studio::before {
@@ -156,11 +167,81 @@ body {
   top: 0;
   bottom: 0;
   width: 4px;
+  border-radius: 18px 0 0 18px;
   background: linear-gradient(180deg, #5c6ac4, #8b7ce8);
 }
 
 .tidysync-ai-studio.is-generating {
   animation: tidysync-ai-glow 1.6s ease-in-out infinite;
+}
+
+.tidysync-ai-studio-head {
+  position: relative;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.tidysync-ai-studio-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(145deg, #5c6ac4, #7c6cf0);
+  color: #fff;
+  flex-shrink: 0;
+  box-shadow: 0 8px 20px rgba(92, 106, 196, 0.28);
+}
+
+.tidysync-ai-studio-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.tidysync-ai-composer {
+  position: relative;
+  margin-bottom: 14px;
+}
+
+.tidysync-ai-composer-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: #202223;
+  margin-bottom: 10px;
+}
+
+.tidysync-ai-composer-box {
+  border: 1px solid #d2d5d8;
+  border-radius: 16px;
+  background: #fafbfb;
+  overflow: visible;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.tidysync-ai-composer-box:focus-within {
+  border-color: #5c6ac4;
+  box-shadow: 0 0 0 3px rgba(92, 106, 196, 0.14);
+  background: #fff;
+}
+
+.tidysync-ai-composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-top: 1px solid #e8e9eb;
+  background: #fff;
+  border-radius: 0 0 16px 16px;
+}
+
+.tidysync-ai-generating {
+  margin-top: 14px;
+  padding-top: 8px;
 }
 
 .tidysync-ai-header {
@@ -1707,14 +1788,15 @@ body {
 .tidysync-agent-pro-input,
 .tidysync-mention-editor {
   width: 100%;
-  min-height: 96px;
-  padding: 12px 14px;
-  border: 1px solid #c9cccf;
-  border-radius: 12px;
-  font-size: 14px;
-  line-height: 1.5;
+  min-height: 112px;
+  padding: 16px 18px;
+  border: none;
+  border-radius: 0;
+  font-size: 15px;
+  line-height: 1.55;
   resize: vertical;
   font-family: inherit;
+  background: transparent;
 }
 
 .tidysync-mention-editor {
@@ -2363,11 +2445,12 @@ body {
 }
 
 .tidysync-agent-pro-composer-box {
-  border: 1px solid #e1e3e5;
+  border: 1px solid #d2d5d8;
   border-radius: 16px;
-  background: #fafbfb;
+  background: linear-gradient(180deg, #fafbfb 0%, #fff 100%);
   overflow: visible;
   transition: border-color 0.2s, box-shadow 0.2s;
+  box-shadow: 0 4px 18px rgba(32, 34, 35, 0.04);
 }
 
 .tidysync-agent-pro-composer-box:focus-within {
@@ -4204,15 +4287,18 @@ body {
 
 .tidysync-plan-gate-visual {
   position: relative;
-  width: 88px;
-  height: 88px;
+  width: 104px;
+  height: 104px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .tidysync-plan-gate-icon-ring {
-  width: 88px;
-  height: 88px;
-  border-radius: 22px;
+  width: 96px;
+  height: 96px;
+  border-radius: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4222,16 +4308,17 @@ body {
 }
 
 .tidysync-plan-gate-icon-ring svg {
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
 }
 
 .tidysync-plan-gate-lock {
   position: absolute;
-  right: -6px;
-  bottom: -6px;
-  width: 30px;
-  height: 30px;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: 34px;
+  height: 34px;
   border-radius: 999px;
   background: #202223;
   color: #fff;
@@ -4240,11 +4327,13 @@ body {
   justify-content: center;
   border: 3px solid #fff;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+  line-height: 0;
 }
 
 .tidysync-plan-gate-lock svg {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
+  display: block;
 }
 
 .tidysync-plan-gate-body {

@@ -4,6 +4,7 @@ import type { GraphQLContext } from "../context";
 import { requireActiveMerchant } from "../context";
 import { appError, planLimitError } from "../graphql/app-error";
 import { checkCatalogLimit } from "./tenant";
+import { resolveAuditLogEnabled } from "@tidysync/shared";
 
 type TenantRow = NonNullable<Awaited<ReturnType<typeof tenantRepository.findById>>>;
 
@@ -51,7 +52,7 @@ export async function assertScheduledJobsAllowed(tenantId: string) {
 
 export async function assertAuditLogAllowed(tenantId: string) {
   const { tenant, plan } = await loadTenantWithPlan(tenantId);
-  if (!plan.auditLogEnabled) {
+  if (!resolveAuditLogEnabled(plan)) {
     throw planLimitError(
       "Audit log and compliance exports are not available on your plan. Upgrade to Starter or higher.",
       { feature: "audit" },

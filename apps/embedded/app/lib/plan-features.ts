@@ -1,12 +1,13 @@
-export interface TenantPlanFeatures {
+import {
+  resolveAuditLogEnabled,
+  resolveAgentEnabled,
+  resolveScheduledJobs,
+  type PlanCapabilitySource,
+} from "@tidysync/shared";
+
+export interface TenantPlanFeatures extends PlanCapabilitySource {
   name?: string;
-  slug?: string;
   maxProducts?: number;
-  maxBackups?: number;
-  agentEnabled?: boolean;
-  scheduledJobs?: boolean;
-  auditLogEnabled?: boolean;
-  isFree?: boolean;
   aiCreditsRemaining?: number;
 }
 
@@ -18,15 +19,15 @@ export interface TenantPlanContext {
 }
 
 export function isAgentPlanLocked(plan?: TenantPlanFeatures | null): boolean {
-  return !plan?.agentEnabled;
+  return !resolveAgentEnabled(plan);
 }
 
 export function isSchedulesPlanLocked(plan?: TenantPlanFeatures | null): boolean {
-  return !plan?.scheduledJobs;
+  return !resolveScheduledJobs(plan);
 }
 
 export function isAuditPlanLocked(plan?: TenantPlanFeatures | null): boolean {
-  return !plan?.auditLogEnabled;
+  return !resolveAuditLogEnabled(plan);
 }
 
 export function isBackupsPlanLocked(plan?: TenantPlanFeatures | null): boolean {
@@ -52,4 +53,14 @@ export function catalogAtLimit(tenant: TenantPlanContext): boolean {
 export function upgradePlanLabel(plan?: TenantPlanFeatures | null): string {
   if (!plan?.isFree) return "View plans";
   return "Upgrade to Starter";
+}
+
+export function planFeatureSummary(plan?: TenantPlanFeatures | null): string[] {
+  if (!plan) return [];
+  const features: string[] = [];
+  if (resolveAgentEnabled(plan)) features.push("AI Agent");
+  if (resolveScheduledJobs(plan)) features.push("Schedules");
+  if (resolveAuditLogEnabled(plan)) features.push("Audit log");
+  if ((plan.maxBackups ?? 0) > 0) features.push(`${plan.maxBackups} backups`);
+  return features;
 }

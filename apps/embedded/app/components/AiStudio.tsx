@@ -1,6 +1,7 @@
 "use client";
 
-import { BlockStack, Button, InlineStack, Text } from "@shopify/polaris";
+import { Button, Icon, InlineStack, Text } from "@shopify/polaris";
+import { MagicIcon } from "@shopify/polaris-icons";
 import { ProductMentionTextarea } from "./ProductMentionTextarea";
 
 const PROMPT_CHIPS = [
@@ -31,31 +32,49 @@ export function AiStudio({
 }: AiStudioProps) {
   return (
     <div className={`tidysync-ai-studio${loading ? " is-generating" : ""}`}>
-      <div className="tidysync-ai-header">
-        <span className="tidysync-ai-badge">AI</span>
-        <BlockStack gap="100">
+      <div className="tidysync-ai-studio-aura" aria-hidden="true" />
+      <header className="tidysync-ai-studio-head">
+        <div className="tidysync-ai-studio-icon">
+          <Icon source={MagicIcon} />
+        </div>
+        <div>
           <Text as="h3" variant="headingSm">
             Natural language bulk edit
           </Text>
           <Text as="p" variant="bodySm" tone="subdued">
-            Describe the change. Type <strong>@</strong> to pick a product name. We build a plan, show a full diff, and wait for your confirmation before anything runs.
+            Describe the change in plain English. Type <strong>@</strong> to mention a product. We build a mutation
+            plan, show a full diff, and wait for your approval before anything runs.
           </Text>
-        </BlockStack>
-      </div>
+        </div>
+      </header>
 
-      <label className="tidysync-field-label" htmlFor="ai-bulk-prompt">What should we change?</label>
-      <ProductMentionTextarea
-        shop={shop}
-        id="ai-bulk-prompt"
-        value={value}
-        onChange={onChange}
-        placeholder="e.g. Increase all Summer Collection prices by 10% · type @ to mention a product"
-        rows={4}
-        disabled={loading}
-        className="tidysync-ai-mention-input"
-        hint={error ? undefined : "Tip: type @ to search products by name"}
-      />
-      {error ? <p className="tidysync-field-error">{error}</p> : null}
+      <div className="tidysync-ai-composer">
+        <label className="tidysync-ai-composer-label" htmlFor="ai-bulk-prompt">
+          What should we change?
+        </label>
+        <div className="tidysync-ai-composer-box">
+          <ProductMentionTextarea
+            shop={shop}
+            id="ai-bulk-prompt"
+            value={value}
+            onChange={onChange}
+            placeholder="e.g. Increase all Summer Collection prices by 10% · type @ to mention a product"
+            rows={5}
+            disabled={loading}
+            className="tidysync-ai-mention-input"
+            hint={error ? undefined : "Tip: type @ to search products by name"}
+          />
+          <div className="tidysync-ai-composer-footer">
+            <Text as="span" variant="bodySm" tone="subdued">
+              {creditsRemaining != null ? `${creditsRemaining} AI credits remaining` : "Uses 1 AI credit"}
+            </Text>
+            <Button variant="primary" onClick={onSubmit} loading={loading} disabled={!value.trim()}>
+              Generate preview
+            </Button>
+          </div>
+        </div>
+        {error ? <p className="tidysync-field-error">{error}</p> : null}
+      </div>
 
       <div className="tidysync-prompt-chips">
         {PROMPT_CHIPS.map((chip) => (
@@ -72,31 +91,15 @@ export function AiStudio({
       </div>
 
       {loading && (
-        <div style={{ marginTop: 16 }}>
+        <div className="tidysync-ai-generating">
           <Text as="p" variant="bodySm" tone="subdued">
             Building mutation plan…
           </Text>
-          <div className="tidysync-generating-line" style={{ width: "92%", marginTop: 10 }} />
+          <div className="tidysync-generating-line" style={{ width: "92%" }} />
           <div className="tidysync-generating-line" style={{ width: "74%" }} />
           <div className="tidysync-generating-line" style={{ width: "58%" }} />
         </div>
       )}
-
-      <div style={{ marginTop: 16 }}>
-        <InlineStack align="space-between" blockAlign="center">
-          <Text as="span" variant="bodySm" tone="subdued">
-            {creditsRemaining != null ? `${creditsRemaining} AI credits remaining` : "Uses 1 AI credit"}
-          </Text>
-          <Button
-            variant="primary"
-            onClick={onSubmit}
-            loading={loading}
-            disabled={!value.trim()}
-          >
-            Generate preview
-          </Button>
-        </InlineStack>
-      </div>
     </div>
   );
 }

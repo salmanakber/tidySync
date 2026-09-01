@@ -868,6 +868,7 @@ export const resolvers = {
       });
       await prisma.auditLog.create({
         data: {
+          tenantId: args.tenantId,
           action: "admin.tenant_plan_updated",
           metadata: { tenantId: args.tenantId, planSlug: args.planSlug },
         },

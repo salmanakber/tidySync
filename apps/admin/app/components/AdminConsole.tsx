@@ -36,7 +36,19 @@ interface Tenant {
   skuCount?: number;
   aiCreditsUsed: number;
   extraAiCredits?: number;
-  plan?: { name: string; slug?: string; maxProducts?: number; aiCreditsPerMonth?: number; aiCreditsRemaining?: number };
+  plan?: {
+    name: string;
+    slug?: string;
+    maxProducts?: number;
+    aiCreditsPerMonth?: number;
+    aiCreditsRemaining?: number;
+    agentEnabled?: boolean;
+    agentRunsPerMonth?: number;
+    scheduledJobs?: boolean;
+    auditLogEnabled?: boolean;
+    maxBackups?: number;
+    isFree?: boolean;
+  };
 }
 
 interface TenantDetail {
@@ -453,7 +465,11 @@ export function AdminConsole() {
           tenant {
             id shopDomain shopName status billingStatus billingBypass installApproved adminNotes installedAt
             productCount skuCount aiCreditsUsed extraAiCredits
-            plan { name slug maxProducts aiCreditsPerMonth aiCreditsRemaining }
+            plan {
+              name slug maxProducts aiCreditsPerMonth aiCreditsRemaining
+              agentEnabled agentRunsPerMonth scheduledJobs auditLogEnabled
+              maxBackups crossPlatform multiStore isFree
+            }
           }
           jobStats { total running failed completed }
           recentJobs { id type status rowCount successCount failedCount createdAt errorSummary }
@@ -886,6 +902,34 @@ export function AdminConsole() {
                 <strong>{tenantDetail.tenant.installedAt ? new Date(tenantDetail.tenant.installedAt).toLocaleDateString() : "—"}</strong>
               </div>
             </div>
+
+            {tenantDetail.tenant.plan && (
+              <div className="plan-capabilities-card" style={{ marginTop: 20 }}>
+                <h3 className="card-title" style={{ marginBottom: 12 }}>Plan capabilities (effective)</h3>
+                <p style={{ color: "var(--text-secondary)", fontSize: 13, marginBottom: 12 }}>
+                  Feature access comes from the assigned plan row in <strong>Plans</strong>. Edit flags there if a paid store
+                  is missing audit log or automation. Plan changes from Billing or Grant paid apply immediately.
+                </p>
+                <div className="plan-capabilities-grid" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  <span className={`badge ${tenantDetail.tenant.plan.agentEnabled ? "badge-success" : "badge-attention"}`}>
+                    Agent {tenantDetail.tenant.plan.agentEnabled ? "ON" : "OFF"}
+                  </span>
+                  <span className={`badge ${tenantDetail.tenant.plan.scheduledJobs ? "badge-success" : "badge-attention"}`}>
+                    Schedules {tenantDetail.tenant.plan.scheduledJobs ? "ON" : "OFF"}
+                  </span>
+                  <span className={`badge ${tenantDetail.tenant.plan.auditLogEnabled ? "badge-success" : "badge-attention"}`}>
+                    Audit log {tenantDetail.tenant.plan.auditLogEnabled ? "ON" : "OFF"}
+                  </span>
+                  <span className="badge">
+                    Backups: {tenantDetail.tenant.plan.maxBackups ?? 0}
+                  </span>
+                  <span className="badge">
+                    {tenantDetail.auditLogCount.toLocaleString()} stored events
+                  </span>
+                </div>
+              </div>
+            )}
+
             <div className="flex-row" style={{ marginTop: 16 }}>
               <button
                 type="button"
@@ -1134,6 +1178,8 @@ export function AdminConsole() {
                 <th>AI credits</th>
                 <th>Backups</th>
                 <th>Agent</th>
+                <th>Schedules</th>
+                <th>Audit log</th>
                 <th>Price</th>
               </tr>
             </thead>
@@ -1145,6 +1191,8 @@ export function AdminConsole() {
                   <td>{p.aiCreditsPerMonth}</td>
                   <td>{p.maxBackups} · {p.maxBackupProducts} prod</td>
                   <td>{p.agentEnabled ? `${p.agentRunsPerMonth}/mo` : "—"}</td>
+                  <td>{p.scheduledJobs ? "Yes" : "—"}</td>
+                  <td>{p.auditLogEnabled ? "Yes" : "—"}</td>
                   <td>{p.isFree ? "Free" : `$${(p.priceMonthlyCents / 100).toFixed(0)}/mo`}</td>
                 </tr>
               ))}

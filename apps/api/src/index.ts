@@ -16,6 +16,7 @@ import { shopify, sessionStorage } from "./shopify/client";
 import { ensureTenant } from "./services/tenant";
 import { apiKeyAuth } from "./middleware/api-key";
 import { prisma, sessionRepository } from "@tidysync/database";
+import { resolveAuditLogEnabled } from "@tidysync/shared";
 import { attachUiApps } from "./ui";
 
 const PORT = Number(process.env.PORT ?? process.env.API_PORT ?? 4000);
@@ -243,7 +244,7 @@ app.get("/audit/export/all", async (req, res) => {
     res.status(404).send("Tenant not found");
     return;
   }
-  if (!tenant.plan?.auditLogEnabled) {
+  if (!tenant.plan?.auditLogEnabled && !resolveAuditLogEnabled(tenant.plan ?? undefined)) {
     res.status(403).send("Audit log export is not available on your plan. Upgrade to Starter or higher.");
     return;
   }

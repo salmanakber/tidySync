@@ -3,6 +3,13 @@ export const TIDYSYNC_APP_NAME = "TidySync";
 export { resolveRedisUrl } from "./redis-url";
 
 export {
+  resolveAuditLogEnabled,
+  resolveAgentEnabled,
+  resolveScheduledJobs,
+  type PlanCapabilitySource,
+} from "./plan-capabilities";
+
+export {
   IMPORT_REQUIRED_BY_RESOURCE,
   isFieldMapped,
   validateImportMappings,

@@ -202,6 +202,7 @@ export function Dashboard() {
   const [aiLoading, setAiLoading] = useState(false);
   const [approveLoading, setApproveLoading] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [alerts, setAlerts] = useState<AppAlertModel[]>([]);
@@ -297,6 +298,7 @@ export function Dashboard() {
 
   const loadData = useCallback(async (options?: { refreshCatalog?: boolean }) => {
     if (!shop) return;
+    setRefreshing(true);
     try {
       const tenantData = await gqlRequest<{ meTenant: Tenant }>(
         QUERIES.meTenant,
@@ -335,6 +337,8 @@ export function Dashboard() {
       } else {
         showOperationalError(e, "Dashboard load failed");
       }
+    } finally {
+      setRefreshing(false);
     }
   }, [shop, beginInstall, pushAlert, showOperationalError]);
 
@@ -1019,8 +1023,9 @@ export function Dashboard() {
       title="TidySync"
       subtitle={tenant?.shopName ?? tenant?.shopDomain ?? shop}
       primaryAction={{
-        content: "Refresh",
+        content: refreshing ? "Refreshing…" : "Refresh",
         icon: RefreshIcon,
+        loading: refreshing,
         onAction: () => loadData({ refreshCatalog: true }),
       }}
       secondaryActions={[
@@ -1045,6 +1050,12 @@ export function Dashboard() {
                 else dismissAlert(id);
               }}
             />
+          </Layout.Section>
+        )}
+
+        {refreshing && !bootstrapping && (
+          <Layout.Section>
+            <Banner tone="info">Refreshing store data and jobs…</Banner>
           </Layout.Section>
         )}
 
@@ -1771,8 +1782,14 @@ export function Dashboard() {
                           No audit events yet
                         </Text>
                         <Text as="p" variant="bodySm" tone="subdued">
-                          Run an import, export, or AI edit and activity will appear here.
+                          Activity appears when you import, export, approve jobs, run AI edits, or change billing.
+                          Run an action, then click Refresh on this tab.
                         </Text>
+                        <div style={{ marginTop: 12 }}>
+                          <Button onClick={() => loadAudit(1)} loading={auditLoading}>
+                            Reload audit log
+                          </Button>
+                        </div>
                       </div>
                     ) : (
                       <>

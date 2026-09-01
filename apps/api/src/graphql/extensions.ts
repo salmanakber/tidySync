@@ -4,6 +4,7 @@ import { inferColumnMappingsWithAi, parseNlBulkEditWithAi, generateImpactSummary
 import { consumeAiCredit } from "../services/tenant";
 import { catalogScanQueue, exportQueue, bulkEditQueue, agentQueue, importQueue } from "../queues";
 import { checkBackupAllowed, consumeAgentRun, computeAgentRunsRemaining } from "../services/tenant-limits";
+import { resolveAgentEnabled } from "@tidysync/shared";
 import { scanStoreHealth, countThinDescriptionIssues } from "../services/store-scan";
 import { findDuplicateProducts } from "../services/duplicate-products";
 import { downloadGoogleSheetCsv, parseSpreadsheetUrl, type GoogleSheetsConfig } from "../services/google-sheets";
@@ -427,7 +428,7 @@ export const extensionResolvers = {
         plan: tenant?.plan,
       }) ?? 0;
       return {
-        enabled: Boolean(tenant?.plan?.agentEnabled),
+        enabled: resolveAgentEnabled(tenant?.plan),
         runsUsed: tenant?.agentRunsUsed ?? 0,
         runsLimit,
         runsRemaining,
