@@ -7,6 +7,7 @@ import { checkBackupAllowed, consumeAgentRun, computeAgentRunsRemaining } from "
 import { scanStoreHealth, countThinDescriptionIssues } from "../services/store-scan";
 import { findDuplicateProducts } from "../services/duplicate-products";
 import { downloadGoogleSheetCsv, parseSpreadsheetUrl, type GoogleSheetsConfig } from "../services/google-sheets";
+import { previewImportJobMappings } from "../services/import-preview";
 import { enqueueSupplierFeedSync, normalizeFeedSyncMode } from "../services/supplier-feed";
 import { parseAgentIntent, buildSeoImprovementPlan } from "@tidysync/ai";
 import { type GraphQLContext, requireMerchant, requireActiveMerchant, requireAdmin } from "../context";
@@ -294,7 +295,7 @@ export const extensionTypeDefs = `#graphql
     previewMergeProducts(primaryProductId: ID!, duplicateProductIds: [ID!]!): Job!
     previewBulkMergeProducts(merges: [ProductMergePairInput!]!): Job!
     connectGoogleSheet(spreadsheetUrl: String!, sheetName: String): TenantIntegration!
-    syncGoogleSheet(integrationId: ID!): Job!
+    syncGoogleSheet(integrationId: ID!, forceMapping: Boolean): Job!
     updateGoogleSheetFeed(
       integrationId: ID!
       syncMode: String
@@ -1030,7 +1031,11 @@ export const extensionResolvers = {
         },
       });
     },
-    syncGoogleSheet: async (_: unknown, args: { integrationId: string }, ctx: GraphQLContext) => {
+    syncGoogleSheet: async (
+      _: unknown,
+      args: { integrationId: string; forceMapping?: boolean },
+      ctx: GraphQLContext,
+    ) => {
       const { tenantId, shop } = requireActiveMerchant(ctx);
       const integration = await prisma.tenantIntegration.findFirst({
         where: { id: args.integrationId, tenantId, type: "GOOGLE_SHEETS" },
@@ -1071,11 +1076,28 @@ export const extensionResolvers = {
             spreadsheetId: config.spreadsheetId,
             integrationId: integration.id,
           } as object,
-          impactSummary: `Google Sheet synced — ${Math.max(0, downloaded.rowEstimate - 1)} rows ready to map`,
+          impactSummary: `Google Sheet ready — ${Math.max(0, downloaded.rowEstimate - 1)} rows. Map columns before import.`,
         },
       });
 
       await importQueue.add("analyze", { jobId: syncJob.id, tenantId, shop });
+
+      const useSavedMappings =
+        !args.forceMapping &&
+        syncMode === "create" &&
+        Boolean(config.savedMappings?.length);
+
+      let resultJob = syncJob;
+      if (useSavedMappings) {
+        try {
+          resultJob = await previewImportJobMappings(tenantId, syncJob.id, config.savedMappings!, {
+            defaults: config.savedDefaults,
+            integrationId: integration.id,
+          });
+        } catch {
+          resultJob = syncJob;
+        }
+      }
 
       await prisma.tenantIntegration.update({
         where: { id: integration.id },
@@ -1084,7 +1106,7 @@ export const extensionResolvers = {
         },
       });
 
-      return syncJob;
+      return resultJob;
     },
     updateGoogleSheetFeed: async (
       _: unknown,

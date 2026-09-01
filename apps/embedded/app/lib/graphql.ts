@@ -421,8 +421,10 @@ export const MUTATIONS = {
     }
   `,
   syncGoogleSheet: `
-    mutation SyncGoogleSheet($integrationId: ID!) {
-      syncGoogleSheet(integrationId: $integrationId) { id status type rowCount impactSummary }
+    mutation SyncGoogleSheet($integrationId: ID!, $forceMapping: Boolean) {
+      syncGoogleSheet(integrationId: $integrationId, forceMapping: $forceMapping) {
+        id status type rowCount impactSummary fileName
+      }
     }
   `,
   updateGoogleSheetFeed: `

@@ -31,7 +31,15 @@ interface TenantIntegration {
 interface GoogleSheetsStudioProps {
   shop: string;
   onUpgrade?: () => void;
-  onJobStarted?: (jobId: string) => void;
+  onJobStarted?: (
+    jobId: string,
+    meta?: {
+      status?: string;
+      type?: string;
+      rowCount?: number;
+      fileName?: string;
+    },
+  ) => void;
   compact?: boolean;
 }
 
@@ -127,16 +135,28 @@ export function GoogleSheetsStudio({
     }
   };
 
-  const sync = async (integrationId: string) => {
+  const sync = async (integrationId: string, forceMapping = false) => {
     setSyncing(integrationId);
     setErrorAlert(null);
     try {
-      const data = await gqlRequest<{ syncGoogleSheet: { id: string } }>(
-        MUTATIONS.syncGoogleSheet,
-        { integrationId },
-        shop,
-      );
-      if (onJobStarted) onJobStarted(data.syncGoogleSheet.id);
+      const data = await gqlRequest<{
+        syncGoogleSheet: {
+          id: string;
+          status: string;
+          type: string;
+          rowCount?: number;
+          fileName?: string;
+        };
+      }>(MUTATIONS.syncGoogleSheet, { integrationId, forceMapping }, shop);
+      const job = data.syncGoogleSheet;
+      if (onJobStarted) {
+        onJobStarted(job.id, {
+          status: job.status,
+          type: job.type,
+          rowCount: job.rowCount,
+          fileName: job.fileName,
+        });
+      }
       await load();
     } catch (e) {
       setErrorAlert(alertFromError(e, onUpgrade));
@@ -272,11 +292,19 @@ export function GoogleSheetsStudio({
               <div className="tidysync-sheets-connected-actions">
                 <Button
                   variant="primary"
-                  onClick={() => sync(sheetsIntegration.id)}
+                  onClick={() => sync(sheetsIntegration.id, false)}
                   loading={syncing === sheetsIntegration.id}
                 >
-                  {isLiveMode && hasMapping ? "Sync feed" : "Sync sheet"}
+                  {isLiveMode && hasMapping ? "Sync feed" : hasMapping ? "Sync now" : "Sync & map columns"}
                 </Button>
+                {hasMapping && !isLiveMode && (
+                  <Button
+                    onClick={() => sync(sheetsIntegration.id, true)}
+                    disabled={syncing === sheetsIntegration.id}
+                  >
+                    Map columns
+                  </Button>
+                )}
                 <Button onClick={() => disconnect(sheetsIntegration.id)}>Disconnect</Button>
               </div>
             </div>
@@ -305,7 +333,7 @@ export function GoogleSheetsStudio({
                 loading={connecting}
                 disabled={!sheetUrl.trim()}
               >
-                Connect & sync
+                Connect sheet
               </Button>
             </div>
           </div>
@@ -356,11 +384,16 @@ export function GoogleSheetsStudio({
               <div className="tidysync-sheets-connected-actions">
                 <Button
                   variant="primary"
-                  onClick={() => sync(sheetsIntegration.id)}
+                  onClick={() => sync(sheetsIntegration.id, false)}
                   loading={syncing === sheetsIntegration.id}
                 >
-                  {isLiveMode && hasMapping ? "Run feed sync" : "Sync now"}
+                  {isLiveMode && hasMapping ? "Run feed sync" : hasMapping ? "Sync now" : "Sync & map columns"}
                 </Button>
+                {hasMapping && !isLiveMode && (
+                  <Button onClick={() => sync(sheetsIntegration.id, true)} disabled={syncing === sheetsIntegration.id}>
+                    Map columns
+                  </Button>
+                )}
                 <Button tone="critical" onClick={() => disconnect(sheetsIntegration.id)}>
                   Disconnect
                 </Button>

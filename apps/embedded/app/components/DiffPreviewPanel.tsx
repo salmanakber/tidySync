@@ -119,6 +119,24 @@ export function DiffPreviewPanel({
               Your catalog snapshot finished successfully. Open the Backups tab to view, download, or restore this
               snapshot anytime.
             </Banner>
+          ) : jobType === "IMPORT" && jobStatus === "MAPPING" ? (
+            <Banner tone="info">
+              This import is waiting for column mapping. Open <strong>Import</strong> or click the job again to map
+              spreadsheet columns to Shopify fields before preview.
+            </Banner>
+          ) : jobType === "IMPORT" && jobStatus === "PREVIEW" ? (
+            <Banner tone="warning">
+              Import preview is empty — check your column mapping and required fields (title, price), then preview
+              again.
+            </Banner>
+          ) : jobType === "IMPORT" && jobStatus === "COMPLETED" ? (
+            <Banner tone="success">
+              Import finished. Review success and failed row counts in the job summary above.
+            </Banner>
+          ) : jobType === "IMPORT" && (jobStatus === "RUNNING" || jobStatus === "QUEUED") ? (
+            <Banner tone="info">
+              Import is running — products are being created or updated in Shopify. Check the progress bar at the top.
+            </Banner>
           ) : jobType === "AGENT_RUN" && impactSummary ? (
             <Banner tone="info">{impactSummary}</Banner>
           ) : jobType === "BACKUP" && jobStatus === "RUNNING" ? (

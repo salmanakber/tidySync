@@ -681,9 +681,61 @@ export function Dashboard() {
 
   const openJob = async (jobId: string) => {
     const detail = await gqlRequest<{ job: Job }>(QUERIES.job, { id: jobId }, shop);
-    setSelectedJob(detail.job);
+    const job = detail.job;
+    if (job.type === "IMPORT" && job.status === "MAPPING") {
+      setMappingJobId(job.id);
+      setMappingRows([]);
+      setImportPlatform("csv");
+      setMappingOpen(true);
+      return;
+    }
+    setSelectedJob(job);
     setPreviewOpen(true);
   };
+
+  const handleGoogleSheetJobStarted = useCallback(
+    (
+      jobId: string,
+      meta?: {
+        status?: string;
+        type?: string;
+        rowCount?: number;
+        fileName?: string;
+      },
+    ) => {
+      if (meta?.status === "MAPPING") {
+        setMappingJobId(jobId);
+        setMappingRows([]);
+        setImportPlatform("csv");
+        setMappingOpen(true);
+        setStickyProgress(null);
+        pushAlert({
+          tone: "info",
+          title: "Map your spreadsheet",
+          message:
+            "Match columns from your Google Sheet to Shopify fields. Nothing is imported until you preview and approve.",
+        });
+        void loadData();
+        return;
+      }
+      if (meta?.status === "PREVIEW" && meta?.type === "IMPORT") {
+        void (async () => {
+          const detail = await gqlRequest<{ job: Job }>(QUERIES.job, { id: jobId }, shop);
+          setSelectedJob(detail.job);
+          setPreviewOpen(true);
+          await loadData();
+        })();
+        return;
+      }
+      beginJobProgress(jobId, {
+        kind: "import",
+        rowCount: meta?.rowCount,
+        fileName: meta?.fileName,
+      });
+      void loadData();
+    },
+    [shop, beginJobProgress, pushAlert, loadData],
+  );
 
   const statusBadge = (status: string) => {
     const tone =
@@ -1212,7 +1264,7 @@ export function Dashboard() {
                               <InlineStack gap="200" blockAlign="center">
                                 {statusBadge(job.status)}
                                 <Button size="slim" onClick={() => openJob(job.id)}>
-                                  Review
+                                  {job.type === "IMPORT" && job.status === "MAPPING" ? "Map" : "Review"}
                                 </Button>
                               </InlineStack>
                             </InlineStack>
@@ -1285,7 +1337,7 @@ export function Dashboard() {
                             <IndexTable.Cell>
                               <InlineStack gap="200">
                                 <Button size="slim" onClick={() => openJob(job.id)}>
-                                  View
+                                  {job.type === "IMPORT" && job.status === "MAPPING" ? "Map" : "View"}
                                 </Button>
                                 {job.status === "COMPLETED" && job.type === "EXPORT" && (
                                   <Button size="slim" onClick={() => downloadExport(job.id, shop)}>
@@ -1357,7 +1409,7 @@ export function Dashboard() {
                       shop={shop}
                       onUpgrade={goToBilling}
                       compact
-                      onJobStarted={(jobId) => beginJobProgress(jobId, { kind: "import" })}
+                      onJobStarted={handleGoogleSheetJobStarted}
                     />
                   </BlockStack>
                 )}
@@ -1980,14 +2032,17 @@ export function Dashboard() {
             ? "Catalog snapshot"
             : selectedJob?.type === "AGENT_RUN"
               ? "Agent mission result"
-              : "Review AI changes — confirmation required"
+              : selectedJob?.type === "IMPORT"
+                ? "Review import — confirmation required"
+                : "Review AI changes — confirmation required"
         }
         primaryAction={
           selectedJob?.status === "PREVIEW" &&
           selectedJob?.type !== "BACKUP" &&
           selectedJob?.type !== "AGENT_RUN"
             ? {
-                content: "Confirm & apply changes",
+                content:
+                  selectedJob?.type === "IMPORT" ? "Confirm & import to Shopify" : "Confirm & apply changes",
                 onAction: () => selectedJob && handleApprove(selectedJob.id),
                 loading: approveLoading,
                 disabled: approveLoading,
@@ -2017,8 +2072,13 @@ export function Dashboard() {
               selectedJob?.type !== "BACKUP" &&
               selectedJob?.type !== "AGENT_RUN" && (
               <Banner tone="warning">
-                Nothing is changed in your Shopify store until you click <strong>Confirm & apply changes</strong>.
-                Review every row below before confirming.
+                {selectedJob?.type === "IMPORT"
+                  ? "Nothing is created in Shopify until you click "
+                  : "Nothing is changed in your Shopify store until you click "}
+                <strong>
+                  {selectedJob?.type === "IMPORT" ? "Confirm & import to Shopify" : "Confirm & apply changes"}
+                </strong>
+                . Review every row below before confirming.
               </Banner>
             )}
             <DiffPreviewPanel
