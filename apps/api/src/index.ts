@@ -35,21 +35,23 @@ app.use(cors({ origin: true, credentials: true }));
 // Shopify webhooks need raw body for HMAC — register before json parser on webhook route only
 app.post(
   "/webhooks/shopify",
-  express.raw({ type: "application/json" }),
+  express.text({ type: "*/*" }),
   async (req, res) => {
-    const topic = (req.headers["x-shopify-topic"] as string) ?? "";
-    const shop = (req.headers["x-shopify-shop-domain"] as string) ?? "";
+    const rawBody = typeof req.body === "string" ? req.body : String(req.body ?? "");
 
     try {
-      const rawBody = (req.body as Buffer).toString("utf8");
-      const valid = await shopify.webhooks.validate({
+      const validation = await shopify.webhooks.validate({
         rawBody,
         rawRequest: req,
+        rawResponse: res,
       });
-      if (!valid) {
-        res.status(401).send("Invalid webhook signature");
+      if (!validation.valid) {
+        res.status(401).send("Unauthorized");
         return;
       }
+
+      const topic = validation.topic ?? (req.headers["x-shopify-topic"] as string) ?? "";
+      const shop = validation.domain ?? (req.headers["x-shopify-shop-domain"] as string) ?? "";
 
       const payload = JSON.parse(rawBody) as Record<string, unknown>;
       if (
