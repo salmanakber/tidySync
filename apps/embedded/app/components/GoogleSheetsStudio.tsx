@@ -44,6 +44,8 @@ const SYNC_MODE_OPTIONS = [
 
 const SHEET_URL_HELP =
   "Share → General access: Anyone with the link → Viewer. Open the tab you want to sync and paste the full URL from your browser (include #gid=…). Test in a private window — it must open without signing into Google.";
+
+const SCHEDULE_OPTIONS = [
   { label: "Every 6 hours", value: "every 6h" },
   { label: "Every 12 hours", value: "every 12h" },
   { label: "Daily", value: "daily" },
