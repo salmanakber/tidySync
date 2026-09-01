@@ -1011,6 +1011,7 @@ export const extensionResolvers = {
         ...(prev ?? {}),
         spreadsheetId: parsed.spreadsheetId,
         sheetGid: parsed.gid,
+        published: parsed.published ?? false,
         sheetName: args.sheetName ?? prev?.sheetName ?? "Sheet1",
         direction: "import",
       };
@@ -1051,7 +1052,10 @@ export const extensionResolvers = {
         return feedJob;
       }
 
-      const downloaded = await downloadGoogleSheetCsv(config.spreadsheetId, config.sheetGid);
+      const downloaded = await downloadGoogleSheetCsv(config.spreadsheetId, config.sheetGid, {
+        published: config.published,
+        sheetName: config.sheetName,
+      });
 
       const syncJob = await prisma.job.create({
         data: {

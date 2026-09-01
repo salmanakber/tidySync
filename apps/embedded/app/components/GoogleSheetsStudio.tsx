@@ -42,7 +42,8 @@ const SYNC_MODE_OPTIONS = [
   { label: "Upsert (update + create new)", value: "upsert" },
 ];
 
-const SCHEDULE_OPTIONS = [
+const SHEET_URL_HELP =
+  "Share → General access: Anyone with the link → Viewer. Open the tab you want to sync and paste the full URL from your browser (include #gid=…). Test in a private window — it must open without signing into Google.";
   { label: "Every 6 hours", value: "every 6h" },
   { label: "Every 12 hours", value: "every 12h" },
   { label: "Daily", value: "daily" },
@@ -286,7 +287,7 @@ export function GoogleSheetsStudio({
               value={sheetUrl}
               onChange={setSheetUrl}
               placeholder="https://docs.google.com/spreadsheets/d/…"
-              helpText='Share as "Anyone with the link → Viewer"'
+              helpText={SHEET_URL_HELP}
               autoComplete="off"
             />
             <div className="tidysync-sheets-connect-row">
@@ -372,6 +373,7 @@ export function GoogleSheetsStudio({
               value={sheetUrl}
               onChange={setSheetUrl}
               placeholder="https://docs.google.com/spreadsheets/d/…"
+              helpText={SHEET_URL_HELP}
               autoComplete="off"
             />
             <TextField label="Sheet label" value={sheetName} onChange={setSheetName} autoComplete="off" />

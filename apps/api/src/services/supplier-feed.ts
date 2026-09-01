@@ -29,7 +29,10 @@ export async function enqueueSupplierFeedSync(
     throw new Error("Set sync mode to update by SKU, barcode, or upsert for live feed sync.");
   }
 
-  const downloaded = await downloadGoogleSheetCsv(config.spreadsheetId, config.sheetGid);
+  const downloaded = await downloadGoogleSheetCsv(config.spreadsheetId, config.sheetGid, {
+    published: config.published,
+    sheetName: config.sheetName,
+  });
   const matchField: FeedMatchField =
     config.matchField ??
     (syncMode === "update_by_barcode" ? "variants.barcode" : "variants.sku");
