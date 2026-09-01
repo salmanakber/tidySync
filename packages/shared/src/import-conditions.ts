@@ -120,12 +120,110 @@ export function applyImportConditions(
   return { mapped: out, skipped: false, applied };
 }
 
+export const IMPORT_CONDITION_OPERATORS: Array<{
+  label: string;
+  value: ImportConditionOperator;
+  numeric?: boolean;
+}> = [
+  { label: "equals", value: "eq" },
+  { label: "contains", value: "contains" },
+  { label: "is greater than", value: "gt", numeric: true },
+  { label: "is less than", value: "lt", numeric: true },
+  { label: "is at least", value: "gte", numeric: true },
+  { label: "is at most", value: "lte", numeric: true },
+];
+
+export const IMPORT_CONDITION_ACTIONS: Array<{
+  label: string;
+  value: ImportConditionAction;
+  needsValue?: boolean;
+  valueLabel?: string;
+  valuePlaceholder?: string;
+  needsField?: boolean;
+}> = [
+  {
+    label: "Multiply price by",
+    value: "multiply_price",
+    needsValue: true,
+    valueLabel: "Multiplier",
+    valuePlaceholder: "0.9 for 10% off, 1.1 for 10% increase",
+  },
+  {
+    label: "Add to price",
+    value: "add_price",
+    needsValue: true,
+    valueLabel: "Amount",
+    valuePlaceholder: "e.g. 5 or -2",
+  },
+  {
+    label: "Set price to",
+    value: "set_price",
+    needsValue: true,
+    valueLabel: "Price",
+    valuePlaceholder: "e.g. 29.99",
+  },
+  {
+    label: "Set compare-at price (% above price)",
+    value: "set_compare_at_percent",
+    needsValue: true,
+    valueLabel: "Percent",
+    valuePlaceholder: "e.g. 15",
+  },
+  {
+    label: "Set field value",
+    value: "set_field",
+    needsValue: true,
+    needsField: true,
+    valueLabel: "New value",
+    valuePlaceholder: "Value to apply",
+  },
+  {
+    label: "Add tag",
+    value: "add_tag",
+    needsValue: true,
+    valueLabel: "Tag",
+    valuePlaceholder: "e.g. promo, clearance",
+  },
+  { label: "Skip row (do not import)", value: "skip_row" },
+];
+
+const FIELD_LABELS: Record<string, string> = {
+  title: "Title",
+  descriptionHtml: "Description",
+  vendor: "Vendor / brand",
+  productType: "Product type",
+  tags: "Tags",
+  status: "Status",
+  "variants.sku": "SKU",
+  "variants.price": "Price",
+  "variants.compareAtPrice": "Compare-at price",
+  "variants.inventoryQuantity": "Inventory",
+  "variants.barcode": "Barcode",
+  images: "Images",
+};
+
+export function describeImportCondition(cond: ImportCondition): string {
+  const fieldLabel = FIELD_LABELS[cond.field] ?? cond.field;
+  const op =
+    IMPORT_CONDITION_OPERATORS.find((o) => o.value === cond.operator)?.label ?? cond.operator;
+  const act = IMPORT_CONDITION_ACTIONS.find((a) => a.value === cond.action);
+  let actionPart = act?.label ?? cond.action;
+  if (cond.action !== "skip_row" && cond.actionValue != null && cond.actionValue !== "") {
+    actionPart += ` ${cond.actionValue}`;
+  }
+  if (cond.action === "set_field" && cond.actionField) {
+    const af = FIELD_LABELS[cond.actionField] ?? cond.actionField;
+    actionPart += ` on ${af}`;
+  }
+  return `If ${fieldLabel} ${op} “${cond.value}” → ${actionPart}`;
+}
+
 export const IMPORT_CONDITION_PRESETS: Array<{
   label: string;
   condition: Omit<ImportCondition, "id">;
 }> = [
   {
-    label: "Brand Nike → 10% off price",
+    label: "Example: vendor Nike → 10% off price",
     condition: {
       field: "vendor",
       operator: "eq",
@@ -136,7 +234,7 @@ export const IMPORT_CONDITION_PRESETS: Array<{
     },
   },
   {
-    label: "Brand contains Sale → add tag",
+    label: "Example: tags contain Sale → add tag",
     condition: {
       field: "tags",
       operator: "contains",
@@ -147,7 +245,7 @@ export const IMPORT_CONDITION_PRESETS: Array<{
     },
   },
   {
-    label: "Price over $100 → +15% compare-at",
+    label: "Example: price over $100 → +15% compare-at",
     condition: {
       field: "variants.price",
       operator: "gt",

@@ -12,15 +12,15 @@ import {
   Badge,
   ProgressBar,
 } from "@shopify/polaris";
-import { gqlRequest, MUTATIONS } from "../lib/graphql";
+import { gqlRequest, MUTATIONS, QUERIES } from "../lib/graphql";
 import {
   IMPORT_REQUIRED_BY_RESOURCE,
   isFieldMapped,
   validateImportMappings,
-  IMPORT_CONDITION_PRESETS,
   type ImportDefaults,
   type ImportCondition,
 } from "@tidysync/shared/import-settings";
+import { ImportConditionBuilder } from "./ImportConditionBuilder";
 
 interface MappingRow {
   sourceColumn: string;
@@ -149,6 +149,7 @@ export function MappingEditor({
   >([]);
   const [polishing, setPolishing] = useState(false);
   const [conditions, setConditions] = useState<ImportCondition[]>([]);
+  const [previewRows, setPreviewRows] = useState<Array<Record<string, unknown>>>([]);
   const targetOptions = targetsForResource(resourceType);
   const requiredFields = IMPORT_REQUIRED_BY_RESOURCE[resourceType] ?? IMPORT_REQUIRED_BY_RESOURCE.products;
 
@@ -197,6 +198,43 @@ export function MappingEditor({
       cancelled = true;
     };
   }, [jobId, platformKey, shop, initialMappings.length]);
+
+  useEffect(() => {
+    let cancelled = false;
+    gqlRequest<{
+      job: { diffPreview?: { previewRows?: Array<Record<string, unknown>> } };
+    }>(QUERIES.job, { id: jobId }, shop)
+      .then((data) => {
+        if (!cancelled && data.job?.diffPreview?.previewRows) {
+          setPreviewRows(data.job.diffPreview.previewRows);
+        }
+      })
+      .catch(() => {
+        /* optional sample data */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId, shop]);
+
+  const conditionFieldOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return mappings
+      .filter((m) => m.targetField)
+      .filter((m) => {
+        if (seen.has(m.targetField)) return false;
+        seen.add(m.targetField);
+        return true;
+      })
+      .map((m) => {
+        const targetLabel =
+          targetOptions.find((t) => t.value === m.targetField)?.label ?? m.targetField;
+        return {
+          label: `${targetLabel} ← ${m.sourceColumn}`,
+          value: m.targetField,
+        };
+      });
+  }, [mappings, targetOptions]);
 
   const stats = useMemo(() => {
     const matched = mappings.filter((m) => m.targetField).length;
@@ -441,47 +479,13 @@ export function MappingEditor({
       )}
 
       {resourceType === "products" && (
-        <div className="tidysync-mapping-conditions">
-          <Text as="h4" variant="headingSm">Conditional import rules</Text>
-          <Text as="p" variant="bodySm" tone="subdued">
-            Apply actions when row data matches — e.g. if vendor equals Nike, reduce price 10%.
-          </Text>
-          <div className="tidysync-condition-presets">
-            {IMPORT_CONDITION_PRESETS.map((preset) => (
-              <button
-                key={preset.label}
-                type="button"
-                className="tidysync-chip"
-                onClick={() =>
-                  setConditions((prev) => [
-                    ...prev,
-                    { ...preset.condition, id: `cond-${Date.now()}-${prev.length}` },
-                  ])
-                }
-              >
-                + {preset.label}
-              </button>
-            ))}
-          </div>
-          {conditions.length > 0 && (
-            <BlockStack gap="200">
-              {conditions.map((c) => (
-                <div key={c.id} className="tidysync-condition-card">
-                  <Text as="p" variant="bodySm" fontWeight="semibold">
-                    {c.label ?? `${c.field} ${c.operator} ${c.value}`}
-                  </Text>
-                  <Text as="p" variant="bodySm" tone="subdued">Action: {c.action}</Text>
-                  <Button
-                    size="slim"
-                    onClick={() => setConditions((prev) => prev.filter((x) => x.id !== c.id))}
-                  >
-                    Remove
-                  </Button>
-                </div>
-              ))}
-            </BlockStack>
-          )}
-        </div>
+        <ImportConditionBuilder
+          mappings={mappings}
+          fieldOptions={conditionFieldOptions}
+          previewRows={previewRows}
+          conditions={conditions}
+          onChange={setConditions}
+        />
       )}
 
       {resourceType === "products" && (

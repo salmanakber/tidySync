@@ -3353,6 +3353,68 @@ body {
   margin: 12px 0;
 }
 
+.tidysync-condition-builder {
+  margin-top: 14px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #e1e3e5;
+  border-radius: 12px;
+}
+
+.tidysync-condition-builder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.tidysync-condition-builder-actions {
+  margin-top: 12px;
+}
+
+.tidysync-condition-value-field {
+  grid-column: 1 / -1;
+}
+
+.tidysync-condition-samples {
+  margin-top: 8px;
+}
+
+.tidysync-condition-samples-label {
+  display: block;
+  font-size: 12px;
+  color: #6d7175;
+  margin-bottom: 6px;
+}
+
+.tidysync-condition-samples-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tidysync-chip-sm {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.tidysync-condition-examples {
+  margin-top: 16px;
+}
+
+.tidysync-condition-examples-toggle {
+  background: none;
+  border: none;
+  color: #2c6ecb;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.tidysync-condition-examples-toggle:hover {
+  color: #1a5bb8;
+}
+
 .tidysync-condition-card {
   padding: 12px;
   background: #fff;

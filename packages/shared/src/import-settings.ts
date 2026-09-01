@@ -28,6 +28,9 @@ export interface ImportMutationPlan {
 
 export {
   applyImportConditions,
+  describeImportCondition,
+  IMPORT_CONDITION_ACTIONS,
+  IMPORT_CONDITION_OPERATORS,
   IMPORT_CONDITION_PRESETS,
   type ImportCondition,
   type ImportConditionAction,
