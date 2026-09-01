@@ -33,7 +33,9 @@ export function DuplicateStudio({ shop, onUpgrade, onApprove }: DuplicateStudioP
   const [groups, setGroups] = useState<DuplicateGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [mergingGroupId, setMergingGroupId] = useState<string | null>(null);
+  const [bulkMerging, setBulkMerging] = useState(false);
   const [primaryByGroup, setPrimaryByGroup] = useState<Record<string, string>>({});
+  const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [errorAlert, setErrorAlert] = useState<ReturnType<typeof alertFromError> | null>(null);
 
   const load = useCallback(async () => {
@@ -46,10 +48,13 @@ export function DuplicateStudio({ shop, onUpgrade, onApprove }: DuplicateStudioP
       );
       setGroups(data.findDuplicateProducts);
       const defaults: Record<string, string> = {};
+      const selected = new Set<string>();
       for (const g of data.findDuplicateProducts) {
         defaults[g.id] = g.products[0]?.id ?? "";
+        selected.add(g.id);
       }
       setPrimaryByGroup(defaults);
+      setSelectedGroups(selected);
       setErrorAlert(null);
     } catch (e) {
       setErrorAlert(alertFromError(e, onUpgrade));
@@ -84,7 +89,51 @@ export function DuplicateStudio({ shop, onUpgrade, onApprove }: DuplicateStudioP
     }
   };
 
+  const mergeSelectedGroups = async () => {
+    const merges = groups
+      .filter((g) => selectedGroups.has(g.id))
+      .map((g) => {
+        const primaryId = primaryByGroup[g.id];
+        const duplicateIds = g.products.map((p) => p.id).filter((id) => id !== primaryId);
+        return { primaryProductId: primaryId, duplicateProductIds: duplicateIds };
+      })
+      .filter((m) => m.primaryProductId && m.duplicateProductIds.length > 0);
+
+    if (!merges.length) {
+      setErrorAlert({
+        tone: "warning",
+        message: "Select at least one group with duplicates to merge.",
+      });
+      return;
+    }
+
+    setBulkMerging(true);
+    setErrorAlert(null);
+    try {
+      const data = await gqlRequest<{ previewBulkMergeProducts: { id: string } }>(
+        MUTATIONS.previewBulkMergeProducts,
+        { merges },
+        shop,
+      );
+      if (onApprove) onApprove(data.previewBulkMergeProducts.id);
+    } catch (e) {
+      setErrorAlert(alertFromError(e, onUpgrade));
+    } finally {
+      setBulkMerging(false);
+    }
+  };
+
+  const toggleGroupSelection = (groupId: string) => {
+    setSelectedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  };
+
   const totalDuplicates = groups.reduce((sum, g) => sum + g.products.length - 1, 0);
+  const selectedCount = groups.filter((g) => selectedGroups.has(g.id)).length;
 
   return (
     <div className="tidysync-studio tidysync-duplicates">
@@ -130,6 +179,16 @@ export function DuplicateStudio({ shop, onUpgrade, onApprove }: DuplicateStudioP
         <Button icon={RefreshIcon} onClick={() => load()} loading={loading}>
           Scan again
         </Button>
+        {groups.length > 1 && (
+          <Button
+            variant="primary"
+            onClick={() => mergeSelectedGroups()}
+            loading={bulkMerging}
+            disabled={mergingGroupId != null || selectedCount === 0}
+          >
+            Bulk merge {String(selectedCount)} group{selectedCount === 1 ? "" : "s"}
+          </Button>
+        )}
       </div>
 
       {loading ? (
@@ -150,16 +209,28 @@ export function DuplicateStudio({ shop, onUpgrade, onApprove }: DuplicateStudioP
           {groups.map((group) => (
             <article key={group.id} className="tidysync-duplicate-group">
               <header className="tidysync-duplicate-group-head">
-                <div>
-                  <span className="tidysync-duplicate-reason">{group.reason}</span>
-                  <h4>{group.matchKey.slice(0, 80)}{group.matchKey.length > 80 ? "…" : ""}</h4>
-                  <p>{group.products.length} listings · click a product to set as primary</p>
+                <div className="tidysync-duplicate-group-head-left">
+                  {groups.length > 1 && (
+                    <label className="tidysync-duplicate-bulk-check">
+                      <input
+                        type="checkbox"
+                        checked={selectedGroups.has(group.id)}
+                        onChange={() => toggleGroupSelection(group.id)}
+                      />
+                      <span>Bulk merge</span>
+                    </label>
+                  )}
+                  <div>
+                    <span className="tidysync-duplicate-reason">{group.reason}</span>
+                    <h4>{group.matchKey.slice(0, 80)}{group.matchKey.length > 80 ? "…" : ""}</h4>
+                    <p>{group.products.length} listings · click a product to set as primary</p>
+                  </div>
                 </div>
                 <Button
                   variant="primary"
                   onClick={() => mergeGroup(group)}
                   loading={mergingGroupId === group.id}
-                  disabled={mergingGroupId != null && mergingGroupId !== group.id}
+                  disabled={bulkMerging || (mergingGroupId != null && mergingGroupId !== group.id)}
                 >
                   Preview merge
                 </Button>

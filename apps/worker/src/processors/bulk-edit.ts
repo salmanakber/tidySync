@@ -279,7 +279,17 @@ export async function processBulkEditJob(jobId: string, tenantId: string, shop: 
   const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job?.mutationPlan) throw new Error("Bulk edit job missing plan");
 
-  const planRoot = job.mutationPlan as { action?: string; primaryProductId?: string; duplicateProductIds?: string[] };
+  const planRoot = job.mutationPlan as {
+    action?: string;
+    primaryProductId?: string;
+    duplicateProductIds?: string[];
+    merges?: Array<{ primaryProductId: string; duplicateProductIds: string[] }>;
+  };
+  if (planRoot.action === "bulk_merge_products" && planRoot.merges?.length) {
+    const { processBulkProductMergeJob } = await import("./product-merge");
+    await processBulkProductMergeJob(jobId, tenantId, shop, planRoot.merges);
+    return;
+  }
   if (planRoot.action === "merge_products" && planRoot.primaryProductId && planRoot.duplicateProductIds) {
     const { processProductMergeJob } = await import("./product-merge");
     await processProductMergeJob(

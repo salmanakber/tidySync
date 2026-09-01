@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Icon, Spinner } from "@shopify/polaris";
-import { AutomationIcon, MagicIcon, AlertTriangleIcon, ProductIcon } from "@shopify/polaris-icons";
+import { AutomationIcon, AlertTriangleIcon, ProductIcon } from "@shopify/polaris-icons";
 import { gqlRequest, QUERIES, MUTATIONS } from "../lib/graphql";
 import { alertFromError } from "../lib/graphql-errors";
 import { AppAlert } from "./AppAlert";
 import { DiffPreviewPanel } from "./DiffPreviewPanel";
+import { ProductMentionTextarea } from "./ProductMentionTextarea";
 
 interface AgentStatus {
   enabled: boolean;
@@ -81,6 +82,7 @@ interface AgentStudioProps {
     },
   ) => void;
   onFixPreview?: (job: AgentJob) => void;
+  onGoToBackups?: () => void;
   /** When set, auto-runs the Improve product SEO mission once */
   autoStartSeo?: boolean;
   onAutoStartSeoConsumed?: () => void;
@@ -105,13 +107,13 @@ const QUICK_ACTIONS = [
     tone: "seo",
   },
   {
-    id: "backup",
-    label: "Snapshot catalog",
-    desc: "Agent mission · catalog backup",
-    prompt: "Create a full catalog backup before I make changes",
+    id: "descriptions",
+    label: "Polish thin descriptions",
+    desc: "Agent mission · richer product copy",
+    prompt: "Find products with thin descriptions and draft richer product copy I can review",
     mode: "agent" as const,
-    icon: MagicIcon,
-    tone: "vault",
+    icon: ProductIcon,
+    tone: "seo",
   },
   {
     id: "price",
@@ -146,6 +148,7 @@ export function AgentStudio({
   onUpgrade,
   onJobStarted,
   onFixPreview,
+  onGoToBackups,
   autoStartSeo,
   onAutoStartSeoConsumed,
 }: AgentStudioProps) {
@@ -209,12 +212,6 @@ export function AgentStudio({
           if (previewId) {
             const preview = await gqlRequest<{ job: AgentJob }>(QUERIES.job, { id: previewId }, shop);
             setPreviewJob(preview.job);
-            if (preview.job?.type === "BACKUP" && onJobStarted) {
-              onJobStarted(previewId, {
-                rowCount: preview.job.rowCount,
-                kind: "backup",
-              });
-            }
           }
           void loadStatus();
         }
@@ -443,14 +440,15 @@ export function AgentStudio({
           Agent command (multi-step mission)
         </label>
         <div className="tidysync-agent-pro-composer-box">
-          <textarea
+          <ProductMentionTextarea
+            shop={shop}
             id="agent-prompt"
-            className="tidysync-agent-pro-input"
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Describe a complex mission — e.g. Scan my store, fix SEO on worst products, then snapshot the catalog"
+            onChange={setPrompt}
+            placeholder="Describe a mission — e.g. Scan my store, polish thin descriptions, or improve SEO for @Product Name"
             rows={4}
             disabled={loading}
+            hint="Type @ to mention a product by name"
           />
           <div className="tidysync-agent-pro-composer-footer">
             <span className="tidysync-agent-pro-hint">Uses 1 agent run · Runs in background · Approve changes before apply</span>
@@ -580,6 +578,11 @@ export function AgentStudio({
         <div className="tidysync-agent-pro-result-banner">
           <span className="tidysync-agent-pro-intent">{intent.replace(/_/g, " ")}</span>
           <p>{message}</p>
+          {intent === "CREATE_BACKUP" && onGoToBackups && (
+            <div className="tidysync-agent-pro-preview-cta">
+              <Button variant="primary" onClick={onGoToBackups}>Open Backups</Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -591,6 +594,22 @@ export function AgentStudio({
               <li key={i}>{a}</li>
             ))}
           </ol>
+        </div>
+      )}
+
+      {previewJob?.type === "BACKUP" && (
+        <div className="tidysync-agent-pro-preview">
+          <h4>Catalog snapshot</h4>
+          <p>
+            {previewJob.status === "COMPLETED"
+              ? "Your backup finished successfully. View and restore it from the Backups tab."
+              : "Your backup is still running — watch the progress bar at the top."}
+          </p>
+          {onGoToBackups && (
+            <div className="tidysync-agent-pro-preview-cta">
+              <Button onClick={onGoToBackups}>Open Backups</Button>
+            </div>
+          )}
         </div>
       )}
 

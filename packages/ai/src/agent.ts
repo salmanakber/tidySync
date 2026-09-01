@@ -4,6 +4,7 @@ import { parseNlBulkEdit } from "@tidysync/shared";
 export type AgentIntent =
   | "FIX_STORE"
   | "IMPROVE_SEO"
+  | "IMPROVE_DESCRIPTION"
   | "BULK_EDIT"
   | "CREATE_BACKUP"
   | "IMPORT_WITH_RULES"
@@ -30,7 +31,26 @@ export function detectAgentIntentRuleBased(prompt: string): AgentIntentResult {
       productFilter,
       prompt,
       confidence: 0.9,
-      suggestedActions: ["Create a full product catalog backup"],
+      suggestedActions: ["Open Backups from the sidebar", "Scan store health"],
+      modelUsed: "rule-based",
+    };
+  }
+
+  if (
+    lower.includes("thin description") ||
+    lower.includes("short description") ||
+    lower.includes("polish description") ||
+    lower.includes("improve description") ||
+    lower.includes("rewrite description") ||
+    lower.includes("better description") ||
+    (lower.includes("description") && (lower.includes("polish") || lower.includes("improve") || lower.includes("rewrite")))
+  ) {
+    return {
+      intent: "IMPROVE_DESCRIPTION",
+      productFilter,
+      prompt,
+      confidence: 0.88,
+      suggestedActions: ["Review description preview before apply", "Scan store health"],
       modelUsed: "rule-based",
     };
   }
@@ -103,7 +123,7 @@ export async function parseAgentIntent(prompt: string): Promise<AgentIntentResul
       {
         role: "system",
         content:
-          "Classify merchant intent for a Shopify ops agent. Return JSON only: { intent: FIX_STORE|IMPROVE_SEO|BULK_EDIT|CREATE_BACKUP|IMPORT_WITH_RULES|UNKNOWN, productFilter?: string, confidence: 0-1, suggestedActions: string[] }. productFilter is a product title fragment if they named a specific product.",
+          "You are a warm, helpful Shopify store teammate — friendly and clear, never robotic. Classify the merchant's request. Return JSON only: { intent: FIX_STORE|IMPROVE_SEO|IMPROVE_DESCRIPTION|BULK_EDIT|CREATE_BACKUP|IMPORT_WITH_RULES|UNKNOWN, productFilter?: string, confidence: 0-1, suggestedActions: string[] }. productFilter is a product title fragment if they named a specific product. For CREATE_BACKUP, suggest opening the Backups tab (no agent run needed). For IMPROVE_DESCRIPTION, they want richer copy for thin/short product descriptions.",
       },
       { role: "user", content: prompt },
     ],
@@ -257,4 +277,21 @@ For price changes use multiply/add/set. Always include a clear description.`,
 function lowerIncludesSeo(prompt: string): boolean {
   const lower = prompt.toLowerCase();
   return lower.includes("seo") || lower.includes("meta description");
+}
+
+export function humanizeScanSummary(scan: {
+  productCount: number;
+  overallHealthScore: number;
+  issues: Array<{ severity: string }>;
+}): string {
+  const { productCount, overallHealthScore, issues } = scan;
+  const critical = issues.filter((i) => i.severity === "critical").length;
+  const warning = issues.filter((i) => i.severity === "warning").length;
+  if (productCount === 0) {
+    return "I looked through your store but didn't find any products yet — add some and I can help polish them.";
+  }
+  if (critical === 0 && warning === 0) {
+    return `Your catalog looks solid — ${productCount} products, health score ${overallHealthScore}/100. Nothing urgent jumped out at me.`;
+  }
+  return `I reviewed ${productCount} products. ${critical} items need attention soon, plus ${warning} smaller tweaks. Overall health ${overallHealthScore}/100 — details below.`;
 }

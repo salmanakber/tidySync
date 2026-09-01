@@ -17,6 +17,8 @@ interface DiffPreviewProps {
   rows?: DiffRow[];
   failedItems?: Array<{ rowIndex: number; errorMessage?: string; autoFixSuggestion?: string }>;
   streamPlan?: boolean;
+  jobType?: string;
+  jobStatus?: string;
 }
 
 export function DiffPreviewPanel({
@@ -26,6 +28,8 @@ export function DiffPreviewPanel({
   rows = [],
   failedItems = [],
   streamPlan = true,
+  jobType,
+  jobStatus,
 }: DiffPreviewProps) {
   const [visibleSteps, setVisibleSteps] = useState(streamPlan ? 0 : steps.length);
 
@@ -109,10 +113,25 @@ export function DiffPreviewPanel({
       ))}
 
       {steps.length === 0 && rows.length === 0 && (
-        <Banner tone="warning">
-          No changes were generated for this prompt. Try something like &quot;Increase all prices by
-          10%&quot; or &quot;Add tag needs-review to products tagged Sale&quot;.
-        </Banner>
+        <>
+          {jobType === "BACKUP" && jobStatus === "COMPLETED" ? (
+            <Banner tone="success">
+              Your catalog snapshot finished successfully. Open the Backups tab to view, download, or restore this
+              snapshot anytime.
+            </Banner>
+          ) : jobType === "AGENT_RUN" && impactSummary ? (
+            <Banner tone="info">{impactSummary}</Banner>
+          ) : jobType === "BACKUP" && jobStatus === "RUNNING" ? (
+            <Banner tone="info">
+              Your catalog snapshot is still running — check the progress bar at the top of the page.
+            </Banner>
+          ) : (
+            <Banner tone="warning">
+              I didn&apos;t find any product changes to preview for this job. Try something like &quot;Increase all
+              prices by 10%&quot; or &quot;Polish thin product descriptions&quot; in the Agent tab.
+            </Banner>
+          )}
+        </>
       )}
     </BlockStack>
   );

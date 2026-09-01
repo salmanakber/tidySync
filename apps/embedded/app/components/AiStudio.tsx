@@ -1,16 +1,17 @@
 "use client";
 
-import { BlockStack, Button, InlineStack, Text, TextField } from "@shopify/polaris";
+import { BlockStack, Button, InlineStack, Text } from "@shopify/polaris";
+import { ProductMentionTextarea } from "./ProductMentionTextarea";
 
 const PROMPT_CHIPS = [
   "Increase all prices by 10%",
-  "Improve SEO and description for (product name)",
-  "Change name of abc to Premium Leather Wallet",
+  "Improve SEO and description for @",
   "Add tag needs-review to products tagged Sale",
   "Set compare-at price 20% above price",
 ];
 
 interface AiStudioProps {
+  shop: string;
   value: string;
   onChange: (value: string) => void;
   onSubmit: () => void;
@@ -20,6 +21,7 @@ interface AiStudioProps {
 }
 
 export function AiStudio({
+  shop,
   value,
   onChange,
   onSubmit,
@@ -36,22 +38,24 @@ export function AiStudio({
             Natural language bulk edit
           </Text>
           <Text as="p" variant="bodySm" tone="subdued">
-            Describe the change. We build a plan, show a full diff, and wait for your explicit confirmation before anything runs in Shopify.
+            Describe the change. Type <strong>@</strong> to pick a product name. We build a plan, show a full diff, and wait for your confirmation before anything runs.
           </Text>
         </BlockStack>
       </div>
 
-      <TextField
-        label="What should we change?"
-        labelHidden
+      <label className="tidysync-field-label" htmlFor="ai-bulk-prompt">What should we change?</label>
+      <ProductMentionTextarea
+        shop={shop}
+        id="ai-bulk-prompt"
         value={value}
         onChange={onChange}
-        placeholder="e.g. Increase all Summer Collection prices by 10%"
-        autoComplete="off"
-        multiline={4}
+        placeholder="e.g. Increase all Summer Collection prices by 10% · type @ to mention a product"
+        rows={4}
         disabled={loading}
-        error={error ?? undefined}
+        className="tidysync-ai-mention-input"
+        hint={error ? undefined : "Tip: type @ to search products by name"}
       />
+      {error ? <p className="tidysync-field-error">{error}</p> : null}
 
       <div className="tidysync-prompt-chips">
         {PROMPT_CHIPS.map((chip) => (

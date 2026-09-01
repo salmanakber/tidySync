@@ -14,6 +14,7 @@ export {
   buildSeoImprovementPlan,
   buildSeoImprovementPlanForProductIds,
   buildDescriptionRewritePlanForProductIds,
+  humanizeScanSummary,
   parseNlBulkEditWithAiEnhanced,
   type AgentIntent,
   type AgentIntentResult,

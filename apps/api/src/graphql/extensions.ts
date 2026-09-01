@@ -214,6 +214,11 @@ export const extensionTypeDefs = `#graphql
     fields: [String!]
   }
 
+  input ProductMergePairInput {
+    primaryProductId: ID!
+    duplicateProductIds: [ID!]!
+  }
+
   type AiEnvFallback {
     groq: Boolean!
     gemini: Boolean!
@@ -287,6 +292,7 @@ export const extensionTypeDefs = `#graphql
     restoreStoreBackup(id: ID!, options: RestoreOptionsInput): Job!
     fixScanIssues(category: String!, productIds: [ID!]!): Job!
     previewMergeProducts(primaryProductId: ID!, duplicateProductIds: [ID!]!): Job!
+    previewBulkMergeProducts(merges: [ProductMergePairInput!]!): Job!
     connectGoogleSheet(spreadsheetUrl: String!, sheetName: String): TenantIntegration!
     syncGoogleSheet(integrationId: ID!): Job!
     updateGoogleSheetFeed(
@@ -762,10 +768,23 @@ export const extensionResolvers = {
     },
     runAgent: async (_: unknown, args: { prompt: string }, ctx: GraphQLContext) => {
       const { tenantId, shop } = requireActiveMerchant(ctx);
-      await consumeAgentRun(tenantId, 1);
-
       const intentResult = await parseAgentIntent(args.prompt);
       const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+
+      if (intentResult.intent === "CREATE_BACKUP") {
+        return {
+          intent: intentResult.intent,
+          message:
+            "Good instinct — but catalog snapshots don't need an agent run. Open Backups from the sidebar anytime to save your catalog. I didn't charge a run for this.",
+          scan: null,
+          previewJob: null,
+          agentJobId: null,
+          agentRunsUsed: tenant?.agentRunsUsed ?? 0,
+          suggestedActions: intentResult.suggestedActions,
+        };
+      }
+
+      await consumeAgentRun(tenantId, 1);
 
       const agentJob = await prisma.job.create({
         data: {
@@ -793,7 +812,7 @@ export const extensionResolvers = {
       return {
         intent: intentResult.intent,
         message:
-          "Agent mission started — watch the thinking steps below. Long tasks run in the background via Redis.",
+          "On it — I'm reading your request and will share a clear summary here in a moment. Long steps run in the background.",
         scan: null,
         previewJob: agentJob,
         agentJobId: agentJob.id,
@@ -904,6 +923,53 @@ export const extensionResolvers = {
           diffPreview: { rows, totalChanges: duplicateIds.length } as object,
           impactSummary: `Merge ${duplicateIds.length} duplicate listing(s) into your primary product. Variants combine; duplicates are removed.`,
           rowCount: duplicateIds.length,
+        },
+        include: { lineItems: { take: 0 } },
+      });
+
+      return { ...job, lineItems: [] };
+    },
+    previewBulkMergeProducts: async (
+      _: unknown,
+      args: { merges: Array<{ primaryProductId: string; duplicateProductIds: string[] }> },
+      ctx: GraphQLContext,
+    ) => {
+      const { tenantId } = requireActiveMerchant(ctx);
+      const merges = args.merges
+        .map((m) => ({
+          primaryProductId: m.primaryProductId,
+          duplicateProductIds: m.duplicateProductIds.filter((id) => id !== m.primaryProductId),
+        }))
+        .filter((m) => m.duplicateProductIds.length > 0);
+
+      if (!merges.length) throw new Error("Select at least one duplicate group to merge");
+
+      const totalDuplicates = merges.reduce((sum, m) => sum + m.duplicateProductIds.length, 0);
+      const rows = merges.flatMap((m, gi) =>
+        m.duplicateProductIds.map((id, i) => ({
+          resourceType: "product",
+          resourceId: id,
+          productId: id,
+          resourceTitle: `Group ${gi + 1} duplicate ${i + 1}`,
+          field: "merge",
+          before: id,
+          after: `Merge into primary`,
+        })),
+      );
+
+      const job = await prisma.job.create({
+        data: {
+          tenantId,
+          type: "BULK_EDIT",
+          status: "PREVIEW",
+          nlPrompt: `Bulk merge ${totalDuplicates} duplicate(s) across ${merges.length} group(s)`,
+          mutationPlan: {
+            action: "bulk_merge_products",
+            merges,
+          } as object,
+          diffPreview: { rows, totalChanges: totalDuplicates } as object,
+          impactSummary: `Merge ${totalDuplicates} duplicate listing(s) across ${merges.length} group(s). Variants combine on each primary; duplicates are removed after approval.`,
+          rowCount: totalDuplicates,
         },
         include: { lineItems: { take: 0 } },
       });

@@ -1479,6 +1479,7 @@ export function Dashboard() {
 
                 {tab === 6 && (
                   <AiStudio
+                    shop={shop}
                     value={nlPrompt}
                     onChange={setNlPrompt}
                     onSubmit={handleNlBulkEdit}
@@ -1948,6 +1949,7 @@ export function Dashboard() {
                       setSelectedJob(job as Job);
                       setPreviewOpen(true);
                     }}
+                    onGoToBackups={() => setTab(13)}
                     autoStartSeo={agentAutoStartSeo}
                     onAutoStartSeoConsumed={() => setAgentAutoStartSeo(false)}
                   />
@@ -1972,9 +1974,17 @@ export function Dashboard() {
       <Modal
         open={previewOpen}
         onClose={() => setPreviewOpen(false)}
-        title="Review AI changes — confirmation required"
+        title={
+          selectedJob?.type === "BACKUP"
+            ? "Catalog snapshot"
+            : selectedJob?.type === "AGENT_RUN"
+              ? "Agent mission result"
+              : "Review AI changes — confirmation required"
+        }
         primaryAction={
-          selectedJob?.status === "PREVIEW"
+          selectedJob?.status === "PREVIEW" &&
+          selectedJob?.type !== "BACKUP" &&
+          selectedJob?.type !== "AGENT_RUN"
             ? {
                 content: "Confirm & apply changes",
                 onAction: () => selectedJob && handleApprove(selectedJob.id),
@@ -1984,20 +1994,32 @@ export function Dashboard() {
             : undefined
         }
         secondaryActions={[
-          {
-            content: "Cancel",
-            onAction: () => setPreviewOpen(false),
-            disabled: approveLoading,
-          },
+          selectedJob?.type === "BACKUP"
+            ? {
+                content: "Open Backups",
+                onAction: () => {
+                  setPreviewOpen(false);
+                  setTab(13);
+                },
+              }
+            : {
+                content: "Close",
+                onAction: () => setPreviewOpen(false),
+                disabled: approveLoading,
+              },
         ]}
         size="large"
       >
         <Modal.Section>
           <BlockStack gap="400">
-            <Banner tone="warning">
-              Nothing is changed in your Shopify store until you click <strong>Confirm & apply changes</strong>.
-              Review every row below before confirming.
-            </Banner>
+            {selectedJob?.status === "PREVIEW" &&
+              selectedJob?.type !== "BACKUP" &&
+              selectedJob?.type !== "AGENT_RUN" && (
+              <Banner tone="warning">
+                Nothing is changed in your Shopify store until you click <strong>Confirm & apply changes</strong>.
+                Review every row below before confirming.
+              </Banner>
+            )}
             <DiffPreviewPanel
               impactSummary={selectedJob?.impactSummary}
               anomalies={selectedJob?.diffPreview?.anomalies}
@@ -2005,6 +2027,8 @@ export function Dashboard() {
               rows={selectedJob?.diffPreview?.rows}
               failedItems={selectedJob?.lineItems?.filter((l) => l.status === "FAILED")}
               streamPlan={false}
+              jobType={selectedJob?.type}
+              jobStatus={selectedJob?.status}
             />
           </BlockStack>
         </Modal.Section>

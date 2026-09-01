@@ -1,8 +1,11 @@
-import fs from "node:fs";
-import path from "node:path";
 import { prisma } from "@tidysync/database";
-import { parseAgentIntent, buildSeoImprovementPlan, parseNlBulkEditWithAi } from "@tidysync/ai";
-import { exportQueue } from "../queues";
+import {
+  parseAgentIntent,
+  buildSeoImprovementPlan,
+  buildDescriptionRewritePlanForProductIds,
+  parseNlBulkEditWithAi,
+  humanizeScanSummary,
+} from "@tidysync/ai";
 import { buildDiffFromMutationPlan } from "../shopify-products";
 import { scanStoreInWorker } from "./agent-scan";
 
@@ -42,20 +45,6 @@ async function bumpStep(
   const updated = steps.map((s) => (s.id === stepId ? { ...s, status, detail: detail ?? s.detail } : s));
   await persistSteps(jobId, updated, stepId);
   return updated;
-}
-
-async function checkBackupAllowedWorker(tenantId: string) {
-  const tenant = await prisma.tenant.findUnique({
-    where: { id: tenantId },
-    include: { plan: true },
-  });
-  const max = tenant?.plan?.maxBackups ?? 0;
-  const count = await prisma.storeBackup.count({
-    where: { tenantId, status: { not: "DELETED" } },
-  });
-  if (count >= max) {
-    throw new Error(`Backup limit reached (${max}). Upgrade or delete an old snapshot.`);
-  }
 }
 
 async function consumeAiCreditWorker(tenantId: string, credits = 1) {
@@ -113,7 +102,7 @@ export async function processAgentRun(jobId: string, tenantId: string, shop: str
 
     if (intentResult.intent === "FIX_STORE") {
       scanResult = await scanStoreInWorker(shop, 150);
-      message = scanResult.summary;
+      message = humanizeScanSummary(scanResult);
       steps = await bumpStep(
         jobId,
         "execute",
@@ -122,23 +111,47 @@ export async function processAgentRun(jobId: string, tenantId: string, shop: str
         steps,
       );
     } else if (intentResult.intent === "CREATE_BACKUP") {
-      await checkBackupAllowedWorker(tenantId);
-      const label = `Agent backup ${new Date().toLocaleDateString()}`;
-      const backupJob = await prisma.job.create({
-        data: {
-          tenantId,
-          type: "BACKUP",
-          status: "QUEUED",
-          mutationPlan: { label, parentAgentJobId: jobId } as object,
-        },
-      });
-      await exportQueue.add("backup", { jobId: backupJob.id, tenantId, shop });
-      previewJobId = backupJob.id;
-      message = "Catalog snapshot queued — watch the live progress bar.";
-      steps = await bumpStep(jobId, "execute", "done", "Backup job queued", steps);
+      message =
+        "Catalog snapshots live in the Backups tab — open Backups from the sidebar anytime. No backup was started from this mission.";
+      steps = await bumpStep(jobId, "execute", "skipped", "Use Backups tab instead", steps);
     } else if (intentResult.intent === "IMPORT_WITH_RULES") {
-      message = "Use the Import tab with conditional rules for this workflow.";
+      message = "For conditional imports, the Import tab is the right place — upload your file and add rules there.";
       steps = await bumpStep(jobId, "execute", "skipped", "Open Import tab", steps);
+    } else if (intentResult.intent === "IMPROVE_DESCRIPTION") {
+      scanResult = await scanStoreInWorker(shop, 150);
+      const thinIds = scanResult.issues
+        .filter((i) => i.title === "Thin description" && i.productId)
+        .map((i) => i.productId!)
+        .slice(0, 50);
+      if (thinIds.length === 0) {
+        message =
+          "I looked for thin descriptions but your products already have solid copy — nice work!";
+        steps = await bumpStep(jobId, "execute", "done", "No thin descriptions found", steps);
+      } else {
+        const plan = buildDescriptionRewritePlanForProductIds(thinIds);
+        const previewJob = await prisma.job.create({
+          data: {
+            tenantId,
+            type: "BULK_EDIT",
+            status: "PREVIEW",
+            nlPrompt: job.nlPrompt,
+            isAiGenerated: true,
+            mutationPlan: { ...plan, parentAgentJobId: jobId } as object,
+          },
+        });
+        const diff = await buildDiffFromMutationPlan(shop, plan);
+        await prisma.job.update({
+          where: { id: previewJob.id },
+          data: {
+            diffPreview: diff as object,
+            impactSummary: `Richer descriptions drafted for ${diff.totalChanges} product(s).`,
+            rowCount: diff.totalChanges,
+          },
+        });
+        previewJobId = previewJob.id;
+        message = `I found ${thinIds.length} products with short descriptions and drafted richer copy — review before anything goes live.`;
+        steps = await bumpStep(jobId, "execute", "done", `${diff.totalChanges} descriptions drafted`, steps);
+      }
     } else if (intentResult.intent === "IMPROVE_SEO") {
       const plan = buildSeoImprovementPlan(intentResult.productFilter);
       const previewJob = await prisma.job.create({
@@ -161,7 +174,7 @@ export async function processAgentRun(jobId: string, tenantId: string, shop: str
         },
       });
       previewJobId = previewJob.id;
-      message = "SEO plan ready — review diffs and approve.";
+      message = "Your SEO improvements are ready — take a look at the proposed changes and approve when you're happy.";
       steps = await bumpStep(jobId, "execute", "done", `${diff.totalChanges} products in plan`, steps);
     } else {
       const parsed = await parseNlBulkEditWithAi(job.nlPrompt);
@@ -188,7 +201,7 @@ export async function processAgentRun(jobId: string, tenantId: string, shop: str
         },
       });
       previewJobId = previewJob.id;
-      message = "Bulk edit plan ready — review before apply.";
+      message = "Here's your bulk edit plan — nothing changes in Shopify until you approve.";
       steps = await bumpStep(jobId, "execute", "done", `${diff.totalChanges} proposed changes`, steps);
     }
 

@@ -406,6 +406,13 @@ export const MUTATIONS = {
       }
     }
   `,
+  previewBulkMergeProducts: `
+    mutation PreviewBulkMergeProducts($merges: [ProductMergePairInput!]!) {
+      previewBulkMergeProducts(merges: $merges) {
+        id status diffPreview impactSummary rowCount
+      }
+    }
+  `,
   connectGoogleSheet: `
     mutation ConnectGoogleSheet($spreadsheetUrl: String!, $sheetName: String) {
       connectGoogleSheet(spreadsheetUrl: $spreadsheetUrl, sheetName: $sheetName) {
