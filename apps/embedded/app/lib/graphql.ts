@@ -159,7 +159,7 @@ export const QUERIES = {
     query Jobs($limit: Int) {
       jobs(limit: $limit) {
         id type status rowCount processedCount successCount failedCount
-        impactSummary errorSummary createdAt startedAt finishedAt fileName nlPrompt
+        impactSummary errorSummary createdAt startedAt finishedAt fileName nlPrompt resourceType
       }
     }
   `,

@@ -32,7 +32,12 @@ export function AppAlert({
 }
 
 function isToastAlert(alert: AppAlertModel): boolean {
-  return alert.tone === "success" || alert.code === "JOB_SUCCESS" || alert.code === "JOB_FAILED";
+  return (
+    alert.tone === "success" ||
+    alert.code === "JOB_SUCCESS" ||
+    alert.code === "JOB_FAILED" ||
+    alert.code === "EXPORT_SUCCESS"
+  );
 }
 
 interface AppAlertStackProps {

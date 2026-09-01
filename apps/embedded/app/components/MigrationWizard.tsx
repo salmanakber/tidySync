@@ -79,7 +79,7 @@ export function MigrationWizard({
             </span>
             <h2 className="tidysync-studio-title">Move your catalog to Shopify safely</h2>
             <p className="tidysync-studio-sub">
-              WooCommerce, Amazon, Etsy, and 15+ platforms — with optional vault snapshot before anything goes live.
+              WooCommerce, Amazon, Etsy, and 15+ platforms — with optional backup snapshot before anything goes live.
             </p>
           </div>
           <div className="tidysync-studio-progress-ring">
@@ -192,7 +192,7 @@ export function MigrationWizard({
                   <Icon source={DatabaseIcon} />
                 </span>
                 <div className="tidysync-studio-option-copy">
-                  <strong>Catalog vault snapshot</strong>
+                  <strong>Catalog backup snapshot</strong>
                   <span>Full JSON backup stored in TidySync — restore with filters if needed.</span>
                 </div>
                 <div className="tidysync-studio-option-action">
@@ -276,7 +276,7 @@ export function MigrationWizard({
                   <span className="tidysync-studio-check-icon">
                     {backupCreated || skippedBackup ? "✓" : "○"}
                   </span>
-                  {backupCreated ? "Vault backup created" : "Backup skipped or pending"}
+                  {backupCreated ? "Backup created" : "Backup skipped or pending"}
                 </li>
               </ul>
             </div>

@@ -56,7 +56,7 @@ const NAV_GROUPS: Array<{ label: string; ids: string[] }> = [
   { label: "Overview", ids: ["home", "jobs"] },
   { label: "Catalog", ids: ["migrate", "import", "export", "duplicates"] },
   { label: "Intelligence", ids: ["ai", "seo", "agent"] },
-  { label: "Vault & health", ids: ["backups", "health"] },
+  { label: "Backups & health", ids: ["backups", "health"] },
   { label: "Admin", ids: ["audit", "schedules", "settings"] },
 ];
 

@@ -71,7 +71,15 @@ interface AgentStudioProps {
   shop: string;
   onApprove?: (jobId: string) => void;
   onUpgrade?: () => void;
-  onJobStarted?: (jobId: string, meta?: { isImport?: boolean; rowCount?: number }) => void;
+  onJobStarted?: (
+    jobId: string,
+    meta?: {
+      isImport?: boolean;
+      rowCount?: number;
+      kind?: "import" | "export" | "bulk" | "agent" | "backup";
+      label?: string;
+    },
+  ) => void;
   onFixPreview?: (job: AgentJob) => void;
   /** When set, auto-runs the Improve product SEO mission once */
   autoStartSeo?: boolean;
@@ -99,7 +107,7 @@ const QUICK_ACTIONS = [
   {
     id: "backup",
     label: "Snapshot catalog",
-    desc: "Agent mission · vault backup",
+    desc: "Agent mission · catalog backup",
     prompt: "Create a full catalog backup before I make changes",
     mode: "agent" as const,
     icon: MagicIcon,
@@ -202,7 +210,10 @@ export function AgentStudio({
             const preview = await gqlRequest<{ job: AgentJob }>(QUERIES.job, { id: previewId }, shop);
             setPreviewJob(preview.job);
             if (preview.job?.type === "BACKUP" && onJobStarted) {
-              onJobStarted(previewId, { rowCount: preview.job.rowCount });
+              onJobStarted(previewId, {
+                rowCount: preview.job.rowCount,
+                kind: "backup",
+              });
             }
           }
           void loadStatus();
@@ -259,8 +270,11 @@ export function AgentStudio({
       const jobId = data.runAgent.agentJobId ?? data.runAgent.previewJob?.id;
       if (jobId) {
         setAgentJob(data.runAgent.previewJob ?? { id: jobId, type: "AGENT_RUN", status: "QUEUED" });
-        if (onJobStarted) onJobStarted(jobId);
+        if (onJobStarted) {
+          onJobStarted(jobId, { kind: "agent", label: value.slice(0, 72) });
+        }
         pollAgentJob(jobId);
+        setLoading(false);
       } else {
         setLoading(false);
       }
@@ -343,7 +357,7 @@ export function AgentStudio({
   };
 
   return (
-    <div className={`tidysync-agent-pro${loading || scanLoading ? " is-running" : ""}`}>
+    <div className={`tidysync-agent-pro${scanLoading ? " is-running" : ""}`}>
       <header className="tidysync-agent-pro-hero">
         <div className="tidysync-agent-pro-hero-bg" aria-hidden="true" />
         <div className="tidysync-agent-pro-hero-inner">
@@ -454,24 +468,40 @@ export function AgentStudio({
               <span /><span /><span />
             </div>
             <div>
-              <strong>{scanLoading ? "Scanning catalog…" : "Agent is working…"}</strong>
-              <p>{scanLoading ? "Using 1 AI credit · analyzing products in Shopify" : message}</p>
+              <strong>{scanLoading ? "Scanning catalog…" : "Starting agent mission…"}</strong>
+              <p>
+                {scanLoading
+                  ? "Using 1 AI credit · analyzing products in Shopify"
+                  : "Queuing your mission — progress will appear at the top"}
+              </p>
             </div>
             <Spinner size="small" />
           </div>
-          {steps.length > 0 && (
-            <ul className="tidysync-agent-step-timeline">
-              {steps.map((step) => (
-                <li key={step.id} className={`tidysync-agent-step is-${step.status}`}>
-                  <span className="tidysync-agent-step-dot" />
-                  <div>
-                    <strong>{step.label}</strong>
-                    {step.detail && <span>{step.detail}</span>}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
+        </div>
+      )}
+
+      {agentJob &&
+        (agentJob.status === "QUEUED" || agentJob.status === "RUNNING") &&
+        steps.length > 0 && (
+        <div className="tidysync-agent-thinking-panel is-inline">
+          <div className="tidysync-agent-thinking-head">
+            <div>
+              <strong>Agent is working</strong>
+              <p>{message || "Executing steps in the background…"}</p>
+            </div>
+            <Spinner size="small" />
+          </div>
+          <ul className="tidysync-agent-step-timeline">
+            {steps.map((step) => (
+              <li key={step.id} className={`tidysync-agent-step is-${step.status}`}>
+                <span className="tidysync-agent-step-dot" />
+                <div>
+                  <strong>{step.label}</strong>
+                  {step.detail && <span>{step.detail}</span>}
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

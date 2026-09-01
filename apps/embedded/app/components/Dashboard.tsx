@@ -56,6 +56,7 @@ import { GoogleSheetsStudio } from "./GoogleSheetsStudio";
 import { MigrationWizard } from "./MigrationWizard";
 import { WorkspaceNav } from "./WorkspaceNav";
 import { LiveJobsBar } from "./LiveJobsBar";
+import { StickyJobProgress } from "./StickyJobProgress";
 import { AppAlertStack } from "./AppAlert";
 import { subscribeToJobProgress } from "../lib/job-events";
 import {
@@ -139,6 +140,7 @@ interface Job {
   finishedAt?: string;
   fileName?: string;
   nlPrompt?: string;
+  resourceType?: string;
   mutationPlan?: { steps?: Array<{ description: string }> };
   diffPreview?: {
     rows?: Array<{
@@ -205,7 +207,8 @@ export function Dashboard() {
   >([]);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [mappingOpen, setMappingOpen] = useState(false);
-  const [importProgress, setImportProgress] = useState<ImportProgressState | null>(null);
+  const [overlayProgress, setOverlayProgress] = useState<ImportProgressState | null>(null);
+  const [stickyProgress, setStickyProgress] = useState<ImportProgressState | null>(null);
   const [mappingJobId, setMappingJobId] = useState("");
   const [mappingRows, setMappingRows] = useState<
     Array<{
@@ -319,20 +322,44 @@ export function Dashboard() {
   const beginJobProgress = useCallback(
     (
       jobId: string,
-      meta: { fileName?: string; rowCount?: number; isImport?: boolean },
+      meta: {
+        fileName?: string;
+        rowCount?: number;
+        isImport?: boolean;
+        kind?: ImportProgressState["kind"];
+        label?: string;
+      },
     ) => {
       jobEventCleanupRef.current?.();
-      setImportProgress({
+      const kind =
+        meta.kind ??
+        (meta.isImport ? "import" : "bulk");
+      const defaultMessage = (() => {
+        switch (kind) {
+          case "export":
+            return "Pulling catalog data and packaging your file…";
+          case "agent":
+            return "Agent is planning and executing your mission…";
+          case "backup":
+            return "Snapshotting products to secure storage…";
+          case "bulk":
+            return "Applying your approved changes to Shopify…";
+          default:
+            return "Creating products in your Shopify store…";
+        }
+      })();
+
+      setStickyProgress({
         phase: "importing",
         jobId,
+        kind,
+        label: meta.label,
         fileName: meta.fileName,
         rowCount: meta.rowCount ?? 0,
         successCount: 0,
         failedCount: 0,
         processedCount: 0,
-        message: meta.isImport
-          ? "Creating products in your Shopify store…"
-          : "Applying your approved changes…",
+        message: defaultMessage,
       });
 
       jobEventCleanupRef.current = subscribeToJobProgress(
@@ -341,21 +368,43 @@ export function Dashboard() {
         (ev) => {
           const done = ["COMPLETED", "FAILED", "CANCELLED"].includes(ev.status);
           const rowTotal = ev.rowCount > 0 ? ev.rowCount : meta.rowCount ?? 0;
-          setImportProgress({
+          const progressMessage = (() => {
+            if (done) {
+              if (ev.status === "COMPLETED") {
+                if (kind === "export") {
+                  return "Your file is ready — download below or from Jobs.";
+                }
+                return `${ev.successCount.toLocaleString()} in Shopify · ${ev.failedCount} failed`;
+              }
+              return "Some rows could not be processed — see Jobs for details";
+            }
+            if (kind === "agent") {
+              return rowTotal > 0
+                ? `Agent working · ${ev.successCount.toLocaleString()} of ${rowTotal.toLocaleString()} steps`
+                : "Agent is working on your catalog mission…";
+            }
+            if (kind === "export") {
+              return rowTotal > 0
+                ? `Exported ${ev.successCount.toLocaleString()} of ${rowTotal.toLocaleString()} rows`
+                : "Building your export file…";
+            }
+            if (rowTotal > 0) {
+              return `${ev.successCount.toLocaleString()} of ${rowTotal.toLocaleString()} live in Shopify`;
+            }
+            return defaultMessage;
+          })();
+
+          setStickyProgress({
             phase: done ? (ev.status === "COMPLETED" ? "complete" : "failed") : "importing",
             jobId,
+            kind,
+            label: meta.label,
             fileName: meta.fileName,
             rowCount: rowTotal,
             successCount: ev.successCount,
             failedCount: ev.failedCount,
             processedCount: ev.successCount,
-            message: done
-              ? ev.status === "COMPLETED"
-                ? `${ev.successCount.toLocaleString()} in Shopify · ${ev.failedCount} failed`
-                : "Some rows could not be processed — see Jobs for details"
-              : rowTotal > 0
-                ? `${ev.successCount.toLocaleString()} of ${rowTotal.toLocaleString()} live in Shopify`
-                : `${ev.successCount.toLocaleString()} products added so far`,
+            message: progressMessage,
           });
           if (done) {
             jobEventCleanupRef.current = null;
@@ -363,18 +412,31 @@ export function Dashboard() {
               toastedJobIdsRef.current.add(jobId);
             }
             if (ev.status === "COMPLETED") {
-              pushAlert({
-                tone: "success",
-                code: "JOB_SUCCESS",
-                title: "Job completed",
-                message:
-                  ev.successCount > 0
-                    ? `${ev.successCount.toLocaleString()} items processed successfully${
-                        ev.failedCount ? ` · ${ev.failedCount} failed` : ""
-                      }`
-                    : "Your job finished successfully.",
-                autoDismissMs: 4500,
-              });
+              if (kind === "export") {
+                pushAlert({
+                  tone: "success",
+                  code: "EXPORT_SUCCESS",
+                  title: "Export ready",
+                  message:
+                    meta.label
+                      ? `${meta.label} is ready — download from Export or Jobs.`
+                      : "Your export file is ready — download from Export or Jobs.",
+                  autoDismissMs: 6000,
+                });
+              } else {
+                pushAlert({
+                  tone: "success",
+                  code: "JOB_SUCCESS",
+                  title: "Job completed",
+                  message:
+                    ev.successCount > 0
+                      ? `${ev.successCount.toLocaleString()} items processed successfully${
+                          ev.failedCount ? ` · ${ev.failedCount} failed` : ""
+                        }`
+                      : "Your job finished successfully.",
+                  autoDismissMs: 4500,
+                });
+              }
             } else if (ev.status === "FAILED") {
               pushAlert({
                 tone: "critical",
@@ -384,7 +446,7 @@ export function Dashboard() {
                 autoDismissMs: 7000,
               });
             }
-            window.setTimeout(() => setImportProgress(null), 2800);
+            window.setTimeout(() => setStickyProgress(null), 3200);
             void loadData();
           }
         },
@@ -407,8 +469,13 @@ export function Dashboard() {
   const handleExport = async () => {
     setLoading(true);
     setError(null);
+    const platformName =
+      EXPORT_PLATFORMS.find((p) => p.key === exportPlatform)?.name ?? exportPlatform;
+    const exportLabel = `${exportResourceType} → ${platformName}`;
     try {
-      await gqlRequest(
+      const result = await gqlRequest<{
+        createExportJob: { id: string; status: string; rowCount?: number; resourceType?: string };
+      }>(
         MUTATIONS.createExport,
         {
           platformKey: exportPlatform === "shopify" ? null : exportPlatform,
@@ -416,7 +483,13 @@ export function Dashboard() {
         },
         shop,
       );
-      setTab(0);
+      const job = result.createExportJob;
+      beginJobProgress(job.id, {
+        kind: "export",
+        label: exportLabel,
+        fileName: exportLabel,
+        rowCount: job.rowCount,
+      });
       await loadData();
     } catch (e) {
       showOperationalError(e, "Export failed");
@@ -425,13 +498,27 @@ export function Dashboard() {
     }
   };
 
+  const recentExports = useMemo(
+    () => jobs.filter((j) => j.type === "EXPORT").slice(0, 6),
+    [jobs],
+  );
+
+  const formatExportLabel = (job: Job) => {
+    const resource = job.resourceType ?? "products";
+    const platform =
+      job.fileName?.includes("→")
+        ? job.fileName
+        : `${resource} export`;
+    return platform;
+  };
+
   const handleImport = async (file: File) => {
     setLoading(true);
     setError(null);
-    setImportProgress({ phase: "uploading", fileName: file.name, message: "Securely uploading your catalog…" });
+    setOverlayProgress({ phase: "uploading", fileName: file.name, message: "Securely uploading your catalog…" });
     try {
       const uploaded = await uploadFile(file, shop);
-      setImportProgress({
+      setOverlayProgress({
         phase: "analyzing",
         fileName: file.name,
         message: "Detecting platform and reading columns…",
@@ -473,7 +560,7 @@ export function Dashboard() {
         setImportPlatform(detected === "unknown" ? "csv" : detected);
       }
 
-      setImportProgress({
+      setOverlayProgress({
         phase: "mapping",
         fileName: file.name,
         jobId,
@@ -483,18 +570,18 @@ export function Dashboard() {
 
       setMappingJobId(jobId);
       setMappingRows([]);
-      setImportProgress(null);
+      setOverlayProgress(null);
       setMappingOpen(true);
       await loadData();
     } catch (e) {
       const message = errorMessage(e, "Import failed");
-      setImportProgress({
+      setOverlayProgress({
         phase: "failed",
         fileName: file.name,
         message,
       });
       showOperationalError(e, "Import failed");
-      setTimeout(() => setImportProgress(null), 4500);
+      setTimeout(() => setOverlayProgress(null), 4500);
     } finally {
       setLoading(false);
     }
@@ -558,6 +645,7 @@ export function Dashboard() {
           fileName: job.fileName ?? job.nlPrompt ?? previewMeta?.fileName,
           rowCount: job.rowCount,
           isImport,
+          kind: isImport ? "import" : "bulk",
         });
         setNotice(
           isImport
@@ -622,7 +710,7 @@ export function Dashboard() {
     { id: "schedules", content: "Schedules" },
     { id: "settings", content: "Billing" },
     { id: "agent", content: "Agent" },
-    { id: "backups", content: "Vault" },
+    { id: "backups", content: "Backups" },
   ];
 
   useEffect(() => {
@@ -704,19 +792,29 @@ export function Dashboard() {
       if (toastedJobIdsRef.current.has(job.id)) continue;
       if ((was === "RUNNING" || was === "QUEUED") && job.status === "COMPLETED") {
         toastedJobIdsRef.current.add(job.id);
-        const label = job.type.replace(/_/g, " ");
-        pushAlert({
-          tone: "success",
-          code: "JOB_SUCCESS",
-          title: `${label} completed`,
-          message:
-            job.successCount > 0
-              ? `${job.successCount.toLocaleString()} ok${
-                  job.failedCount ? ` · ${job.failedCount} failed` : ""
-                }`
-              : "Finished successfully.",
-          autoDismissMs: 4500,
-        });
+        if (job.type === "EXPORT") {
+          pushAlert({
+            tone: "success",
+            code: "EXPORT_SUCCESS",
+            title: "Export ready",
+            message: "Your export file is ready — download from Export or Jobs.",
+            autoDismissMs: 6000,
+          });
+        } else {
+          const label = job.type.replace(/_/g, " ");
+          pushAlert({
+            tone: "success",
+            code: "JOB_SUCCESS",
+            title: `${label} completed`,
+            message:
+              job.successCount > 0
+                ? `${job.successCount.toLocaleString()} ok${
+                    job.failedCount ? ` · ${job.failedCount} failed` : ""
+                  }`
+                : "Finished successfully.",
+            autoDismissMs: 4500,
+          });
+        }
       } else if ((was === "RUNNING" || was === "QUEUED") && job.status === "FAILED") {
         toastedJobIdsRef.current.add(job.id);
         pushAlert({
@@ -820,7 +918,13 @@ export function Dashboard() {
       ]}
     >
       <Layout>
-        {allAlerts.some((a) => a.tone !== "success" && a.code !== "JOB_SUCCESS" && a.code !== "JOB_FAILED") && (
+        {allAlerts.some(
+          (a) =>
+            a.tone !== "success" &&
+            a.code !== "JOB_SUCCESS" &&
+            a.code !== "JOB_FAILED" &&
+            a.code !== "EXPORT_SUCCESS",
+        ) && (
           <Layout.Section>
             <AppAlertStack
               mode="banners"
@@ -833,7 +937,14 @@ export function Dashboard() {
           </Layout.Section>
         )}
 
-        {error && allAlerts.filter((a) => a.tone !== "success" && a.code !== "JOB_SUCCESS" && a.code !== "JOB_FAILED").length === 0 && (
+        {error &&
+          allAlerts.filter(
+            (a) =>
+              a.tone !== "success" &&
+              a.code !== "JOB_SUCCESS" &&
+              a.code !== "JOB_FAILED" &&
+              a.code !== "EXPORT_SUCCESS",
+          ).length === 0 && (
           <Layout.Section>
             <Banner tone="critical" onDismiss={() => setError(null)}>
               {error}
@@ -918,6 +1029,7 @@ export function Dashboard() {
               onCollapsedChange={setSidebarCollapsed}
             />
             <div className="tidysync-workspace-main">
+              {stickyProgress && <StickyJobProgress state={stickyProgress} />}
               <LiveJobsBar
                 jobs={jobs}
                 onCancel={handleCancelJob}
@@ -938,7 +1050,7 @@ export function Dashboard() {
                           </div>
                           <p className="tidysync-action-title">Migration wizard</p>
                           <p className="tidysync-action-desc">
-                            Guided move from WooCommerce, Amazon, Etsy, and more — with vault snapshot.
+                            Guided move from WooCommerce, Amazon, Etsy, and more — with backup snapshot.
                           </p>
                         </button>
                         <button type="button" className="tidysync-action-card" onClick={() => setTab(3)}>
@@ -994,7 +1106,7 @@ export function Dashboard() {
                           <div className="tidysync-action-icon">
                             <Icon source={DatabaseIcon} />
                           </div>
-                          <p className="tidysync-action-title">Catalog vault</p>
+                          <p className="tidysync-action-title">Catalog backups</p>
                           <p className="tidysync-action-desc">
                             Snapshot products before risky imports or bulk changes.
                           </p>
@@ -1206,7 +1318,7 @@ export function Dashboard() {
                       setMigrationBackupDone(true);
                     }}
                     onOpenMapping={() => setMappingOpen(true)}
-                    importProgress={importProgress}
+                    importProgress={overlayProgress}
                     mappingReady={Boolean(mappingJobId && mappingRows.some((m) => m.targetField))}
                     backupCreated={migrationBackupDone}
                     loading={loading}
@@ -1244,7 +1356,7 @@ export function Dashboard() {
                       shop={shop}
                       onUpgrade={goToBilling}
                       compact
-                      onJobStarted={(jobId) => beginJobProgress(jobId, {})}
+                      onJobStarted={(jobId) => beginJobProgress(jobId, { kind: "import" })}
                     />
                   </BlockStack>
                 )}
@@ -1254,7 +1366,7 @@ export function Dashboard() {
                     <div>
                       <p className="tidysync-section-title">Export catalog data</p>
                       <p className="tidysync-section-sub">
-                        Choose what to export and the destination format. Your file appears in Jobs when ready.
+                        Choose what to export and the destination format. Downloads appear below when ready.
                       </p>
                     </div>
 
@@ -1309,7 +1421,7 @@ export function Dashboard() {
                               exportPlatform}
                           </Text>
                           <Text as="p" variant="bodySm" tone="subdued">
-                            Large catalogs run in the background with live progress on Jobs.
+                            Large catalogs run in the background — progress stays visible at the top while you work.
                           </Text>
                         </BlockStack>
                         <Button variant="primary" icon={ExportIcon} onClick={handleExport} loading={loading}>
@@ -1317,6 +1429,43 @@ export function Dashboard() {
                         </Button>
                       </InlineStack>
                     </div>
+
+                    {recentExports.length > 0 && (
+                      <div className="tidysync-export-recent">
+                        <div className="tidysync-export-recent-head">
+                          <Text as="h3" variant="headingSm">Recent exports</Text>
+                          <Button size="slim" onClick={() => setTab(1)}>View all jobs</Button>
+                        </div>
+                        <ul className="tidysync-export-recent-list">
+                          {recentExports.map((job) => (
+                            <li key={job.id} className="tidysync-export-recent-item">
+                              <div className="tidysync-export-recent-copy">
+                                <Text as="p" variant="bodyMd" fontWeight="semibold">
+                                  {formatExportLabel(job)}
+                                </Text>
+                                <Text as="p" variant="bodySm" tone="subdued">
+                                  {new Date(job.createdAt).toLocaleString()}
+                                  {job.rowCount > 0
+                                    ? ` · ${job.successCount.toLocaleString()}/${job.rowCount.toLocaleString()} rows`
+                                    : ""}
+                                </Text>
+                              </div>
+                              <InlineStack gap="200" blockAlign="center">
+                                {statusBadge(job.status)}
+                                {job.status === "COMPLETED" && (
+                                  <Button size="slim" onClick={() => downloadExport(job.id, shop)}>
+                                    Download
+                                  </Button>
+                                )}
+                                {(job.status === "RUNNING" || job.status === "QUEUED") && (
+                                  <Badge tone="info">In progress</Badge>
+                                )}
+                              </InlineStack>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </BlockStack>
                 )}
 
@@ -1788,7 +1937,13 @@ export function Dashboard() {
                     shop={shop}
                     onUpgrade={goToBilling}
                     onApprove={(jobId) => handleApprove(jobId)}
-                    onJobStarted={(jobId, meta) => beginJobProgress(jobId, meta ?? {})}
+                    onJobStarted={(jobId, meta) =>
+                      beginJobProgress(jobId, {
+                        ...meta,
+                        kind: meta?.kind ?? "agent",
+                        label: meta?.label,
+                      })
+                    }
                     onFixPreview={(job) => {
                       setSelectedJob(job as Job);
                       setPreviewOpen(true);
@@ -1803,7 +1958,9 @@ export function Dashboard() {
                     shop={shop}
                     maxBackups={tenant?.plan?.maxBackups ?? 0}
                     onUpgrade={goToBilling}
-                    onJobStarted={(jobId, meta) => beginJobProgress(jobId, meta ?? {})}
+                    onJobStarted={(jobId, meta) =>
+                      beginJobProgress(jobId, { ...meta, kind: "backup" })
+                    }
                   />
                 )}
               </div>
@@ -1886,10 +2043,11 @@ export function Dashboard() {
         </Modal.Section>
       </Modal>
 
-      {importProgress && (
+      {overlayProgress &&
+        ["uploading", "analyzing", "mapping"].includes(overlayProgress.phase) && (
         <div className="tidysync-import-overlay" aria-modal="true">
           <div className="tidysync-import-overlay-card">
-            <ImportProgressLoader state={importProgress} />
+            <ImportProgressLoader state={overlayProgress} />
           </div>
         </div>
       )}

@@ -187,7 +187,7 @@ export function BackupStudio({ shop, maxBackups = 0, onUpgrade, onJobStarted }: 
           <div className="tidysync-vault-hero-copy">
             <span className="tidysync-vault-badge">
               <Icon source={DatabaseIcon} />
-              Catalog vault
+              Catalog backup
             </span>
             <h2 className="tidysync-vault-title">Secure product snapshots</h2>
             <p className="tidysync-vault-sub">
@@ -197,7 +197,7 @@ export function BackupStudio({ shop, maxBackups = 0, onUpgrade, onJobStarted }: 
 
           <div className="tidysync-vault-capacity">
             <div className="tidysync-vault-capacity-head">
-              <span>Vault usage</span>
+              <span>Backup usage</span>
               <strong>{backups.length} / {maxBackups}</strong>
             </div>
             <div className="tidysync-vault-capacity-track">
@@ -253,7 +253,7 @@ export function BackupStudio({ shop, maxBackups = 0, onUpgrade, onJobStarted }: 
       {loading ? (
         <div className="tidysync-vault-loading">
           <Spinner />
-          <p>Loading your vault…</p>
+          <p>Loading your backups…</p>
         </div>
       ) : backups.length === 0 ? (
         <div className="tidysync-vault-empty">

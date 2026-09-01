@@ -10,6 +10,8 @@ export type ImportLoaderPhase =
   | "complete"
   | "failed";
 
+export type JobProgressKind = "import" | "export" | "bulk" | "agent" | "backup";
+
 export interface ImportProgressState {
   phase: ImportLoaderPhase;
   fileName?: string;
@@ -19,6 +21,8 @@ export interface ImportProgressState {
   successCount?: number;
   failedCount?: number;
   message?: string;
+  kind?: JobProgressKind;
+  label?: string;
 }
 
 const PHASE_LABELS: Record<ImportLoaderPhase, string> = {
