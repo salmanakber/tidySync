@@ -44,6 +44,7 @@ import {
 import { MappingEditor } from "./MappingEditor";
 import { FileDropzone } from "./FileDropzone";
 import { AiStudio } from "./AiStudio";
+import { mentionValueToPrompt } from "./ProductMentionTextarea";
 import { DiffPreviewPanel } from "./DiffPreviewPanel";
 import { DashboardSkeleton } from "./DashboardSkeleton";
 import { PlatformPicker } from "./PlatformPicker";
@@ -602,13 +603,13 @@ export function Dashboard() {
   };
 
   const handleNlBulkEdit = async () => {
-    if (!nlPrompt.trim()) return;
+    if (!mentionValueToPrompt(nlPrompt).trim()) return;
     setAiLoading(true);
     setError(null);
     try {
       const result = await gqlRequest<{ generateNlBulkEdit: Job }>(
         MUTATIONS.nlBulkEdit,
-        { prompt: nlPrompt },
+        { prompt: mentionValueToPrompt(nlPrompt) },
         shop,
       );
       setSelectedJob(result.generateNlBulkEdit);

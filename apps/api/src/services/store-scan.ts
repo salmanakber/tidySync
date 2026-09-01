@@ -45,6 +45,15 @@ export interface StoreScanResult {
   summary: string;
 }
 
+export function countThinDescriptionIssues(issues: StoreScanIssue[]): number {
+  return issues.filter(
+    (i) =>
+      i.productId &&
+      i.category === "Catalog" &&
+      (i.title === "Thin description" || i.title === "Empty description"),
+  ).length;
+}
+
 export async function scanStoreHealth(
   shop: string,
   sessionToken?: string,
@@ -149,6 +158,17 @@ export async function scanStoreHealth(
         productId: id,
         productTitle: title,
       });
+    } else if (descriptionHtml.trim().length < 40) {
+      issues.push({
+        id: `desc-thin-${id}`,
+        severity: "warning",
+        category: "Catalog",
+        title: "Thin description",
+        detail: "Description is missing or very short.",
+        productId: id,
+        productTitle: title,
+      });
+      catalogPoints += 1;
     } else {
       catalogPoints += 1;
     }

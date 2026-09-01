@@ -7,7 +7,7 @@ import { gqlRequest, QUERIES, MUTATIONS } from "../lib/graphql";
 import { alertFromError } from "../lib/graphql-errors";
 import { AppAlert } from "./AppAlert";
 import { DiffPreviewPanel } from "./DiffPreviewPanel";
-import { ProductMentionTextarea } from "./ProductMentionTextarea";
+import { ProductMentionTextarea, mentionValueToPrompt } from "./ProductMentionTextarea";
 
 interface AgentStatus {
   enabled: boolean;
@@ -239,8 +239,9 @@ export function AgentStudio({
   };
 
   const runAgentMission = async (text?: string) => {
-    const value = (text ?? prompt).trim();
-    if (!value) return;
+    const raw = (text ?? prompt).trim();
+    const value = text ?? prompt;
+    if (!mentionValueToPrompt(raw || value).trim()) return;
     setPrompt(value);
     setLoading(true);
     setErrorAlert(null);
@@ -257,12 +258,17 @@ export function AgentStudio({
           agentJobId?: string;
           previewJob?: AgentJob;
           suggestedActions: string[];
+          scan?: StoreScanResult | null;
         };
-      }>(MUTATIONS.runAgent, { prompt: value }, shop);
+      }>(MUTATIONS.runAgent, { prompt: mentionValueToPrompt(value) }, shop);
 
       setIntent(data.runAgent.intent);
       setMessage(data.runAgent.message);
       setSuggestedActions(data.runAgent.suggestedActions);
+
+      if (data.runAgent.scan && isScanResult(data.runAgent.scan)) {
+        setScan(data.runAgent.scan);
+      }
 
       const jobId = data.runAgent.agentJobId ?? data.runAgent.previewJob?.id;
       if (jobId) {
@@ -452,7 +458,7 @@ export function AgentStudio({
           />
           <div className="tidysync-agent-pro-composer-footer">
             <span className="tidysync-agent-pro-hint">Uses 1 agent run · Runs in background · Approve changes before apply</span>
-            <Button variant="primary" onClick={() => runAgentMission()} loading={loading} disabled={!prompt.trim()}>
+            <Button variant="primary" onClick={() => runAgentMission()} loading={loading} disabled={!mentionValueToPrompt(prompt).trim()}>
               Run agent mission
             </Button>
           </div>
@@ -574,7 +580,7 @@ export function AgentStudio({
         </section>
       )}
 
-      {!scanLoading && message && !loading && intent && !scan && (
+      {!scanLoading && message && !loading && intent && (!scan || intent === "IMPROVE_DESCRIPTION" || intent === "CREATE_BACKUP") && (
         <div className="tidysync-agent-pro-result-banner">
           <span className="tidysync-agent-pro-intent">{intent.replace(/_/g, " ")}</span>
           <p>{message}</p>

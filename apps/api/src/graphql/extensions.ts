@@ -4,7 +4,7 @@ import { inferColumnMappingsWithAi, parseNlBulkEditWithAi, generateImpactSummary
 import { consumeAiCredit } from "../services/tenant";
 import { catalogScanQueue, exportQueue, bulkEditQueue, agentQueue, importQueue } from "../queues";
 import { checkBackupAllowed, consumeAgentRun, computeAgentRunsRemaining } from "../services/tenant-limits";
-import { scanStoreHealth } from "../services/store-scan";
+import { scanStoreHealth, countThinDescriptionIssues } from "../services/store-scan";
 import { findDuplicateProducts } from "../services/duplicate-products";
 import { downloadGoogleSheetCsv, parseSpreadsheetUrl, type GoogleSheetsConfig } from "../services/google-sheets";
 import { enqueueSupplierFeedSync, normalizeFeedSyncMode } from "../services/supplier-feed";
@@ -782,6 +782,23 @@ export const extensionResolvers = {
           agentRunsUsed: tenant?.agentRunsUsed ?? 0,
           suggestedActions: intentResult.suggestedActions,
         };
+      }
+
+      if (intentResult.intent === "IMPROVE_DESCRIPTION") {
+        const scan = await scanStoreHealth(shop, ctx.sessionToken, 150);
+        const thinCount = countThinDescriptionIssues(scan.issues);
+        if (thinCount === 0) {
+          return {
+            intent: intentResult.intent,
+            message:
+              "I checked your catalog and your product descriptions already look solid — nothing to polish right now. I didn't charge an agent run.",
+            scan,
+            previewJob: null,
+            agentJobId: null,
+            agentRunsUsed: tenant?.agentRunsUsed ?? 0,
+            suggestedActions: ["Scan store health", "Improve product SEO"],
+          };
+        }
       }
 
       await consumeAgentRun(tenantId, 1);
