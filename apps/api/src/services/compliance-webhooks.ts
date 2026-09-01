@@ -11,19 +11,6 @@ function shopFromPayload(shop: string, payload: CompliancePayload): string {
   return String(domain).replace(/^https?:\/\//, "").replace(/\/$/, "");
 }
 
-import { prisma, tenantRepository } from "@tidysync/database";
-
-type CompliancePayload = Record<string, unknown>;
-
-function normalizeTopic(topic: string): string {
-  return topic.toUpperCase().replace(/\//g, "_").replace(/-/g, "_");
-}
-
-function shopFromPayload(shop: string, payload: CompliancePayload): string {
-  const domain = payload.shop_domain ?? payload.shopDomain ?? shop;
-  return String(domain).replace(/^https?:\/\//, "").replace(/\/$/, "");
-}
-
 function customerFromPayload(payload: CompliancePayload): Record<string, unknown> | null {
   const raw = payload.customer;
   if (!raw || typeof raw !== "object") return null;
