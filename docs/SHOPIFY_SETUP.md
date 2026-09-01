@@ -81,6 +81,23 @@ Open Shopify Admin → Apps → TidySync. The dashboard should load inside Admin
 
 The repo includes `shopify.app.toml` — Client ID should match `SHOPIFY_API_KEY`.
 
+Mandatory **compliance webhooks** (App Store) are declared in `shopify.app.toml`:
+
+- `customers/data_request` — customer data export requests
+- `customers/redact` — delete customer data
+- `shop/redact` — delete shop data after uninstall
+
+They POST to `https://sync.tidyflowapp.com/webhooks/shopify` (same as billing webhooks).
+
+After changing `shopify.app.toml`, register with Shopify:
+
+```bash
+# From repo root, with Shopify CLI logged in
+shopify app deploy
+```
+
+Or in **Partner Dashboard → your app → Configuration → Compliance webhooks**, set the same URL if CLI deploy is not used.
+
 ## Troubleshooting
 
 | Issue | Fix |

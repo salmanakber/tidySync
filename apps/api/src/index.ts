@@ -58,6 +58,16 @@ app.post(
       ) {
         const { handleShopifyBillingWebhook } = await import("./services/billing");
         await handleShopifyBillingWebhook(topic, shop, payload);
+      } else if (
+        topic === "CUSTOMERS_DATA_REQUEST" ||
+        topic === "CUSTOMERS_REDACT" ||
+        topic === "SHOP_REDACT" ||
+        topic === "customers/data_request" ||
+        topic === "customers/redact" ||
+        topic === "shop/redact"
+      ) {
+        const { handleComplianceWebhook } = await import("./services/compliance-webhooks");
+        await handleComplianceWebhook(topic, shop, payload);
       }
 
       res.status(200).send("ok");
