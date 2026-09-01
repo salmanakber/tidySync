@@ -1,13 +1,14 @@
-import {
-  resolveAuditLogEnabled,
-  resolveAgentEnabled,
-  resolveScheduledJobs,
-  type PlanCapabilitySource,
-} from "@tidysync/shared";
+/** Client-safe plan helpers — do not import @tidysync/shared here (pulls node:fs via redis-url). */
 
-export interface TenantPlanFeatures extends PlanCapabilitySource {
+export interface TenantPlanFeatures {
   name?: string;
+  slug?: string | null;
   maxProducts?: number;
+  maxBackups?: number;
+  agentEnabled?: boolean;
+  scheduledJobs?: boolean;
+  auditLogEnabled?: boolean;
+  isFree?: boolean;
   aiCreditsRemaining?: number;
 }
 
@@ -16,6 +17,27 @@ export interface TenantPlanContext {
   billingStatus?: string;
   billingBypass?: boolean;
   plan?: TenantPlanFeatures | null;
+}
+
+function resolveAuditLogEnabled(plan?: TenantPlanFeatures | null): boolean {
+  if (!plan) return false;
+  if (plan.auditLogEnabled) return true;
+  if (!plan.isFree && plan.slug && plan.slug !== "free") return true;
+  return false;
+}
+
+function resolveAgentEnabled(plan?: TenantPlanFeatures | null): boolean {
+  if (!plan) return false;
+  if (plan.agentEnabled) return true;
+  if (plan.slug && ["starter", "growth", "advanced"].includes(plan.slug)) return true;
+  return false;
+}
+
+function resolveScheduledJobs(plan?: TenantPlanFeatures | null): boolean {
+  if (!plan) return false;
+  if (plan.scheduledJobs) return true;
+  if (!plan.isFree && plan.slug && plan.slug !== "free") return true;
+  return false;
 }
 
 export function isAgentPlanLocked(plan?: TenantPlanFeatures | null): boolean {

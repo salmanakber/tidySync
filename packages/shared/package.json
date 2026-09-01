@@ -8,13 +8,15 @@
   "typesVersions": {
     "*": {
       "file-parser": ["./dist/file-parser.d.ts"],
-      "import-settings": ["./dist/import-settings.d.ts"]
+      "import-settings": ["./dist/import-settings.d.ts"],
+      "plan-capabilities": ["./dist/plan-capabilities.d.ts"]
     }
   },
   "exports": {
     ".": "./dist/index.js",
     "./file-parser": "./dist/file-parser.js",
-    "./import-settings": "./dist/import-settings.js"
+    "./import-settings": "./dist/import-settings.js",
+    "./plan-capabilities": "./dist/plan-capabilities.js"
   },
   "scripts": {
     "build": "tsc",
