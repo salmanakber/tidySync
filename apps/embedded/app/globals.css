@@ -4314,7 +4314,7 @@ body {
 
 .tidysync-plan-gate-lock {
   position: absolute;
-  left: 50%;
+  left: 90%;
   bottom: 0;
   transform: translateX(-50%);
   width: 34px;
@@ -4331,8 +4331,8 @@ body {
 }
 
 .tidysync-plan-gate-lock svg {
-  width: 15px;
-  height: 15px;
+  width: 24px;
+  height: 18px;
   display: block;
 }
 
