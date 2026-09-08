@@ -260,7 +260,7 @@ app.get("/billing/confirm", async (req, res) => {
   }
 
   try {
-    const { confirmBillingCharge } = await import("./services/billing");
+    const { confirmBillingCharge, toShopifyBillingGid } = await import("./services/billing");
     let chargeId =
       (req.query.charge_id as string) ??
       (req.query.chargeId as string) ??
@@ -277,10 +277,22 @@ app.get("/billing/confirm", async (req, res) => {
       }
     }
 
+    // Shopify appends a numeric charge_id; GraphQL needs a GID
+    chargeId = toShopifyBillingGid(chargeId, type);
+
     const result = await confirmBillingCharge(shop, chargeId, type, planSlug, credits);
     const status = result.ok ? "success" : "declined";
-    res.redirect(`${embeddedAppUrl}?shop=${encodeURIComponent(shop)}&billing=${status}&tab=settings`);
+    const host = typeof req.query.host === "string" ? req.query.host : "";
+    const params = new URLSearchParams({
+      shop,
+      billing: status,
+      tab: "settings",
+      embedded: "1",
+    });
+    if (host) params.set("host", host);
+    res.redirect(`${embeddedAppUrl}/?${params.toString()}`);
   } catch (err) {
+    console.error("[billing/confirm]", err);
     res.status(500).send(err instanceof Error ? err.message : "Billing confirmation failed");
   }
 });

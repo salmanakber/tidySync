@@ -65,6 +65,29 @@ function returnUrl(shop: string, type: "subscription" | "onetime", chargeId: str
   return `${base}/billing/confirm?shop=${encodeURIComponent(shop)}&type=${type}&charge_id=${encodeURIComponent(chargeId)}`;
 }
 
+/**
+ * Shopify's approval redirect sends a numeric REST charge_id
+ * (e.g. 27819409547), but Admin GraphQL `node(id:)` requires a GID.
+ */
+export function toShopifyBillingGid(
+  chargeId: string,
+  type: "subscription" | "onetime",
+): string {
+  const raw = String(chargeId ?? "").trim();
+  if (!raw) return raw;
+  if (raw.startsWith("gid://")) return raw;
+  const resource = type === "subscription" ? "AppSubscription" : "AppPurchaseOneTime";
+  // Strip accidental prefixes like "AppSubscription/" if present
+  const numeric = raw.replace(/^.*\//, "");
+  return `gid://shopify/${resource}/${numeric}`;
+}
+
+function billingChargeLookupIds(chargeId: string, type: "subscription" | "onetime"): string[] {
+  const gid = toShopifyBillingGid(chargeId, type);
+  const numeric = gid.replace(/^gid:\/\/shopify\/[^/]+\//, "");
+  return [...new Set([chargeId, gid, numeric].filter(Boolean))];
+}
+
 export async function createPlanSubscription(shop: string, tenantId: string, planSlug: string) {
   const plan = await prisma.plan.findUnique({ where: { slug: planSlug } });
   if (!plan || plan.isFree) throw new Error("Invalid plan for subscription");
@@ -191,26 +214,55 @@ export async function confirmBillingCharge(
   const tenant = await tenantRepository.findByShopDomain(shop);
   if (!tenant) throw new Error("Tenant not found");
 
+  const lookupIds = billingChargeLookupIds(chargeId, type);
+  const gid = toShopifyBillingGid(chargeId, type);
+  if (!gid) {
+    throw new Error("Missing Shopify charge id on billing confirmation");
+  }
+
   const client = await getShopGraphqlClient(shop);
   let status = "PENDING";
+  let resolvedGid = gid;
 
   if (type === "subscription") {
     const response = await client.request(APP_SUBSCRIPTION_QUERY, {
-      variables: { id: chargeId },
+      variables: { id: gid },
     });
-    const node = (response.data as { node: { status: string } | null }).node;
+    const node = (response.data as { node: { id?: string; status: string } | null }).node;
     status = node?.status ?? "PENDING";
+    if (node?.id) resolvedGid = node.id;
   } else {
     const response = await client.request(APP_PURCHASE_ONE_TIME_QUERY, {
-      variables: { id: chargeId },
+      variables: { id: gid },
     });
-    const node = (response.data as { node: { status: string } | null }).node;
+    const node = (response.data as { node: { id?: string; status: string } | null }).node;
     status = node?.status ?? "PENDING";
+    if (node?.id) resolvedGid = node.id;
   }
 
-  const charge = await prisma.billingCharge.findFirst({
-    where: { shopifyChargeId: chargeId, tenantId: tenant.id },
+  // Pending rows are stored with GraphQL GIDs; Shopify redirects with numeric IDs
+  let charge = await prisma.billingCharge.findFirst({
+    where: {
+      tenantId: tenant.id,
+      OR: lookupIds.map((id) => ({ shopifyChargeId: id })),
+    },
+    orderBy: { createdAt: "desc" },
   });
+  if (!charge && type === "subscription" && planSlug) {
+    const plan = await prisma.plan.findUnique({ where: { slug: planSlug } });
+    if (plan) {
+      charge = await prisma.billingCharge.findFirst({
+        where: { tenantId: tenant.id, planId: plan.id, status: "PENDING", type: "RECURRING" },
+        orderBy: { createdAt: "desc" },
+      });
+    }
+  }
+  if (!charge && type === "onetime") {
+    charge = await prisma.billingCharge.findFirst({
+      where: { tenantId: tenant.id, status: "PENDING", type: "ONE_TIME" },
+      orderBy: { createdAt: "desc" },
+    });
+  }
 
   if (status === "ACTIVE") {
     if (type === "subscription" && planSlug) {
@@ -219,20 +271,24 @@ export async function confirmBillingCharge(
         await tenantRepository.update(tenant.id, {
           planId: plan.id,
           billingStatus: "ACTIVE",
-          shopifySubscriptionId: chargeId,
+          shopifySubscriptionId: resolvedGid,
         });
       }
       if (charge) {
         await prisma.billingCharge.update({
           where: { id: charge.id },
-          data: { status: "ACTIVE", activatedAt: new Date() },
+          data: {
+            status: "ACTIVE",
+            activatedAt: new Date(),
+            shopifyChargeId: resolvedGid,
+          },
         });
       }
       await prisma.auditLog.create({
         data: {
           tenantId: tenant.id,
           action: "billing.subscription_activated",
-          metadata: { planSlug, chargeId },
+          metadata: { planSlug, chargeId: resolvedGid },
         },
       });
     } else if (type === "onetime") {
@@ -243,14 +299,18 @@ export async function confirmBillingCharge(
       if (charge) {
         await prisma.billingCharge.update({
           where: { id: charge.id },
-          data: { status: "ACTIVE", activatedAt: new Date() },
+          data: {
+            status: "ACTIVE",
+            activatedAt: new Date(),
+            shopifyChargeId: resolvedGid,
+          },
         });
       }
       await prisma.auditLog.create({
         data: {
           tenantId: tenant.id,
           action: "billing.credits_purchased",
-          metadata: { credits: grantCredits, chargeId },
+          metadata: { credits: grantCredits, chargeId: resolvedGid },
         },
       });
     }
@@ -266,6 +326,14 @@ export async function confirmBillingCharge(
       });
     }
     return { ok: false, status: "DECLINED" };
+  }
+
+  // Shopify sometimes redirects before the charge reads as ACTIVE — sync from installation
+  if (type === "subscription") {
+    const synced = await syncActiveSubscriptionForShop(shop);
+    if (synced?.plan && synced.plan !== "free") {
+      return { ok: true, status: "ACTIVE" };
+    }
   }
 
   return { ok: false, status };
