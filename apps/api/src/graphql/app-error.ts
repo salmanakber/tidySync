@@ -7,7 +7,8 @@ export type AppErrorCode =
   | "FORBIDDEN"
   | "VALIDATION"
   | "NOT_FOUND"
-  | "BILLING_REQUIRED";
+  | "BILLING_REQUIRED"
+  | "SESSION_TOKEN_STALE";
 
 const USER_FACING_CODES = new Set<AppErrorCode>([
   "CREDIT_LIMIT",
@@ -17,6 +18,7 @@ const USER_FACING_CODES = new Set<AppErrorCode>([
   "VALIDATION",
   "NOT_FOUND",
   "BILLING_REQUIRED",
+  "SESSION_TOKEN_STALE",
 ]);
 
 export function isUserFacingErrorCode(code: string | undefined): boolean {

@@ -3,6 +3,7 @@ import cors from "cors";
 import multer from "multer";
 import path from "node:path";
 import fs from "node:fs";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createYoga } from "graphql-yoga";
 import { GraphQLError } from "graphql";
 import { maskError as yogaMaskError } from "graphql-yoga";
@@ -18,6 +19,8 @@ import { apiKeyAuth } from "./middleware/api-key";
 import { prisma, sessionRepository } from "@tidysync/database";
 import { resolveAuditLogEnabled } from "@tidysync/shared";
 import { attachUiApps } from "./ui";
+
+const expressResStore = new AsyncLocalStorage<express.Response>();
 
 const PORT = Number(process.env.PORT ?? process.env.API_PORT ?? 4000);
 const API_HOST = process.env.HOST ?? process.env.API_HOST ?? "0.0.0.0";
@@ -101,9 +104,42 @@ const yoga = createYoga({
           return error;
         }
       }
+      // Surface App Bridge retry signal as a user-facing GraphQL error
+      const original = (error as GraphQLError).originalError ?? error;
+      if (
+        original instanceof Error &&
+        (original.name === "SessionTokenStaleError" ||
+          original.message.includes("token exchange failed (400)"))
+      ) {
+        return new GraphQLError(original.message, {
+          extensions: {
+            code: "SESSION_TOKEN_STALE",
+            retrySessionToken: true,
+          },
+        });
+      }
       return yogaMaskError(error, defaultMessage, isDev);
     },
   },
+  plugins: [
+    {
+      onResultProcess({ result }) {
+        const errors = (result as { errors?: Array<{ extensions?: Record<string, unknown> }> })
+          .errors;
+        const needsRetry = errors?.some(
+          (e) =>
+            e.extensions?.code === "SESSION_TOKEN_STALE" ||
+            e.extensions?.retrySessionToken === true,
+        );
+        if (!needsRetry) return;
+        const res = expressResStore.getStore();
+        if (res) {
+          res.setHeader("X-Shopify-Retry-Invalid-Session-Request", "1");
+          res.statusCode = 401;
+        }
+      },
+    },
+  ],
 });
 
 app.get("/health", async (_req, res) => {
@@ -419,7 +455,9 @@ app.post("/internal/notify", async (req, res) => {
 });
 
 const graphqlHandler = (req: express.Request, res: express.Response) => {
-  yoga(req, res);
+  expressResStore.run(res, () => {
+    yoga(req, res);
+  });
 };
 
 app.all("/graphql", graphqlHandler);

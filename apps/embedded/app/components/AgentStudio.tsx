@@ -228,7 +228,9 @@ export function AgentStudio({
     setErrorAlert(null);
     setScan(null);
     try {
-      const data = await gqlRequest<{ scanStore: StoreScanResult }>(MUTATIONS.scanStore, {}, shop);
+      const data = await gqlRequest<{ scanStore: StoreScanResult }>(MUTATIONS.scanStore, {}, shop, {
+        forceAuthRefresh: true,
+      });
       setScan(data.scanStore);
       setMessage(data.scanStore.summary);
       setIntent("STORE_SCAN");
@@ -261,7 +263,9 @@ export function AgentStudio({
           suggestedActions: string[];
           scan?: StoreScanResult | null;
         };
-      }>(MUTATIONS.runAgent, { prompt: mentionValueToPrompt(value) }, shop);
+      }>(MUTATIONS.runAgent, { prompt: mentionValueToPrompt(value) }, shop, {
+        forceAuthRefresh: true,
+      });
 
       setIntent(data.runAgent.intent);
       setMessage(data.runAgent.message);
@@ -357,7 +361,7 @@ export function AgentStudio({
     try {
       const data = await gqlRequest<{
         fixScanIssues: AgentJob;
-      }>(MUTATIONS.fixScanIssues, { category, productIds }, shop);
+      }>(MUTATIONS.fixScanIssues, { category, productIds }, shop, { forceAuthRefresh: true });
       setPreviewJob(data.fixScanIssues);
       setMessage(`Fix plan ready — ${productIds.length} products. Review before apply.`);
       if (onFixPreview) {
@@ -475,13 +479,14 @@ export function AgentStudio({
             placeholder="Describe a mission — e.g. Scan my store, polish thin descriptions, or improve SEO for @Product Name"
             rows={4}
             disabled={loading || missionsLocked}
-            hint="Type @ to mention a product by name"
+            className="tidysync-agent-pro-input"
+            hint={undefined}
           />
           <div className="tidysync-agent-pro-composer-footer">
             <span className="tidysync-agent-pro-hint">
               {missionsLocked
                 ? "Agent missions are not on your plan — upgrade to unlock."
-                : "Uses 1 agent run · Runs in background · Approve changes before apply"}
+                : "Type @ to mention a product · Uses 1 agent run · Approve before apply"}
             </span>
             <Button
               variant="primary"

@@ -735,6 +735,12 @@ export const resolvers = {
         try {
           await ensureFreshOfflineSession(shop, ctx.sessionToken);
         } catch (err) {
+          const { isSessionTokenStaleError } = await import("../shopify/client");
+          if (isSessionTokenStaleError(err)) {
+            throw appError("SESSION_TOKEN_STALE", err instanceof Error ? err.message : "Session expired", {
+              retrySessionToken: true,
+            });
+          }
           if (!canSync && isReconnectError(err)) {
             throw appError(
               "UNAUTHORIZED",
@@ -905,9 +911,19 @@ export const resolvers = {
         include: { lineItems: { take: 0 } },
       });
 
-      const { mintWorkerAccessToken } = await import("../shopify/client");
-      const accessToken = await mintWorkerAccessToken(shop, ctx.sessionToken);
-      if (!accessToken && job.type === "BULK_EDIT") {
+      const { mintWorkerAccessToken, isSessionTokenStaleError } = await import("../shopify/client");
+      let accessToken: string | undefined;
+      try {
+        accessToken = await mintWorkerAccessToken(shop, ctx.sessionToken);
+      } catch (err) {
+        if (isSessionTokenStaleError(err)) {
+          throw appError("SESSION_TOKEN_STALE", err instanceof Error ? err.message : "Session expired", {
+            retrySessionToken: true,
+          });
+        }
+        throw err;
+      }
+      if (!accessToken && (job.type === "BULK_EDIT" || job.type === "IMPORT" || job.type === "AGENT_RUN")) {
         throw appError(
           "UNAUTHORIZED",
           "Your Shopify connection expired. Click Connect to re-authorize TidySync, then approve again.",

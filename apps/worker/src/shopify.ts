@@ -76,7 +76,10 @@ export async function getShopGraphqlClient(shop: string) {
       return new shopify.clients.Graphql({ session });
     }
     console.warn(
-      `[shopify-worker] job payload token failed probe for ${shop}; falling back to DB offline session`,
+      `[shopify-worker] job payload token failed probe for ${shop} — not falling back to stale DB token`,
+    );
+    throw new Error(
+      `RECONNECT_REQUIRED: Fresh Shopify token was rejected. Open TidySync from Admin, click Connect, then approve again.`,
     );
   }
 

@@ -20,6 +20,7 @@ import {
 import { parseFileHeaders } from "../services/file-parser";
 import { parseFilePreview } from "../services/file-parser";
 import { merchantGraphqlRequest } from "../shopify/client";
+import { appError } from "./app-error";
 import {
   analyzeProductSeoMetrics,
   applyProductSeoToShopify,
@@ -860,10 +861,22 @@ export const extensionResolvers = {
       });
 
       const { withWorkerAccessToken } = await import("../queues/with-worker-token");
-      await agentQueue.add(
-        "agent-run",
-        await withWorkerAccessToken({ jobId: agentJob.id, tenantId, shop }, ctx.sessionToken),
-      );
+      const { isSessionTokenStaleError } = await import("../shopify/client");
+      let agentPayload;
+      try {
+        agentPayload = await withWorkerAccessToken(
+          { jobId: agentJob.id, tenantId, shop },
+          ctx.sessionToken,
+        );
+      } catch (err) {
+        if (isSessionTokenStaleError(err)) {
+          throw appError("SESSION_TOKEN_STALE", err instanceof Error ? err.message : "Session expired", {
+            retrySessionToken: true,
+          });
+        }
+        throw err;
+      }
+      await agentQueue.add("agent-run", agentPayload);
 
       return {
         intent: intentResult.intent,

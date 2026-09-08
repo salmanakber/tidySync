@@ -20,9 +20,10 @@ function jwtExpiresAtMs(token: string): number | null {
   }
 }
 
-function isTokenFresh(token: string, skewMs = 30_000): boolean {
+/** ID tokens live ~60s — only reuse with a small skew so we never send near-expired tokens. */
+function isTokenFresh(token: string, skewMs = 12_000): boolean {
   const exp = jwtExpiresAtMs(token);
-  if (!exp) return true;
+  if (!exp) return false;
   return Date.now() < exp - skewMs;
 }
 
@@ -31,8 +32,9 @@ export function clearSessionTokenCache(): void {
 }
 
 /**
- * Return a valid App Bridge session token, refreshing when missing or expired.
- * On full page reload the cache is empty; we always fetch from App Bridge once.
+ * Return a valid App Bridge session token.
+ * Shopify docs: fetch a fresh ID token on each request rather than caching long-lived.
+ * We only reuse for ~few seconds within the same burst to avoid hammering App Bridge.
  */
 export async function getAuthSessionToken(forceRefresh = false): Promise<string | null> {
   const now = Date.now();
@@ -47,9 +49,11 @@ export async function getAuthSessionToken(forceRefresh = false): Promise<string 
   if (!token) return null;
 
   const jwtExp = jwtExpiresAtMs(token);
+  // Cap cache to 8s — never hold an ID token near its Shopify expiry
+  const hardCap = now + 8_000;
   cachedSessionToken = {
     value: token,
-    expiresAt: jwtExp ? jwtExp - 30_000 : now + 50_000,
+    expiresAt: jwtExp ? Math.min(jwtExp - 12_000, hardCap) : hardCap,
   };
   return token;
 }

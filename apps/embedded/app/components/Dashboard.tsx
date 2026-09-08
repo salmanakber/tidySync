@@ -401,6 +401,13 @@ export function Dashboard() {
         message: defaultMessage,
       });
 
+      // Keep the live progress strip visible when a job is queued
+      window.requestAnimationFrame(() => {
+        document
+          .querySelector(".tidysync-sticky-progress")
+          ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      });
+
       jobEventCleanupRef.current = subscribeToJobProgress(
         jobId,
         shop,
@@ -680,6 +687,7 @@ export function Dashboard() {
         MUTATIONS.nlBulkEdit,
         { prompt: mentionValueToPrompt(nlPrompt) },
         shop,
+        { forceAuthRefresh: true },
       );
       setSelectedJob(result.generateNlBulkEdit);
       setPreviewOpen(true);
@@ -711,15 +719,46 @@ export function Dashboard() {
     setSelectedJob(null);
     setTab(0);
 
-    try {
-      await gqlRequest(MUTATIONS.approveJob, { jobId }, shop);
+    const tracksLivePreview =
+      previewMeta?.type === "IMPORT" ||
+      previewMeta?.type === "BULK_EDIT" ||
+      previewMeta?.type === "BACKUP" ||
+      previewMeta?.type === "AGENT_RUN";
 
-      const jobDetail = await gqlRequest<{ job: Job }>(QUERIES.job, { id: jobId }, shop);
+    // Show progress immediately while approve / queue starts (don't wait for the response)
+    if (tracksLivePreview) {
+      beginJobProgress(jobId, {
+        fileName: previewMeta?.fileName ?? previewMeta?.nlPrompt,
+        rowCount: previewMeta?.rowCount,
+        isImport: previewMeta?.type === "IMPORT",
+        kind:
+          previewMeta?.type === "IMPORT"
+            ? "import"
+            : previewMeta?.type === "BACKUP"
+              ? "backup"
+              : previewMeta?.type === "AGENT_RUN"
+                ? "agent"
+                : "bulk",
+        label: previewMeta?.nlPrompt ?? undefined,
+      });
+      setNotice(
+        previewMeta?.type === "IMPORT"
+          ? "Import starting — watch live progress below."
+          : "Applying changes — watch live progress below.",
+      );
+    }
+
+    try {
+      await gqlRequest(MUTATIONS.approveJob, { jobId }, shop, { forceAuthRefresh: true });
+
+      const jobDetail = await gqlRequest<{ job: Job }>(QUERIES.job, { id: jobId }, shop, {
+        forceAuthRefresh: true,
+      });
       const job = jobDetail.job;
       const isImport = job.type === "IMPORT";
       const alreadyDone = job.status === "COMPLETED" || job.status === "FAILED";
 
-      // Small bulk edits apply instantly on the API — skip queue/progress bar
+      // Small bulk edits apply instantly on the API — finish the sticky bar
       if (job.type === "BULK_EDIT" && alreadyDone) {
         if (job.status === "COMPLETED") {
           pushAlert({
@@ -735,6 +774,18 @@ export function Dashboard() {
             autoDismissMs: 4500,
           });
           setNotice("Changes applied to Shopify.");
+          setStickyProgress((prev) =>
+            prev?.jobId === jobId
+              ? {
+                  ...prev,
+                  phase: "complete",
+                  successCount: job.successCount ?? prev.successCount,
+                  failedCount: job.failedCount ?? 0,
+                  message: `${(job.successCount ?? 0).toLocaleString()} live in Shopify`,
+                }
+              : prev,
+          );
+          window.setTimeout(() => setStickyProgress(null), 2800);
         } else {
           pushAlert({
             tone: "critical",
@@ -743,6 +794,7 @@ export function Dashboard() {
             message: job.errorSummary?.slice(0, 160) || "Check the Jobs tab for details.",
             autoDismissMs: 7000,
           });
+          setStickyProgress(null);
         }
         toastedJobIdsRef.current.add(jobId);
         await loadData();
@@ -750,26 +802,40 @@ export function Dashboard() {
       }
 
       const tracksLive =
-        job.type === "IMPORT" || job.type === "BULK_EDIT";
+        job.type === "IMPORT" ||
+        job.type === "BULK_EDIT" ||
+        job.type === "BACKUP" ||
+        job.type === "AGENT_RUN" ||
+        job.status === "QUEUED" ||
+        job.status === "RUNNING";
 
       if (tracksLive) {
         beginJobProgress(jobId, {
           fileName: job.fileName ?? job.nlPrompt ?? previewMeta?.fileName,
-          rowCount: job.rowCount,
+          rowCount: job.rowCount ?? previewMeta?.rowCount,
           isImport,
-          kind: isImport ? "import" : "bulk",
+          kind:
+            job.type === "IMPORT"
+              ? "import"
+              : job.type === "BACKUP"
+                ? "backup"
+                : job.type === "AGENT_RUN"
+                  ? "agent"
+                  : "bulk",
+          label: job.nlPrompt ?? previewMeta?.nlPrompt ?? undefined,
         });
         setNotice(
           isImport
             ? "Import started — watch live counts below."
-            : "Changes are applying — watch live progress below.",
+            : job.status === "QUEUED"
+              ? "Queued — applying with a fresh Shopify token…"
+              : "Changes are applying — watch live progress below.",
         );
-      } else {
-        setNotice("Job approved and queued.");
       }
 
       void loadData({ silent: true });
     } catch (e) {
+      setStickyProgress(null);
       showOperationalError(e, "Approve failed");
     } finally {
       setApproveLoading(false);

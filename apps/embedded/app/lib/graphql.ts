@@ -43,6 +43,7 @@ export async function gqlRequest<T>(
   query: string,
   variables?: Record<string, unknown>,
   shop?: string,
+  options?: { forceAuthRefresh?: boolean },
 ): Promise<T> {
   const body = JSON.stringify({ query, variables });
 
@@ -62,8 +63,24 @@ export async function gqlRequest<T>(
     return json.data as T;
   };
 
-  let res = await send();
-  if (res.status === 401) {
+  const shouldRetrySession = (response: Response, message?: string) => {
+    const retryHeader = response.headers.get("X-Shopify-Retry-Invalid-Session-Request");
+    if (retryHeader === "1" || response.status === 401) return true;
+    if (!message) return false;
+    return (
+      message.includes("Unauthorized") ||
+      message.includes("session token") ||
+      message.includes("token exchange") ||
+      message.includes("SESSION_TOKEN_STALE") ||
+      message.includes("RECONNECT_REQUIRED") ||
+      message.includes("fresh Shopify token")
+    );
+  };
+
+  // forceAuthRefresh: always mint a new App Bridge ID token (mutations that touch Shopify)
+  let res = await send(Boolean(options?.forceAuthRefresh));
+
+  if (shouldRetrySession(res)) {
     clearSessionTokenCache();
     res = await send(true);
   }
@@ -72,12 +89,7 @@ export async function gqlRequest<T>(
     return await parseResponse(res);
   } catch (error) {
     if (error instanceof GraphQLClientError) {
-      const message = error.message;
-      if (
-        res.status === 401 ||
-        message.includes("Unauthorized") ||
-        message.includes("session token")
-      ) {
+      if (shouldRetrySession(res, error.message)) {
         clearSessionTokenCache();
         const retryRes = await send(true);
         return parseResponse(retryRes);

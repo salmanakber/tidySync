@@ -94,11 +94,17 @@ export function StickyJobProgress({ state }: { state: ImportProgressState }) {
         </div>
         {state.phase === "importing" && (
           <div className="tidysync-sticky-progress-bar-wrap">
-            <ProgressBar
-              progress={pct}
-              size="small"
-              tone={kind === "agent" ? "highlight" : "primary"}
-            />
+            {pct == null ? (
+              <div className="tidysync-sticky-progress-indeterminate" aria-hidden="true">
+                <span />
+              </div>
+            ) : (
+              <ProgressBar
+                progress={pct}
+                size="small"
+                tone={kind === "agent" ? "highlight" : "primary"}
+              />
+            )}
           </div>
         )}
         {state.phase === "complete" && (
