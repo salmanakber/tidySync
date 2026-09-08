@@ -117,10 +117,28 @@ export const jobRepository = {
 };
 
 export const sessionRepository = {
-  findOfflineForShop(shop: string) {
+  async findOfflineForShop(shop: string) {
+    // Prefer the canonical offline session id Shopify uses
+    const byId = await prisma.session.findUnique({ where: { id: `offline_${shop}` } });
+    if (byId?.accessToken) return byId;
+
     return prisma.session.findFirst({
-      where: { shop, isOnline: false },
-      orderBy: { expires: "desc" },
+      where: {
+        shop,
+        isOnline: false,
+        accessToken: { not: "" },
+      },
+      orderBy: { id: "desc" },
+    });
+  },
+
+  async deleteBrokenOfflineSessions(shop: string, keepId?: string) {
+    await prisma.session.deleteMany({
+      where: {
+        shop,
+        isOnline: false,
+        ...(keepId ? { id: { not: keepId } } : {}),
+      },
     });
   },
 };

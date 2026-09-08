@@ -15,12 +15,30 @@ const shopify = shopifyApi({
   isEmbeddedApp: true,
 });
 
+const SHOP_PROBE = `#graphql
+  query TidySyncShopProbe {
+    shop { name id }
+  }
+`;
+
+async function probeSession(session: Session): Promise<boolean> {
+  try {
+    const client = new shopify.clients.Graphql({ session });
+    const res = (await client.request(SHOP_PROBE)) as {
+      data?: { shop?: { name?: string } };
+    };
+    return Boolean(res.data?.shop?.name);
+  } catch {
+    return false;
+  }
+}
+
 export async function getShopGraphqlClient(shop: string) {
   const sessionRow = await sessionRepository.findOfflineForShop(shop);
 
   if (!sessionRow?.accessToken) {
     throw new Error(
-      `Shopify is not connected for ${shop}. Re-open TidySync from Shopify Admin and click Connect, then approve the change again.`,
+      `RECONNECT_REQUIRED: Shopify is not connected for ${shop}. Click Connect in TidySync, then approve again.`,
     );
   }
 
@@ -32,17 +50,24 @@ export async function getShopGraphqlClient(shop: string) {
     accessToken: sessionRow.accessToken,
   });
 
+  if (!(await probeSession(session))) {
+    throw new Error(
+      `RECONNECT_REQUIRED: Shopify blocked this update (session expired). Click Connect to re-authorize TidySync, then try again.`,
+    );
+  }
+
   return new shopify.clients.Graphql({ session });
 }
 
 /** Turn Shopify API errors into merchant-friendly messages. */
 export function friendlyShopifyError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
+  if (msg.includes("RECONNECT_REQUIRED")) return msg;
   if (msg.includes("403") || msg.includes("Forbidden")) {
-    return "Shopify blocked this update (session expired or missing permission). Re-open TidySync from Shopify Admin, click Connect if prompted, then try again.";
+    return "RECONNECT_REQUIRED: Shopify blocked this update (session expired or missing permission). Click Connect to re-authorize, then try again.";
   }
   if (msg.includes("401") || msg.includes("Unauthorized")) {
-    return "Shopify connection expired. Re-open TidySync from Shopify Admin and click Connect, then try again.";
+    return "RECONNECT_REQUIRED: Shopify connection expired. Click Connect to re-authorize, then try again.";
   }
   return msg;
 }

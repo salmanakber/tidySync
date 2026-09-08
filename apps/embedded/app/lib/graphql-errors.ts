@@ -83,7 +83,33 @@ export interface AppAlertModel {
 export function alertFromError(
   error: unknown,
   onBilling?: () => void,
+  onReconnect?: () => void,
 ): Omit<AppAlertModel, "id"> {
+  const msg = errorMessage(error, "");
+  const reconnectNeeded =
+    msg.includes("RECONNECT_REQUIRED") ||
+    msg.includes("Click Connect") ||
+    msg.includes("session expired") ||
+    msg.includes("connection expired") ||
+    msg.includes("connection needs a refresh") ||
+    msg.includes("re-authorize") ||
+    (error instanceof GraphQLClientError &&
+      (Boolean(error.extensions?.reconnectRequired) ||
+        (error.code === "UNAUTHORIZED" && msg.toLowerCase().includes("connect"))));
+
+  if (reconnectNeeded) {
+    return {
+      tone: "warning",
+      title: "Reconnect Shopify",
+      message:
+        "Your Shopify connection expired or is missing permissions. Connect again so TidySync can update products.",
+      code: "RECONNECT_REQUIRED",
+      primaryAction: onReconnect
+        ? { content: "Connect now", onAction: onReconnect }
+        : undefined,
+    };
+  }
+
   if (error instanceof GraphQLClientError) {
     if (error.isCreditLimit) {
       const remaining = error.extensions?.creditsRemaining;

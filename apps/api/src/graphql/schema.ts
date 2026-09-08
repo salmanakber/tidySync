@@ -26,7 +26,8 @@ import {
   bulkEditQueue,
   undoQueue,
 } from "../queues";
-import { getShopGraphqlClient, refreshOfflineTokenFromSession } from "../shopify/client";
+import { getShopGraphqlClient, ensureFreshOfflineSession, isReconnectError } from "../shopify/client";
+import { appError } from "./app-error";
 import { parseFileHeaders, parseFilePreview } from "../services/file-parser";
 import { fetchProductsForExport, buildDiffFromMutationPlan } from "../services/shopify-products";
 import type { GoogleSheetsConfig } from "../services/google-sheets";
@@ -724,9 +725,27 @@ export const resolvers = {
 
       if (ctx.sessionToken) {
         try {
-          await refreshOfflineTokenFromSession(shop, ctx.sessionToken);
+          await ensureFreshOfflineSession(shop, ctx.sessionToken);
+        } catch (err) {
+          if (isReconnectError(err)) {
+            throw appError(
+              "UNAUTHORIZED",
+              "Your Shopify connection expired. Click Connect to re-authorize TidySync, then approve again.",
+              { reconnectRequired: true },
+            );
+          }
+          /* continue — sync path may still work with online token */
+        }
+      } else if (job.type === "BULK_EDIT") {
+        // Without a live App Bridge token we can only use stored offline — verify it works
+        try {
+          await ensureFreshOfflineSession(shop);
         } catch {
-          /* enqueue may still work if a stored offline token is valid */
+          throw appError(
+            "UNAUTHORIZED",
+            "Your Shopify connection expired. Click Connect to re-authorize TidySync, then approve again.",
+            { reconnectRequired: true },
+          );
         }
       }
 
@@ -757,10 +776,25 @@ export const resolvers = {
             }),
           );
         } catch (err) {
+          const message = err instanceof Error ? err.message : "Apply failed";
+          if (isReconnectError(err)) {
+            await prisma.job.update({
+              where: { id: job.id },
+              data: {
+                status: "FAILED",
+                errorSummary: message,
+                finishedAt: new Date(),
+              },
+            });
+            throw appError(
+              "UNAUTHORIZED",
+              "Your Shopify connection expired. Click Connect to re-authorize TidySync, then approve again.",
+              { reconnectRequired: true },
+            );
+          }
           const fresh = await prisma.job.findUnique({ where: { id: job.id } });
           const alreadyWrote = (fresh?.successCount ?? 0) > 0 || (fresh?.processedCount ?? 0) > 0;
           if (alreadyWrote) {
-            const message = err instanceof Error ? err.message : "Apply failed";
             await prisma.job.update({
               where: { id: job.id },
               data: {
@@ -779,11 +813,24 @@ export const resolvers = {
             }
             throw new Error(message);
           }
-          // Fall through to queue so a worker can retry with the offline token
+          // Non-auth failure: fall through to queue only if offline session is healthy
           console.warn(
             `[approveJob] sync apply failed for ${job.id}, queueing instead:`,
-            err instanceof Error ? err.message : err,
+            message,
           );
+          try {
+            await ensureFreshOfflineSession(shop, ctx.sessionToken);
+          } catch {
+            await prisma.job.update({
+              where: { id: job.id },
+              data: { status: "FAILED", errorSummary: message, finishedAt: new Date() },
+            });
+            throw appError(
+              "UNAUTHORIZED",
+              "Your Shopify connection expired. Click Connect to re-authorize TidySync, then approve again.",
+              { reconnectRequired: true },
+            );
+          }
           await prisma.job.update({
             where: { id: job.id },
             data: {

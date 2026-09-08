@@ -265,6 +265,8 @@ export function Dashboard() {
     return () => jobEventCleanupRef.current?.();
   }, []);
 
+  const [reconnectOpen, setReconnectOpen] = useState(false);
+
   const goToBilling = useCallback(() => setTab(11), []);
 
   const pushAlert = useCallback((alert: Omit<AppAlertModel, "id">) => {
@@ -277,12 +279,15 @@ export function Dashboard() {
         (alert.tone === "success" || alert.code === "JOB_SUCCESS" ? 4500 : undefined),
     };
     setAlerts((prev) => [...prev, next]);
+    if (alert.code === "RECONNECT_REQUIRED") {
+      setReconnectOpen(true);
+    }
   }, []);
 
   const showOperationalError = useCallback(
     (err: unknown, context?: string) => {
-      const model = alertFromError(err, goToBilling);
-      if (context) {
+      const model = alertFromError(err, goToBilling, () => setReconnectOpen(true));
+      if (context && model.code !== "RECONNECT_REQUIRED") {
         model.message = `${context}: ${model.message}`;
       }
       pushAlert(model);
@@ -472,6 +477,10 @@ export function Dashboard() {
                 });
               }
             } else if (ev.status === "FAILED") {
+              const reconnect =
+                typeof ev === "object" &&
+                // SSE doesn't include errorSummary — load job after fail
+                true;
               pushAlert({
                 tone: "critical",
                 code: "JOB_FAILED",
@@ -479,6 +488,33 @@ export function Dashboard() {
                 message: "Some rows could not be processed — check Jobs for details.",
                 autoDismissMs: 7000,
               });
+              if (reconnect) {
+                void (async () => {
+                  try {
+                    const detail = await gqlRequest<{ job: Job }>(QUERIES.job, { id: jobId }, shop);
+                    const summary = detail.job.errorSummary ?? "";
+                    if (
+                      summary.includes("RECONNECT_REQUIRED") ||
+                      summary.includes("session expired") ||
+                      summary.includes("Click Connect") ||
+                      summary.includes("403") ||
+                      summary.includes("Forbidden")
+                    ) {
+                      pushAlert({
+                        tone: "warning",
+                        code: "RECONNECT_REQUIRED",
+                        title: "Reconnect Shopify",
+                        message:
+                          "Your Shopify connection expired. Connect again so TidySync can update products.",
+                        primaryAction: { content: "Connect now", onAction: () => setReconnectOpen(true) },
+                      });
+                      setReconnectOpen(true);
+                    }
+                  } catch {
+                    /* ignore */
+                  }
+                })();
+              }
             }
             window.setTimeout(() => setStickyProgress(null), 3200);
             void loadData({ silent: true });
@@ -957,13 +993,32 @@ export function Dashboard() {
         }
       } else if ((was === "RUNNING" || was === "QUEUED") && job.status === "FAILED") {
         toastedJobIdsRef.current.add(job.id);
-        pushAlert({
-          tone: "critical",
-          code: "JOB_FAILED",
-          title: `${job.type.replace(/_/g, " ")} failed`,
-          message: job.errorSummary?.slice(0, 160) || "Check the Jobs tab for details.",
-          autoDismissMs: 7000,
-        });
+        const summary = job.errorSummary ?? "";
+        if (
+          summary.includes("RECONNECT_REQUIRED") ||
+          summary.includes("session expired") ||
+          summary.includes("Click Connect") ||
+          summary.includes("403") ||
+          summary.includes("Forbidden")
+        ) {
+          pushAlert({
+            tone: "warning",
+            code: "RECONNECT_REQUIRED",
+            title: "Reconnect Shopify",
+            message:
+              "Your Shopify connection expired. Connect again so TidySync can update products.",
+            primaryAction: { content: "Connect now", onAction: () => setReconnectOpen(true) },
+          });
+          setReconnectOpen(true);
+        } else {
+          pushAlert({
+            tone: "critical",
+            code: "JOB_FAILED",
+            title: `${job.type.replace(/_/g, " ")} failed`,
+            message: job.errorSummary?.slice(0, 160) || "Check the Jobs tab for details.",
+            autoDismissMs: 7000,
+          });
+        }
       }
     }
     jobStatusRef.current = new Map(jobs.map((j) => [j.id, j.status]));
@@ -2268,6 +2323,38 @@ export function Dashboard() {
           </div>
         </Layout.Section>
       </Layout>
+
+      <Modal
+        open={reconnectOpen}
+        onClose={() => setReconnectOpen(false)}
+        title="Reconnect Shopify"
+        primaryAction={{
+          content: "Connect now",
+          onAction: () => {
+            setReconnectOpen(false);
+            beginInstall();
+          },
+        }}
+        secondaryActions={[
+          {
+            content: "Not now",
+            onAction: () => setReconnectOpen(false),
+          },
+        ]}
+      >
+        <Modal.Section>
+          <BlockStack gap="300">
+            <Text as="p" variant="bodyMd">
+              Your Shopify connection expired or is missing permission to update products. This usually happens after
+              reinstalling the app or when the offline token goes stale.
+            </Text>
+            <Text as="p" variant="bodyMd" tone="subdued">
+              Click <strong>Connect now</strong> to re-authorize TidySync, then approve your changes again. Opening the
+              app from Shopify Admin works best.
+            </Text>
+          </BlockStack>
+        </Modal.Section>
+      </Modal>
 
       <Modal
         open={previewOpen}

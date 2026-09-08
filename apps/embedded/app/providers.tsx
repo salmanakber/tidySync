@@ -167,7 +167,16 @@ function PolarisWrapper({ children }: { children: React.ReactNode }) {
             `/auth/session?shop=${encodeURIComponent(resolvedShop)}`,
             { credentials: "same-origin" },
           );
-          const sessionJson = (await sessionRes.json()) as { ok?: boolean };
+          const sessionJson = (await sessionRes.json()) as {
+            ok?: boolean;
+            reconnectRequired?: boolean;
+          };
+          if (sessionJson.reconnectRequired) {
+            setAuthenticated(false);
+            setAuthError("Shopify connection expired — click Connect to re-authorize.");
+            setReady(true);
+            return;
+          }
           if (sessionJson.ok) {
             setAuthenticated(true);
             setAuthError(null);

@@ -137,49 +137,132 @@ async function onlineSessionForShop(shop: string): Promise<Session | null> {
   return sessionFromRow(row);
 }
 
+const SHOP_PROBE = `#graphql
+  query TidySyncShopProbe {
+    shop { name id }
+  }
+`;
+
+async function probeShopifySession(session: Session): Promise<boolean> {
+  try {
+    const client = new shopify.clients.Graphql({ session });
+    const res = (await client.request(SHOP_PROBE)) as {
+      data?: { shop?: { name?: string } };
+      errors?: unknown[];
+    };
+    if (res.errors && Array.isArray(res.errors) && res.errors.length) return false;
+    return Boolean(res.data?.shop?.name);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Resolve a Shopify Admin API session for merchant-initiated requests.
  * Prefer a fresh token exchange when App Bridge sends a session token; if that
- * fails (expired JWT, clock skew, transient Shopify error), fall back to the
- * stored offline/online token so AI Edit / previews keep working.
+ * fails, fall back to a stored session that still works against Shopify.
  */
 export async function resolveMerchantSession(
   shop: string,
   sessionToken?: string,
 ): Promise<Session> {
-  // Prefer a healthy stored offline token first for reliability — then refresh via session token when possible
-  const offline = await offlineSessionForShop(shop);
-  const online = await onlineSessionForShop(shop);
-
   if (sessionToken) {
     try {
-      const fresh = await exchangeSessionToken(shop, sessionToken, "online");
-      return fresh;
+      const online = await exchangeSessionToken(shop, sessionToken, "online");
+      if (await probeShopifySession(online)) return online;
     } catch (onlineErr) {
-      try {
-        return await exchangeSessionToken(shop, sessionToken, "offline");
-      } catch {
-        console.warn(
-          `[shopify] session token exchange failed for ${shop}; using stored session if available`,
-          onlineErr instanceof Error ? onlineErr.message : onlineErr,
-        );
-      }
+      console.warn(
+        `[shopify] online token exchange failed for ${shop}`,
+        onlineErr instanceof Error ? onlineErr.message : onlineErr,
+      );
+    }
+    try {
+      const offline = await exchangeSessionToken(shop, sessionToken, "offline");
+      if (await probeShopifySession(offline)) return offline;
+    } catch (offlineErr) {
+      console.warn(
+        `[shopify] offline token exchange failed for ${shop}`,
+        offlineErr instanceof Error ? offlineErr.message : offlineErr,
+      );
     }
   }
 
-  if (offline) return offline;
-  if (online) return online;
+  const offline = await offlineSessionForShop(shop);
+  if (offline && (await probeShopifySession(offline))) return offline;
+
+  const online = await onlineSessionForShop(shop);
+  if (online && (await probeShopifySession(online))) return online;
 
   throw new Error(
-    "Shopify connection needs a refresh. Re-open TidySync from Shopify Admin and click Connect if prompted — then try again.",
+    "RECONNECT_REQUIRED: Shopify connection expired. Click Connect to re-authorize TidySync, then try again.",
   );
 }
 
-/** Worker / background jobs — offline token only. */
+/** Ensure a working offline token exists for workers (and sync applies). */
+export async function ensureFreshOfflineSession(
+  shop: string,
+  sessionToken?: string,
+): Promise<Session> {
+  if (sessionToken) {
+    try {
+      const offline = await exchangeSessionToken(shop, sessionToken, "offline");
+      if (await probeShopifySession(offline)) {
+        await sessionRepository.deleteBrokenOfflineSessions(shop, offline.id).catch(() => undefined);
+        return offline;
+      }
+    } catch (err) {
+      console.warn(
+        `[shopify] ensureFreshOfflineSession exchange failed for ${shop}`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  const stored = await offlineSessionForShop(shop);
+  if (stored && (await probeShopifySession(stored))) return stored;
+
+  // Last resort: usable online token for immediate apply (workers still need offline)
+  if (sessionToken) {
+    try {
+      const online = await exchangeSessionToken(shop, sessionToken, "online");
+      if (await probeShopifySession(online)) return online;
+    } catch {
+      /* fall through */
+    }
+  }
+
+  throw new Error(
+    "RECONNECT_REQUIRED: Shopify connection expired. Click Connect to re-authorize TidySync, then try again.",
+  );
+}
+
+export function isReconnectError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  return (
+    msg.includes("RECONNECT_REQUIRED") ||
+    msg.includes("session expired") ||
+    msg.includes("connection expired") ||
+    msg.includes("connection needs a refresh") ||
+    msg.includes("Click Connect") ||
+    msg.includes("403") ||
+    msg.includes("Forbidden") ||
+    msg.includes("401") ||
+    msg.includes("Unauthorized")
+  );
+}
+
+/** Worker / background jobs — offline token only (must already be valid). */
 export async function getShopGraphqlClient(shop: string) {
   const session = await offlineSessionForShop(shop);
   if (!session) {
-    throw new Error(`No offline session for shop ${shop}`);
+    throw new Error(
+      `RECONNECT_REQUIRED: Shopify is not connected for ${shop}. Click Connect, then approve again.`,
+    );
+  }
+  if (!(await probeShopifySession(session))) {
+    throw new Error(
+      `RECONNECT_REQUIRED: Shopify blocked this update (session expired). Click Connect to re-authorize, then try again.`,
+    );
   }
   return new shopify.clients.Graphql({ session });
 }
@@ -240,6 +323,6 @@ export async function merchantGraphqlRequest<T = unknown>(
 export async function refreshOfflineTokenFromSession(
   shop: string,
   sessionToken: string,
-): Promise<void> {
-  await exchangeSessionToken(shop, sessionToken, "offline");
+): Promise<Session> {
+  return ensureFreshOfflineSession(shop, sessionToken);
 }

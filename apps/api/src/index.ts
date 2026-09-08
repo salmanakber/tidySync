@@ -151,6 +151,13 @@ app.get("/auth/callback", async (req, res) => {
   const { session } = callback;
   await sessionStorage.storeSession(session);
   await ensureTenant(session.shop);
+  if (!session.isOnline) {
+    try {
+      await sessionRepository.deleteBrokenOfflineSessions(session.shop, session.id);
+    } catch {
+      /* best-effort cleanup of stale offline tokens */
+    }
+  }
 
   // Return into Shopify Admin so App Bridge gets host + can mint idToken
   const apiKey = process.env.SHOPIFY_API_KEY ?? "";
@@ -183,11 +190,25 @@ app.get("/auth/session", async (req, res) => {
   }
   const offline = await sessionRepository.findOfflineForShop(shop);
   const tenant = await prisma.tenant.findUnique({ where: { shopDomain: shop } });
+
+  let shopifyReachable = false;
+  if (offline?.accessToken) {
+    try {
+      const { ensureFreshOfflineSession } = await import("./shopify/client");
+      await ensureFreshOfflineSession(shop);
+      shopifyReachable = true;
+    } catch {
+      shopifyReachable = false;
+    }
+  }
+
   res.json({
-    ok: Boolean(offline?.accessToken && tenant),
+    ok: Boolean(offline?.accessToken && tenant && shopifyReachable),
     shop,
     hasOfflineSession: Boolean(offline?.accessToken),
     hasTenant: Boolean(tenant),
+    shopifyReachable,
+    reconnectRequired: Boolean(offline?.accessToken && tenant && !shopifyReachable),
   });
 });
 
