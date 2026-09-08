@@ -485,7 +485,13 @@ export const extensionResolvers = {
           mutationPlan: { brandVoice: args.brandVoice },
         },
       });
-      await bulkEditQueue.add("content-rewrite", { jobId: job.id, tenantId, shop });
+      await bulkEditQueue.add(
+        "content-rewrite",
+        await (await import("../queues/with-worker-token")).withWorkerAccessToken(
+          { jobId: job.id, tenantId, shop },
+          ctx.sessionToken,
+        ),
+      );
       return { ...job, lineItems: [] };
     },
     polishImportSample: async (
@@ -750,7 +756,13 @@ export const extensionResolvers = {
         },
       });
 
-      await exportQueue.add("backup", { jobId: job.id, tenantId, shop });
+      await exportQueue.add(
+        "backup",
+        await (await import("../queues/with-worker-token")).withWorkerAccessToken(
+          { jobId: job.id, tenantId, shop },
+          ctx.sessionToken,
+        ),
+      );
 
       await prisma.aiOperation.create({
         data: {
@@ -847,7 +859,11 @@ export const extensionResolvers = {
         },
       });
 
-      await agentQueue.add("agent-run", { jobId: agentJob.id, tenantId, shop });
+      const { withWorkerAccessToken } = await import("../queues/with-worker-token");
+      await agentQueue.add(
+        "agent-run",
+        await withWorkerAccessToken({ jobId: agentJob.id, tenantId, shop }, ctx.sessionToken),
+      );
 
       return {
         intent: intentResult.intent,
@@ -898,7 +914,13 @@ export const extensionResolvers = {
         },
       });
 
-      await bulkEditQueue.add("restore-backup", { jobId: job.id, tenantId, shop });
+      await bulkEditQueue.add(
+        "restore-backup",
+        await (await import("../queues/with-worker-token")).withWorkerAccessToken(
+          { jobId: job.id, tenantId, shop },
+          ctx.sessionToken,
+        ),
+      );
 
       return job;
     },

@@ -9,6 +9,7 @@ import { processBulkEditJob } from "./processors/bulk-edit";
 import { processUndoJob } from "./processors/undo";
 import { processCatalogHealthScan } from "./processors/catalog-health";
 import { processContentRewrite } from "./processors/content-rewrite";
+import { shopifyJobAuth } from "./shopify";
 import { runScheduler } from "./scheduler";
 
 const connection = new IORedis(resolveRedisUrl(), {
@@ -22,17 +23,30 @@ interface JobPayload {
   jobId: string;
   tenantId: string;
   shop: string;
+  /** Fresh Admin API token minted by API from merchant session */
+  accessToken?: string;
   platformKey?: string;
   resourceType?: string;
   undoJobId?: string;
+}
+
+async function withShopifyAuth<T>(data: JobPayload, fn: () => Promise<T>): Promise<T> {
+  return shopifyJobAuth.run(
+    { shop: data.shop, accessToken: data.accessToken },
+    fn,
+  );
 }
 
 function createWorker(queueName: string, processor: (data: JobPayload) => Promise<void>) {
   const worker = new Worker<JobPayload>(
     queueName,
     async (job) => {
-      console.log(`[${queueName}] Processing job ${job.data.jobId}`);
-      await processor(job.data);
+      console.log(
+        `[${queueName}] Processing job ${job.data.jobId}${job.data.accessToken ? " (fresh token)" : " (db offline token)"}`,
+      );
+      await withShopifyAuth(job.data, async () => {
+        await processor(job.data);
+      });
       console.log(`[${queueName}] Completed job ${job.data.jobId}`);
     },
     {
@@ -52,11 +66,13 @@ const importWorker = new Worker<JobPayload>(
   QUEUE_NAMES.IMPORT,
   async (bullJob) => {
     console.log(`[${QUEUE_NAMES.IMPORT}] Processing ${bullJob.name ?? "import"} ${bullJob.data.jobId}`);
-    if (bullJob.name === "analyze") {
-      await processAnalyzeImportJob(bullJob.data.jobId, bullJob.data.tenantId);
-    } else {
-      await processImportJob(bullJob.data.jobId, bullJob.data.tenantId, bullJob.data.shop);
-    }
+    await withShopifyAuth(bullJob.data, async () => {
+      if (bullJob.name === "analyze") {
+        await processAnalyzeImportJob(bullJob.data.jobId, bullJob.data.tenantId);
+      } else {
+        await processImportJob(bullJob.data.jobId, bullJob.data.tenantId, bullJob.data.shop);
+      }
+    });
     console.log(`[${QUEUE_NAMES.IMPORT}] Completed ${bullJob.data.jobId}`);
   },
   { connection, concurrency: 2 },
@@ -136,18 +152,15 @@ async function refreshAiRuntimeFromDb() {
       openaiModel: value.openaiModel,
     });
   } catch (err) {
-    console.warn(
-      "[ai] Failed to refresh runtime config:",
-      err instanceof Error ? err.message : err,
-    );
+    console.warn("[worker] AI runtime refresh skipped:", err instanceof Error ? err.message : err);
   }
 }
 
 void refreshAiRuntimeFromDb();
-setInterval(() => {
-  runScheduler().catch(console.error);
-  void refreshAiRuntimeFromDb();
-}, 60000);
+setInterval(() => void refreshAiRuntimeFromDb(), 60_000);
 
-console.log("TidySync worker started — listening on queues:");
-console.log(Object.values(QUEUE_NAMES).join(", "));
+runScheduler().catch((err) => {
+  console.error("[scheduler] failed to start:", err);
+});
+
+console.log("[worker] TidySync workers started");

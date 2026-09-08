@@ -251,6 +251,37 @@ export function isReconnectError(err: unknown): boolean {
   );
 }
 
+/** Mint a working Admin API access token to pass into BullMQ so workers don't use a stale DB offline token. */
+export async function mintWorkerAccessToken(
+  shop: string,
+  sessionToken?: string,
+): Promise<string | undefined> {
+  try {
+    const session = await ensureFreshOfflineSession(shop, sessionToken);
+    if (session.accessToken && (await probeShopifySession(session))) {
+      return session.accessToken;
+    }
+  } catch (err) {
+    console.warn(
+      `[shopify] mintWorkerAccessToken failed for ${shop}`,
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  if (sessionToken) {
+    try {
+      const online = await exchangeSessionToken(shop, sessionToken, "online");
+      if (online.accessToken && (await probeShopifySession(online))) {
+        return online.accessToken;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return undefined;
+}
+
 /** Worker / background jobs — offline token only (must already be valid). */
 export async function getShopGraphqlClient(shop: string) {
   const session = await offlineSessionForShop(shop);

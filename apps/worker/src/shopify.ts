@@ -1,6 +1,7 @@
 import "@shopify/shopify-api/adapters/node";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { shopifyApi, ApiVersion, Session } from "@shopify/shopify-api";
-import { sessionRepository } from "@tidysync/database";
+import { sessionRepository, shopifySessionStorage } from "@tidysync/database";
 
 const appUrl = process.env.APP_URL ?? "http://localhost:3000";
 
@@ -14,6 +15,12 @@ const shopify = shopifyApi({
   apiVersion: ApiVersion.January25,
   isEmbeddedApp: true,
 });
+
+/** Fresh token minted by the API when the merchant approves a job (preferred over DB offline). */
+export const shopifyJobAuth = new AsyncLocalStorage<{
+  shop: string;
+  accessToken?: string;
+}>();
 
 const SHOP_PROBE = `#graphql
   query TidySyncShopProbe {
@@ -33,7 +40,46 @@ async function probeSession(session: Session): Promise<boolean> {
   }
 }
 
+function sessionFromToken(shop: string, accessToken: string, offline = true): Session {
+  return new Session({
+    id: offline ? `offline_${shop}` : `online_${shop}_${Date.now()}`,
+    shop,
+    state: "active",
+    isOnline: !offline,
+    accessToken,
+  });
+}
+
+/** Persist a working token so later scheduled/worker jobs can reuse it. */
+async function persistOfflineToken(shop: string, accessToken: string): Promise<void> {
+  try {
+    const session = sessionFromToken(shop, accessToken, true);
+    await shopifySessionStorage.storeSession(session);
+    await sessionRepository.deleteBrokenOfflineSessions(shop, session.id).catch(() => undefined);
+  } catch (err) {
+    console.warn(
+      `[shopify-worker] failed to persist offline token for ${shop}`,
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
+
 export async function getShopGraphqlClient(shop: string) {
+  const jobAuth = shopifyJobAuth.getStore();
+  const freshToken = jobAuth?.accessToken;
+
+  if (freshToken) {
+    const session = sessionFromToken(shop, freshToken, true);
+    if (await probeSession(session)) {
+      // Keep DB in sync with the token the API just minted
+      void persistOfflineToken(shop, freshToken);
+      return new shopify.clients.Graphql({ session });
+    }
+    console.warn(
+      `[shopify-worker] job payload token failed probe for ${shop}; falling back to DB offline session`,
+    );
+  }
+
   const sessionRow = await sessionRepository.findOfflineForShop(shop);
 
   if (!sessionRow?.accessToken) {

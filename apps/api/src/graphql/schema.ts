@@ -723,21 +723,27 @@ export const resolvers = {
         await assertCatalogCapacity(tenantId, job.rowCount ?? 0);
       }
 
+      const { canApplyBulkEditSynchronously, applyBulkEditSynchronously, isSmallBulkEditJob } =
+        await import("../services/apply-bulk-edit");
+
+      const canSync = canApplyBulkEditSynchronously(job, {
+        hasSessionToken: Boolean(ctx.sessionToken),
+      });
+
+      // Refresh offline token when possible — but do NOT block sync applies that use the live session token
       if (ctx.sessionToken) {
         try {
           await ensureFreshOfflineSession(shop, ctx.sessionToken);
         } catch (err) {
-          if (isReconnectError(err)) {
+          if (!canSync && isReconnectError(err)) {
             throw appError(
               "UNAUTHORIZED",
               "Your Shopify connection expired. Click Connect to re-authorize TidySync, then approve again.",
               { reconnectRequired: true },
             );
           }
-          /* continue — sync path may still work with online token */
         }
-      } else if (job.type === "BULK_EDIT") {
-        // Without a live App Bridge token we can only use stored offline — verify it works
+      } else if (job.type === "BULK_EDIT" && !canSync) {
         try {
           await ensureFreshOfflineSession(shop);
         } catch {
@@ -749,15 +755,61 @@ export const resolvers = {
         }
       }
 
-      const { canApplyBulkEditSynchronously, applyBulkEditSynchronously, isSmallBulkEditJob } =
-        await import("../services/apply-bulk-edit");
+      // Small bulk + Agent SEO/description: apply with live session — skip broken worker offline token
+      if (canSync) {
+        const plan = job.mutationPlan as { steps?: Array<{ action?: string }> } | null;
+        const isAiSeoJob = Boolean(
+          plan?.steps?.length &&
+            plan.steps.every(
+              (s) => s.action === "ai_improve_seo" || s.action === "ai_rewrite_description",
+            ),
+        );
+        const rowCount =
+          ((job.diffPreview as { rows?: unknown[] } | null)?.rows?.length ?? job.rowCount ?? 0);
+        // Large SEO runs in the API process (not worker) so the live session token is used
+        const runInBackground = isAiSeoJob && rowCount > 12;
 
-      // Small AI/bulk edits (≤50 rows): apply immediately — no Redis queue wait
-      if (canApplyBulkEditSynchronously(job)) {
         await prisma.job.update({
           where: { id: job.id },
-          data: { approvedAt: new Date() },
+          data: {
+            approvedAt: new Date(),
+            ...(runInBackground
+              ? { status: "RUNNING", startedAt: new Date() }
+              : {}),
+          },
         });
+
+        if (runInBackground) {
+          void applyBulkEditSynchronously(job.id, tenantId, shop, ctx.sessionToken).catch(
+            async (err) => {
+              const message = err instanceof Error ? err.message : "Apply failed";
+              await prisma.job.update({
+                where: { id: job.id },
+                data: {
+                  status: "FAILED",
+                  errorSummary: message,
+                  finishedAt: new Date(),
+                },
+              });
+            },
+          );
+          await prisma.auditLog.create({
+            data: {
+              tenantId,
+              action: "job.approved",
+              resourceType: "job",
+              resourceId: job.id,
+              metadata: { type: job.type, mode: "sync-background" },
+            },
+          });
+          return mapJob(
+            await prisma.job.findUniqueOrThrow({
+              where: { id: job.id },
+              include: { lineItems: { take: 0 } },
+            }),
+          );
+        }
+
         try {
           await applyBulkEditSynchronously(job.id, tenantId, shop, ctx.sessionToken);
           await prisma.auditLog.create({
@@ -853,7 +905,22 @@ export const resolvers = {
         include: { lineItems: { take: 0 } },
       });
 
-      const queuePayload = { jobId: job.id, tenantId, shop };
+      const { mintWorkerAccessToken } = await import("../shopify/client");
+      const accessToken = await mintWorkerAccessToken(shop, ctx.sessionToken);
+      if (!accessToken && job.type === "BULK_EDIT") {
+        throw appError(
+          "UNAUTHORIZED",
+          "Your Shopify connection expired. Click Connect to re-authorize TidySync, then approve again.",
+          { reconnectRequired: true },
+        );
+      }
+
+      const queuePayload = {
+        jobId: job.id,
+        tenantId,
+        shop,
+        ...(accessToken ? { accessToken } : {}),
+      };
       // BullMQ: lower priority number = runs first. Tiny edits jump ahead of large jobs.
       const queueOpts = smallBulk
         ? { priority: 1, removeOnComplete: 50, removeOnFail: 20 }
@@ -924,12 +991,18 @@ export const resolvers = {
         },
       });
 
-      await undoQueue.add("undo", {
-        jobId: undoJob.id,
-        tenantId,
-        shop,
-        undoJobId: originalJob.id,
-      });
+      await undoQueue.add(
+        "undo",
+        await (await import("../queues/with-worker-token")).withWorkerAccessToken(
+          {
+            jobId: undoJob.id,
+            tenantId,
+            shop,
+            undoJobId: originalJob.id,
+          },
+          ctx.sessionToken,
+        ),
+      );
 
       return mapJob({ ...undoJob, lineItems: [] });
     },
