@@ -214,3 +214,4 @@ export function normalizeHeader(header: string): string {
 }
 
 export * from "./platform-mapping";
+export * from "./product-scope";

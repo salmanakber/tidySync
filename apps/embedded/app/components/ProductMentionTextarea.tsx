@@ -42,7 +42,11 @@ function productStoreUrl(shop: string, handle?: string | null): string | null {
 }
 
 function tokensToPrompt(text: string): string {
-  return text.replace(MENTION_TOKEN_RE, (_, _id, _handle, title) => `@${title}`);
+  // Keep product GID so the API can scope edits to exact products (not the whole catalog)
+  return text.replace(
+    MENTION_TOKEN_RE,
+    (_, id, _handle, title) => `@"${String(title).replace(/"/g, "")}"{{id:${id}}}`,
+  );
 }
 
 export function mentionValueToPrompt(text: string): string {

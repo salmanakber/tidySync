@@ -177,10 +177,12 @@ export async function processAgentRun(jobId: string, tenantId: string, shop: str
       message = "Your SEO improvements are ready — take a look at the proposed changes and approve when you're happy.";
       steps = await bumpStep(jobId, "execute", "done", `${diff.totalChanges} products in plan`, steps);
     } else {
-      const parsed = await parseNlBulkEditWithAi(job.nlPrompt);
+      const parsed = await parseNlBulkEditWithAi(job.nlPrompt ?? "");
       if (parsed.modelUsed && parsed.modelUsed !== "rule-based") {
         await consumeAiCreditWorker(tenantId, 1);
       }
+      const { applyProductScopeToPlan } = await import("@tidysync/shared");
+      const scopedPlan = applyProductScopeToPlan(job.nlPrompt ?? "", parsed.plan);
       const previewJob = await prisma.job.create({
         data: {
           tenantId,
@@ -188,10 +190,10 @@ export async function processAgentRun(jobId: string, tenantId: string, shop: str
           status: "PREVIEW",
           nlPrompt: job.nlPrompt,
           isAiGenerated: true,
-          mutationPlan: { ...parsed.plan, parentAgentJobId: jobId } as object,
+          mutationPlan: { ...scopedPlan, parentAgentJobId: jobId } as object,
         },
       });
-      const diff = await buildDiffFromMutationPlan(shop, parsed.plan);
+      const diff = await buildDiffFromMutationPlan(shop, scopedPlan);
       await prisma.job.update({
         where: { id: previewJob.id },
         data: {

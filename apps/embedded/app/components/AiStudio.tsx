@@ -60,11 +60,11 @@ export function AiStudio({
               id="ai-bulk-prompt"
               value={value}
               onChange={onChange}
-              placeholder="e.g. Change title of @Classic Tee to Blue Hoodie and set price to 29.99"
+                    placeholder="e.g. Change title of @Classic Tee to Blue Hoodie and set price to 29.99"
               rows={5}
               disabled={loading}
               className="tidysync-ai-mention-input"
-              hint={error ? undefined : "Tip: type @ to search products by name"}
+              hint={error ? undefined : "Always @mention the product so only that item changes — never the whole store"}
             />
           </div>
           <div className="tidysync-ai-composer-footer">

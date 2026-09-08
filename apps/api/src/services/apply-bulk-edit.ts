@@ -81,6 +81,10 @@ function productUpdateInput(row: ExtendedDiffRow): Record<string, unknown> {
   if (row.field === "descriptionHtml") input.descriptionHtml = String(row.after ?? "");
   if (row.field === "vendor") input.vendor = String(row.after ?? "");
   if (row.field === "productType") input.productType = String(row.after ?? "");
+  if (row.field === "status") {
+    const s = String(row.after ?? "").toUpperCase();
+    if (["ACTIVE", "DRAFT", "ARCHIVED"].includes(s)) input.status = s;
+  }
   if (row.field === "tags") {
     input.tags = String(row.after ?? "")
       .split(",")

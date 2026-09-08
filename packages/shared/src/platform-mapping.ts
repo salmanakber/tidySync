@@ -1,6 +1,7 @@
 import type { FieldMapping, MutationPlan } from "./index";
 import { normalizeHeader } from "./index";
 import { PLATFORM_CATALOG, getPlatform, type PlatformKey } from "./platforms";
+import { extractProductScopeFromPrompt } from "./product-scope";
 
 type MappingRecord = Record<string, string>;
 
@@ -260,6 +261,14 @@ export function applyMappingsToRow(
 function extractSharedFilters(prompt: string, lower: string): Record<string, unknown> {
   const filter: Record<string, unknown> = {};
 
+  // Prefer exact @mention product IDs whenever present
+  const scope = extractProductScopeFromPrompt(prompt);
+  if (scope.productIds.length) {
+    filter.productIds = scope.productIds;
+  } else if (scope.titleContains) {
+    filter.titleContains = scope.titleContains;
+  }
+
   const collectionMatch = prompt.match(/(?:collection|tagged?)\s+["']?([^"']+)["']?/i);
   if (collectionMatch) {
     if (lower.includes("collection")) {
@@ -272,17 +281,19 @@ function extractSharedFilters(prompt: string, lower: string): Record<string, unk
   const skuMatch = prompt.match(/sku[s]?\s+(?:containing|with|like)\s+["']?([^"']+)["']?/i);
   if (skuMatch) filter.skuContains = skuMatch[1].trim();
 
-  const productScope = prompt.match(
-    /(?:for|on)\s+(?:the\s+)?product\s+["']?([^"',.]+?)["']?(?=\s*(?:$|and|,|;|\.|and\s+set|and\s+change))/i,
-  );
-  if (productScope?.[1]?.trim()) {
-    filter.titleContains = productScope[1].trim();
-  } else {
-    const quotedProduct = prompt.match(
-      /(?:for|on|of)\s+(?:the\s+)?(?:product\s+)?["']([^"']+)["']/i,
+  if (!filter.productIds && !filter.titleContains) {
+    const productScope = prompt.match(
+      /(?:for|on)\s+(?:the\s+)?product\s+["']?([^"',.]+?)["']?(?=\s*(?:$|and|,|;|\.|and\s+set|and\s+change))/i,
     );
-    if (quotedProduct?.[1]?.trim()) {
-      filter.titleContains = quotedProduct[1].trim();
+    if (productScope?.[1]?.trim()) {
+      filter.titleContains = productScope[1].trim();
+    } else {
+      const quotedProduct = prompt.match(
+        /(?:for|on|of)\s+(?:the\s+)?(?:product\s+)?["']([^"']+)["']/i,
+      );
+      if (quotedProduct?.[1]?.trim()) {
+        filter.titleContains = quotedProduct[1].trim();
+      }
     }
   }
 

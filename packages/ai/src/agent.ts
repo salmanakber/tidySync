@@ -235,36 +235,41 @@ export async function parseNlBulkEditWithAiEnhanced(prompt: string): Promise<{
       {
         role: "system",
         content:
-          `You are a careful, friendly Shopify catalog teammate for TidySync. Merchants speak casually — understand every part of their request before planning.
+          `You are a careful, friendly Shopify catalog teammate for TidySync. Merchants speak casually — understand EVERY part of their request before planning.
 
 Return ONLY JSON: { steps: [{ action, field, value?, filter?, description }] }.
 
 Actions: set, multiply, add, custom, ai_improve_seo, ai_rewrite_description.
-Fields: variants.price, variants.compareAtPrice, variants.sku, title, descriptionHtml, tags, vendor.
+Supported fields (full control):
+- Product: title, descriptionHtml, vendor, productType, tags, status
+- Variant: variants.price, variants.compareAtPrice, variants.sku, variants.barcode
+- SEO helpers: ai_improve_seo
 
 CRITICAL RULES:
-1. Read the FULL request. If they ask for title AND price (or any multi-field change), emit ONE step per field — never drop a field.
-2. Never put a price number into a title step. Never put a product name into a price step.
-3. Extract exact new values. Example: "change title to Blue Hoodie and set price to 29.99" → step1 title="Blue Hoodie", step2 variants.price="29.99".
-4. When a product is named (or @mentioned), set filter.titleContains on EVERY related step.
-5. For SEO/description polish use action ai_improve_seo with filter.titleContains.
-6. For percent price changes use multiply (e.g. 1.1 for +10%).
-7. Write short human descriptions merchants can trust, e.g. "Rename Classic Tee → Blue Hoodie", "Set price to 29.99".`,
+1. Multi-field requests → ONE step per field. Never drop a field.
+2. Never put a price into a title step (or a product name into a price step).
+3. Extract exact values. Example: title to Blue Hoodie + price to 29.99 → two steps.
+4. PRODUCT SCOPE IS MANDATORY: Mentions look like @"Classic Tee"{{id:gid://shopify/Product/123}}. When an id is present set filter.productIds on EVERY step. Otherwise set filter.titleContains. NEVER edit the whole catalog unless they say "all products" / "entire catalog".
+5. SEO/description polish → ai_improve_seo with the same product filter.
+6. Percent price changes → multiply (1.1 = +10%).
+7. Human descriptions, e.g. "Set price to 29.99 (Classic Tee only)".`,
       },
       { role: "user", content: prompt },
     ],
     { jsonMode: true },
   );
 
+  const { applyProductScopeToPlan } = await import("@tidysync/shared");
+
   if (result.provider === "rule-based" || !result.text) {
-    const rulePlan = parseNlBulkEdit(prompt);
+    const rulePlan = applyProductScopeToPlan(prompt, parseNlBulkEdit(prompt));
     if (rulePlan.steps.length > 0) {
       return { plan: rulePlan, modelUsed: "rule-based" };
     }
     const filterMatch = prompt.match(/\(([^)]+)\)/);
     if (lowerIncludesSeo(prompt)) {
       return {
-        plan: buildSeoImprovementPlan(filterMatch?.[1]?.trim()),
+        plan: applyProductScopeToPlan(prompt, buildSeoImprovementPlan(filterMatch?.[1]?.trim())),
         modelUsed: "rule-based-seo",
         isSeoAgent: true,
       };
@@ -275,12 +280,19 @@ CRITICAL RULES:
   try {
     const parsed = JSON.parse(result.text) as import("@tidysync/shared").MutationPlan;
     if (!parsed.steps?.length) {
-      return { plan: parseNlBulkEdit(prompt), modelUsed: "rule-based-fallback" };
+      return {
+        plan: applyProductScopeToPlan(prompt, parseNlBulkEdit(prompt)),
+        modelUsed: "rule-based-fallback",
+      };
     }
-    const isSeo = parsed.steps.some((s) => s.action === "ai_improve_seo");
-    return { plan: parsed, modelUsed: result.modelUsed, isSeoAgent: isSeo };
+    const scoped = applyProductScopeToPlan(prompt, parsed);
+    const isSeo = scoped.steps.some((s) => s.action === "ai_improve_seo");
+    return { plan: scoped, modelUsed: result.modelUsed, isSeoAgent: isSeo };
   } catch {
-    return { plan: parseNlBulkEdit(prompt), modelUsed: "rule-based-fallback" };
+    return {
+      plan: applyProductScopeToPlan(prompt, parseNlBulkEdit(prompt)),
+      modelUsed: "rule-based-fallback",
+    };
   }
 }
 

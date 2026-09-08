@@ -1336,7 +1336,9 @@ export async function createBulkEditPreviewJob(
   sessionToken?: string,
 ) {
   const { buildDiffFromMutationPlan } = await import("../services/shopify-products");
-  const { detectAnomalies } = await import("@tidysync/shared");
+  const { detectAnomalies, applyProductScopeToPlan } = await import("@tidysync/shared");
+
+  const scopedPlan = applyProductScopeToPlan(label, plan as import("@tidysync/shared").MutationPlan);
 
   const job = await prisma.job.create({
     data: {
@@ -1345,13 +1347,13 @@ export async function createBulkEditPreviewJob(
       status: "PREVIEW",
       nlPrompt: label,
       isAiGenerated: true,
-      mutationPlan: plan as object,
+      mutationPlan: scopedPlan as object,
     },
   });
 
   let diff: { rows: unknown[]; totalChanges: number };
   try {
-    diff = await buildDiffFromMutationPlan(shop, plan as import("@tidysync/shared").MutationPlan, sessionToken);
+    diff = await buildDiffFromMutationPlan(shop, scopedPlan, sessionToken);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await prisma.job.update({
@@ -1478,6 +1480,11 @@ export async function generateNlBulkEditWithAi(
     }
   }
 
+  const { applyProductScopeToPlan, extractProductScopeFromPrompt } = await import("@tidysync/shared");
+  // Hard safety: named/@mentioned products must never expand to the whole catalog
+  plan = applyProductScopeToPlan(prompt, plan);
+  const scope = extractProductScopeFromPrompt(prompt);
+
   const { buildDiffFromMutationPlan } = await import("../services/shopify-products");
   const { detectAnomalies, buildImpactSummary } = await import("@tidysync/shared");
 
@@ -1530,7 +1537,9 @@ export async function generateNlBulkEditWithAi(
         status: "PREVIEW",
         diffPreview: { rows: [], totalChanges: 0 },
         impactSummary:
-          "No matching products or variants were found for this prompt. Try a broader phrase (e.g. increase all prices by 10%).",
+          scope.productIds.length || scope.titleContains
+            ? `I couldn't find that product${scope.titleContains ? ` ("${scope.titleContains}")` : ""}. Try @mentioning it from the list, or check the spelling.`
+            : "No matching products or variants were found for this prompt. Try a broader phrase (e.g. increase all prices by 10%), or @mention a product.",
         rowCount: 0,
       },
       include: { lineItems: { take: 0 } },
@@ -1539,6 +1548,17 @@ export async function generateNlBulkEditWithAi(
       ...(await prisma.job.findUnique({ where: { id: job.id }, include: { lineItems: { take: 0 } } }))!,
       lineItems: [],
     };
+  }
+
+  // Extra guard: if they named a product but the diff somehow spans many products, keep only scoped rows
+  if (scope.productIds.length > 0) {
+    const idSet = new Set(scope.productIds);
+    const scopedRows = (diff.rows as Array<{ productId?: string; resourceId: string }>).filter(
+      (r) => idSet.has(r.productId ?? "") || idSet.has(r.resourceId),
+    );
+    if (scopedRows.length > 0 && scopedRows.length < diff.rows.length) {
+      diff = { rows: scopedRows, totalChanges: scopedRows.length };
+    }
   }
 
   const anomalies = detectAnomalies(

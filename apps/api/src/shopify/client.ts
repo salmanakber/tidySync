@@ -147,25 +147,27 @@ export async function resolveMerchantSession(
   shop: string,
   sessionToken?: string,
 ): Promise<Session> {
+  // Prefer a healthy stored offline token first for reliability — then refresh via session token when possible
+  const offline = await offlineSessionForShop(shop);
+  const online = await onlineSessionForShop(shop);
+
   if (sessionToken) {
     try {
-      return await exchangeSessionToken(shop, sessionToken, "online");
+      const fresh = await exchangeSessionToken(shop, sessionToken, "online");
+      return fresh;
     } catch (onlineErr) {
       try {
         return await exchangeSessionToken(shop, sessionToken, "offline");
       } catch {
         console.warn(
-          `[shopify] session token exchange failed for ${shop}; trying stored sessions`,
+          `[shopify] session token exchange failed for ${shop}; using stored session if available`,
           onlineErr instanceof Error ? onlineErr.message : onlineErr,
         );
       }
     }
   }
 
-  const offline = await offlineSessionForShop(shop);
   if (offline) return offline;
-
-  const online = await onlineSessionForShop(shop);
   if (online) return online;
 
   throw new Error(

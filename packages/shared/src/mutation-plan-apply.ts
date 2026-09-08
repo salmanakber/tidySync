@@ -34,6 +34,12 @@ export function productMatchesFilter(
 ): boolean {
   if (!filter || Object.keys(filter).length === 0) return true;
 
+  // Exact product IDs always win (from @ mentions)
+  const productIds = filter.productIds as string[] | undefined;
+  if (productIds?.length) {
+    return productIds.includes(product.id);
+  }
+
   const tag = filter.tag as string | undefined;
   if (tag) {
     const tagLower = tag.toLowerCase();
@@ -49,9 +55,24 @@ export function productMatchesFilter(
     if (!inTitle && !inTags) return false;
   }
 
-  const titleContains = filter.titleContains as string | undefined;
-  if (titleContains && !product.title.toLowerCase().includes(titleContains.toLowerCase())) {
+  const titleExact = filter.titleExact as string | undefined;
+  if (titleExact && product.title.toLowerCase() !== titleExact.toLowerCase()) {
     return false;
+  }
+
+  const titleContains = filter.titleContains as string | undefined;
+  if (titleContains) {
+    const needle = titleContains.toLowerCase().trim();
+    const hay = product.title.toLowerCase();
+    const exact = hay === needle;
+    const strong =
+      hay.startsWith(needle) ||
+      hay.includes(` ${needle}`) ||
+      hay.includes(`${needle} `) ||
+      hay.includes(`-${needle}`) ||
+      hay.includes(`${needle}-`);
+    const includes = needle.length >= 5 && hay.includes(needle);
+    if (!(exact || strong || includes)) return false;
   }
 
   const skuContains = filter.skuContains as string | undefined;
@@ -61,9 +82,22 @@ export function productMatchesFilter(
     if (!hasSku) return false;
   }
 
-  const productIds = filter.productIds as string[] | undefined;
-  if (productIds?.length) {
-    if (!productIds.includes(product.id)) return false;
+  const vendor = filter.vendor as string | undefined;
+  if (vendor && !(product.vendor ?? "").toLowerCase().includes(vendor.toLowerCase())) {
+    return false;
+  }
+
+  const productType = filter.productType as string | undefined;
+  if (
+    productType &&
+    !(product.productType ?? "").toLowerCase().includes(productType.toLowerCase())
+  ) {
+    return false;
+  }
+
+  const status = filter.status as string | undefined;
+  if (status && (product.status ?? "").toUpperCase() !== status.toUpperCase()) {
+    return false;
   }
 
   return true;
