@@ -40,7 +40,7 @@ function friendlyField(field: string): string {
 
 export function DiffPreviewPanel({
   impactSummary,
-  anomalies,
+  anomalies = [],
   steps = [],
   rows = [],
   failedItems = [],
