@@ -342,11 +342,20 @@ export async function processBulkEditJob(jobId: string, tenantId: string, shop: 
     steps: plan.steps.filter((s) => s.action !== "ai_improve_seo" && s.action !== "ai_rewrite_description"),
   };
 
-  const diff =
-    nonSeoPlan.steps.length > 0
-      ? await buildDiffFromMutationPlan(shop, nonSeoPlan)
-      : { rows: [], totalChanges: 0 };
-  const rows = diff.rows as ExtendedDiffRow[];
+  // Prefer the approved preview rows — avoids re-fetching the whole catalog (was causing 0-of-N stalls)
+  const previewRows = (job.diffPreview as { rows?: ExtendedDiffRow[] } | null)?.rows;
+  let rows: ExtendedDiffRow[];
+  if (Array.isArray(previewRows) && previewRows.length > 0 && nonSeoPlan.steps.length > 0) {
+    rows = previewRows.filter(
+      (r) => r.field !== "seo" && !(r.field === "descriptionHtml" && String(r.after ?? "").startsWith("AI:")),
+    );
+  } else {
+    const diff =
+      nonSeoPlan.steps.length > 0
+        ? await buildDiffFromMutationPlan(shop, nonSeoPlan)
+        : { rows: [], totalChanges: 0 };
+    rows = diff.rows as ExtendedDiffRow[];
+  }
 
   let success = 0;
   let failed = 0;

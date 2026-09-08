@@ -730,6 +730,45 @@ export const resolvers = {
         }
       }
 
+      const { canApplyBulkEditSynchronously, applyBulkEditSynchronously } = await import(
+        "../services/apply-bulk-edit"
+      );
+
+      // Small AI/bulk edits (≤20 rows): apply immediately — no Redis queue / progress stall
+      if (canApplyBulkEditSynchronously(job)) {
+        await prisma.job.update({
+          where: { id: job.id },
+          data: { approvedAt: new Date() },
+        });
+        try {
+          await applyBulkEditSynchronously(job.id, tenantId, shop, ctx.sessionToken);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Apply failed";
+          await prisma.job.update({
+            where: { id: job.id },
+            data: { status: "FAILED", errorSummary: message, finishedAt: new Date() },
+          });
+          throw new Error(message);
+        }
+
+        await prisma.auditLog.create({
+          data: {
+            tenantId,
+            action: "job.approved",
+            resourceType: "job",
+            resourceId: job.id,
+            metadata: { type: job.type, mode: "sync" },
+          },
+        });
+
+        return mapJob(
+          await prisma.job.findUniqueOrThrow({
+            where: { id: job.id },
+            include: { lineItems: { take: 0 } },
+          }),
+        );
+      }
+
       const updated = await prisma.job.update({
         where: { id: job.id },
         data: { status: "QUEUED", approvedAt: new Date() },

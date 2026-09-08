@@ -220,7 +220,7 @@ export function AgentStudio({
         clearPoll();
         setLoading(false);
       }
-    }, 1800);
+    }, 4000);
   };
 
   const runScan = async () => {

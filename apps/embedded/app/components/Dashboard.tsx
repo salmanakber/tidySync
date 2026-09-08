@@ -296,9 +296,9 @@ export function Dashboard() {
     setError(null);
   }, []);
 
-  const loadData = useCallback(async (options?: { refreshCatalog?: boolean }) => {
+  const loadData = useCallback(async (options?: { refreshCatalog?: boolean; silent?: boolean }) => {
     if (!shop) return;
-    setRefreshing(true);
+    if (!options?.silent) setRefreshing(true);
     try {
       const tenantData = await gqlRequest<{ meTenant: Tenant }>(
         QUERIES.meTenant,
@@ -334,13 +334,24 @@ export function Dashboard() {
           message: "Open TidySync from Shopify Admin, or click Connect to re-authorize.",
           primaryAction: { content: "Connect", onAction: beginInstall },
         });
-      } else {
+      } else if (!options?.silent) {
         showOperationalError(e, "Dashboard load failed");
       }
     } finally {
-      setRefreshing(false);
+      if (!options?.silent) setRefreshing(false);
     }
   }, [shop, beginInstall, pushAlert, showOperationalError]);
+
+  /** Lightweight jobs-only refresh — no full dashboard blink while a job runs. */
+  const refreshJobsQuietly = useCallback(async () => {
+    if (!shop) return;
+    try {
+      const jobsData = await gqlRequest<{ jobs: Job[] }>(QUERIES.jobs, { limit: 8 }, shop);
+      setJobs(jobsData.jobs);
+    } catch {
+      /* ignore — sticky SSE / next manual refresh will recover */
+    }
+  }, [shop]);
 
   const beginJobProgress = useCallback(
     (
@@ -470,13 +481,13 @@ export function Dashboard() {
               });
             }
             window.setTimeout(() => setStickyProgress(null), 3200);
-            void loadData();
+            void loadData({ silent: true });
           }
         },
-        () => void loadData(),
+        () => void refreshJobsQuietly(),
       );
     },
-    [shop, loadData, pushAlert],
+    [shop, loadData, refreshJobsQuietly, pushAlert],
   );
 
   useEffect(() => {
@@ -660,6 +671,38 @@ export function Dashboard() {
       const jobDetail = await gqlRequest<{ job: Job }>(QUERIES.job, { id: jobId }, shop);
       const job = jobDetail.job;
       const isImport = job.type === "IMPORT";
+      const alreadyDone = job.status === "COMPLETED" || job.status === "FAILED";
+
+      // Small bulk edits apply instantly on the API — skip queue/progress bar
+      if (job.type === "BULK_EDIT" && alreadyDone) {
+        if (job.status === "COMPLETED") {
+          pushAlert({
+            tone: "success",
+            code: "JOB_SUCCESS",
+            title: "Changes applied",
+            message:
+              job.successCount > 0
+                ? `${job.successCount.toLocaleString()} update(s) live in Shopify${
+                    job.failedCount ? ` · ${job.failedCount} failed` : ""
+                  }`
+                : "Your changes were applied.",
+            autoDismissMs: 4500,
+          });
+          setNotice("Changes applied to Shopify.");
+        } else {
+          pushAlert({
+            tone: "critical",
+            code: "JOB_FAILED",
+            title: "Apply failed",
+            message: job.errorSummary?.slice(0, 160) || "Check the Jobs tab for details.",
+            autoDismissMs: 7000,
+          });
+        }
+        toastedJobIdsRef.current.add(jobId);
+        await loadData();
+        return;
+      }
+
       const tracksLive =
         job.type === "IMPORT" || job.type === "BULK_EDIT";
 
@@ -679,7 +722,7 @@ export function Dashboard() {
         setNotice("Job approved and queued.");
       }
 
-      void loadData();
+      void loadData({ silent: true });
     } catch (e) {
       showOperationalError(e, "Approve failed");
     } finally {
@@ -858,9 +901,10 @@ export function Dashboard() {
 
   useEffect(() => {
     if (!shop || runningJobs.length === 0) return;
-    const timer = window.setInterval(() => void loadData(), 3500);
+    // Quiet jobs-only poll as SSE fallback — never blink the whole dashboard
+    const timer = window.setInterval(() => void refreshJobsQuietly(), 12000);
     return () => window.clearInterval(timer);
-  }, [shop, runningJobs.length, loadData]);
+  }, [shop, runningJobs.length, refreshJobsQuietly]);
 
   // Toast when jobs finish (including ones not tracked via SSE import progress)
   useEffect(() => {

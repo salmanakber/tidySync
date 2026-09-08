@@ -235,11 +235,16 @@ export async function parseNlBulkEditWithAiEnhanced(prompt: string): Promise<{
       {
         role: "system",
         content:
-          `Convert merchant requests into a Shopify bulk mutation plan JSON: { steps: [{ action, field, value?, filter?, description }] }.
+          `Convert merchant Shopify catalog requests into mutation plan JSON: { steps: [{ action, field, value?, filter?, description }] }.
 Actions: set, multiply, add, custom, ai_improve_seo, ai_rewrite_description.
-Fields: variants.price, variants.compareAtPrice, variants.sku, title, descriptionHtml, tags, vendor, seo.title, seo.description.
-For "improve SEO/description for product X" use action ai_improve_seo with filter.titleContains = X.
-For price changes use multiply/add/set. Always include a clear description.`,
+Fields: variants.price, variants.compareAtPrice, variants.sku, title, descriptionHtml, tags, vendor.
+CRITICAL RULES:
+1. One step per distinct field change. If they change title AND price, return TWO steps (field "title" and field "variants.price").
+2. Never put a price number into a title step. Never put a product name into a price step.
+3. Extract exact new values carefully. For "change title to Blue Hoodie and set price to 29.99" → title value "Blue Hoodie", price value "29.99".
+4. When a specific product is named, set filter.titleContains to that product name fragment on every related step.
+5. For "improve SEO/description for product X" use action ai_improve_seo with filter.titleContains = X.
+6. For percent price changes use action multiply with value like 1.1 for +10%. Always include a clear description.`,
       },
       { role: "user", content: prompt },
     ],

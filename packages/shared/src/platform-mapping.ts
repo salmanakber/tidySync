@@ -257,67 +257,8 @@ export function applyMappingsToRow(
   return output;
 }
 
-export function parseNlBulkEdit(prompt: string): MutationPlan {
-  const lower = prompt.toLowerCase();
-  const steps: MutationPlan["steps"] = [];
+function extractSharedFilters(prompt: string, lower: string): Record<string, unknown> {
   const filter: Record<string, unknown> = {};
-
-  // "change name/title of X to Y" (tolerates typo "yo" for "to")
-  const renameMatch = prompt.match(
-    /(?:change|rename|update)\s+(?:the\s+)?(?:name|title)\s+(?:of\s+)?["']?(.+?)["']?\s+(?:to|yo|into)\s+["']?(.+?)["']?\s*$/i,
-  );
-  if (renameMatch) {
-    const from = renameMatch[1].trim();
-    const to = renameMatch[2].trim();
-    if (from && to) {
-      filter.titleContains = from;
-      steps.push({
-        action: "set",
-        field: "title",
-        value: to,
-        filter,
-        description: `Rename products matching "${from}" → "${to}"`,
-      });
-      return { steps, estimatedAffectedCount: undefined };
-    }
-  }
-
-  const renameSimple = prompt.match(
-    /rename\s+["']?(.+?)["']?\s+(?:to|yo|into)\s+["']?(.+?)["']?\s*$/i,
-  );
-  if (renameSimple) {
-    filter.titleContains = renameSimple[1].trim();
-    steps.push({
-      action: "set",
-      field: "title",
-      value: renameSimple[2].trim(),
-      filter,
-      description: `Rename "${renameSimple[1].trim()}" → "${renameSimple[2].trim()}"`,
-    });
-    return { steps, estimatedAffectedCount: undefined };
-  }
-
-  const percentMatch = lower.match(
-    /(?:by|increase|decrease|raise|lower)\s+(\d+(?:\.\d+)?)\s*%|(\d+(?:\.\d+)?)\s*%\s+above/,
-  );
-  const percent = percentMatch
-    ? parseFloat(percentMatch[1] ?? percentMatch[2] ?? "0")
-    : null;
-  const isIncrease = lower.includes("increase") || lower.includes("raise");
-  const isDecrease = lower.includes("decrease") || lower.includes("reduce") || lower.includes("lower");
-
-  let field = "variants.price";
-  if (lower.includes("compare-at") || lower.includes("compare at")) {
-    field = "variants.compareAtPrice";
-  } else if (lower.includes("inventory") || lower.includes("stock")) {
-    field = "variants.inventoryQuantity";
-  } else if (lower.includes("tag")) {
-    field = "tags";
-  } else if (lower.includes("description") || lower.includes("content")) {
-    field = "descriptionHtml";
-  } else if (lower.includes("title") || lower.includes("name") || lower.includes("rename")) {
-    field = "title";
-  }
 
   const collectionMatch = prompt.match(/(?:collection|tagged?)\s+["']?([^"']+)["']?/i);
   if (collectionMatch) {
@@ -331,6 +272,39 @@ export function parseNlBulkEdit(prompt: string): MutationPlan {
   const skuMatch = prompt.match(/sku[s]?\s+(?:containing|with|like)\s+["']?([^"']+)["']?/i);
   if (skuMatch) filter.skuContains = skuMatch[1].trim();
 
+  const productScope = prompt.match(
+    /(?:for|on)\s+(?:the\s+)?product\s+["']?([^"',.]+?)["']?(?=\s*(?:$|and|,|;|\.|and\s+set|and\s+change))/i,
+  );
+  if (productScope?.[1]?.trim()) {
+    filter.titleContains = productScope[1].trim();
+  } else {
+    const quotedProduct = prompt.match(
+      /(?:for|on|of)\s+(?:the\s+)?(?:product\s+)?["']([^"']+)["']/i,
+    );
+    if (quotedProduct?.[1]?.trim()) {
+      filter.titleContains = quotedProduct[1].trim();
+    }
+  }
+
+  return filter;
+}
+
+/** Strip trailing "and set price…" clauses so title values stay clean. */
+function stripTrailingFieldClauses(value: string): string {
+  return value
+    .replace(
+      /\s+(?:and|,)\s+(?:(?:also|then)\s+)?(?:set|change|update|increase|decrease)?\s*(?:the\s+)?(?:price|compare[- ]?at|title|name|tag|description|inventory|stock)\b.*$/i,
+      "",
+    )
+    .replace(/["']$/g, "")
+    .trim();
+}
+
+export function parseNlBulkEdit(prompt: string): MutationPlan {
+  const lower = prompt.toLowerCase();
+  const steps: MutationPlan["steps"] = [];
+  const filter = extractSharedFilters(prompt, lower);
+
   const addTagMatch = prompt.match(/add\s+tag\s+['"]?([^'"]+)['"]?/i);
   if (addTagMatch) {
     steps.push({
@@ -343,46 +317,148 @@ export function parseNlBulkEdit(prompt: string): MutationPlan {
     return { steps, estimatedAffectedCount: undefined };
   }
 
-  if (field === "variants.compareAtPrice" && (lower.includes("above") || lower.includes("%"))) {
-    steps.push({
-      action: "custom",
-      field,
-      filter,
-      description: prompt,
-    });
-    return { steps, estimatedAffectedCount: undefined };
+  // Title/name set — capture even when price/other fields are also mentioned
+  const titleSetMatch = prompt.match(
+    /(?:change|rename|update|set)\s+(?:the\s+)?(?:name|title)(?:\s+(?:of|for)\s+["']?(.+?)["']?)?\s+(?:to|yo|into)\s+["']?(.+?)["']?(?=\s*(?:$|and|,|;|\.|increase|decrease|set\s+price|change\s+price|update\s+price))/i,
+  );
+  if (titleSetMatch) {
+    const from = titleSetMatch[1]?.trim();
+    const to = stripTrailingFieldClauses(titleSetMatch[2] ?? "");
+    if (to) {
+      if (from && !filter.titleContains) filter.titleContains = from;
+      steps.push({
+        action: "set",
+        field: "title",
+        value: to,
+        filter: { ...filter },
+        description: from
+          ? `Rename products matching "${from}" → "${to}"`
+          : `Set title to "${to}"`,
+      });
+    }
+  } else {
+    const renameSimple = prompt.match(
+      /rename\s+["']?(.+?)["']?\s+(?:to|yo|into)\s+["']?(.+?)["']?(?=\s*(?:$|and|,|;|\.))/i,
+    );
+    if (renameSimple) {
+      const to = stripTrailingFieldClauses(renameSimple[2].trim());
+      if (!filter.titleContains) filter.titleContains = renameSimple[1].trim();
+      steps.push({
+        action: "set",
+        field: "title",
+        value: to,
+        filter: { ...filter },
+        description: `Rename "${renameSimple[1].trim()}" → "${to}"`,
+      });
+    }
   }
 
-  if (percent !== null && (isIncrease || isDecrease)) {
+  const percentMatch = lower.match(
+    /(?:by|increase|decrease|raise|lower)\s+(\d+(?:\.\d+)?)\s*%|(\d+(?:\.\d+)?)\s*%\s+above/,
+  );
+  const percent = percentMatch
+    ? parseFloat(percentMatch[1] ?? percentMatch[2] ?? "0")
+    : null;
+  const isIncrease = lower.includes("increase") || lower.includes("raise");
+  const isDecrease = lower.includes("decrease") || lower.includes("reduce") || lower.includes("lower");
+  const mentionsPrice =
+    /\bprices?\b/i.test(prompt) ||
+    lower.includes("compare-at") ||
+    lower.includes("compare at");
+  const mentionsCompareAt = lower.includes("compare-at") || lower.includes("compare at");
+
+  // Absolute price set: "set/change price to 19.99"
+  const priceSetMatch = prompt.match(
+    /(?:set|change|update)\s+(?:the\s+)?(?:price|prices)\s+(?:to|yo|into)\s+\$?(\d+(?:\.\d+)?)/i,
+  );
+  if (priceSetMatch && !percent) {
+    steps.push({
+      action: "set",
+      field: "variants.price",
+      value: priceSetMatch[1],
+      filter: { ...filter },
+      description: `Set price to ${priceSetMatch[1]}`,
+    });
+  } else if (mentionsCompareAt && (lower.includes("above") || lower.includes("%"))) {
+    steps.push({
+      action: "custom",
+      field: "variants.compareAtPrice",
+      filter: { ...filter },
+      description: prompt,
+    });
+  } else if (percent !== null && (isIncrease || isDecrease) && (mentionsPrice || !steps.length)) {
+    const field = mentionsCompareAt ? "variants.compareAtPrice" : "variants.price";
     const multiplier = isIncrease ? 1 + percent / 100 : 1 - percent / 100;
     steps.push({
       action: "multiply",
       field,
       value: multiplier,
-      filter,
+      filter: { ...filter },
       description: `${isIncrease ? "Increase" : "Decrease"} ${field} by ${percent}%`,
     });
-  } else if (
-    lower.includes("set") ||
-    lower.includes("update") ||
-    lower.includes("change") ||
-    field === "title"
-  ) {
-    const valueMatch = prompt.match(/\b(?:to|yo|into)\s+["']?(.+?)["']?\s*$/i);
-    steps.push({
-      action: "set",
-      field,
-      value: valueMatch?.[1]?.trim() ?? "",
-      filter,
-      description: `Set ${field} based on: "${prompt}"`,
-    });
-  } else {
-    steps.push({
-      action: "custom",
-      field,
-      filter,
-      description: `Apply bulk change: "${prompt}"`,
-    });
+  }
+
+  // Inventory / tags / description when explicitly named and not already covered
+  if (steps.length === 0) {
+    let field = "variants.price";
+    if (mentionsCompareAt) {
+      field = "variants.compareAtPrice";
+    } else if (lower.includes("inventory") || lower.includes("stock")) {
+      field = "variants.inventoryQuantity";
+    } else if (lower.includes("tag")) {
+      field = "tags";
+    } else if (lower.includes("description") || lower.includes("content")) {
+      field = "descriptionHtml";
+    } else if (lower.includes("title") || lower.includes("name") || lower.includes("rename")) {
+      field = "title";
+    }
+
+    if (percent !== null && (isIncrease || isDecrease)) {
+      const multiplier = isIncrease ? 1 + percent / 100 : 1 - percent / 100;
+      steps.push({
+        action: "multiply",
+        field,
+        value: multiplier,
+        filter,
+        description: `${isIncrease ? "Increase" : "Decrease"} ${field} by ${percent}%`,
+      });
+    } else if (
+      lower.includes("set") ||
+      lower.includes("update") ||
+      lower.includes("change") ||
+      field === "title"
+    ) {
+      let value = "";
+      if (field === "title") {
+        const titleValue = prompt.match(
+          /(?:title|name)\s+(?:to|yo|into)\s+["']?(.+?)["']?\s*$/i,
+        );
+        value = stripTrailingFieldClauses(titleValue?.[1]?.trim() ?? "");
+      } else if (field.includes("price")) {
+        const priceValue = prompt.match(
+          /(?:price|prices)\s+(?:to|yo|into)\s+\$?(\d+(?:\.\d+)?)/i,
+        );
+        value = priceValue?.[1]?.trim() ?? "";
+      }
+      if (!value) {
+        const valueMatch = prompt.match(/\b(?:to|yo|into)\s+["']?(.+?)["']?\s*$/i);
+        value = stripTrailingFieldClauses(valueMatch?.[1]?.trim() ?? "");
+      }
+      steps.push({
+        action: "set",
+        field,
+        value,
+        filter,
+        description: `Set ${field} based on: "${prompt}"`,
+      });
+    } else {
+      steps.push({
+        action: "custom",
+        field,
+        filter,
+        description: `Apply bulk change: "${prompt}"`,
+      });
+    }
   }
 
   return { steps, estimatedAffectedCount: undefined };
