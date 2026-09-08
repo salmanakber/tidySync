@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Banner, BlockStack, Text } from "@shopify/polaris";
+import { Banner, Text } from "@shopify/polaris";
 
 interface DiffRow {
   resourceTitle?: string;
@@ -19,6 +19,23 @@ interface DiffPreviewProps {
   streamPlan?: boolean;
   jobType?: string;
   jobStatus?: string;
+  nlPrompt?: string | null;
+}
+
+function friendlyField(field: string): string {
+  const map: Record<string, string> = {
+    title: "Title",
+    "variants.price": "Price",
+    "variants.compareAtPrice": "Compare-at price",
+    "variants.sku": "SKU",
+    "variants.barcode": "Barcode",
+    descriptionHtml: "Description",
+    tags: "Tags",
+    vendor: "Vendor",
+    productType: "Product type",
+    seo: "SEO",
+  };
+  return map[field] ?? field.replace(/^variants\./, "").replace(/([A-Z])/g, " $1");
 }
 
 export function DiffPreviewPanel({
@@ -30,6 +47,7 @@ export function DiffPreviewPanel({
   streamPlan = true,
   jobType,
   jobStatus,
+  nlPrompt,
 }: DiffPreviewProps) {
   const [visibleSteps, setVisibleSteps] = useState(streamPlan ? 0 : steps.length);
 
@@ -48,61 +66,87 @@ export function DiffPreviewPanel({
     return () => window.clearInterval(id);
   }, [steps, streamPlan]);
 
-  return (
-    <BlockStack gap="400">
-      {impactSummary && <Banner tone="info">{impactSummary}</Banner>}
+  const changeCount = rows.length;
 
-      {anomalies?.map((a) => (
+  return (
+    <div className="tidysync-diff-panel">
+      {(impactSummary || nlPrompt) && (
+        <div className="tidysync-diff-hero">
+          {nlPrompt ? (
+            <p className="tidysync-diff-hero-ask">
+              <span className="tidysync-diff-hero-label">You asked</span>
+              {nlPrompt}
+            </p>
+          ) : null}
+          {impactSummary ? <p className="tidysync-diff-hero-summary">{impactSummary}</p> : null}
+          {changeCount > 0 ? (
+            <div className="tidysync-diff-hero-meta">
+              <span className="tidysync-diff-pill">{changeCount} change{changeCount === 1 ? "" : "s"}</span>
+              <span className="tidysync-diff-pill is-safe">Nothing live until you confirm</span>
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      {anomalies.map((a) => (
         <Banner key={a.message} tone={a.severity === "high" ? "critical" : "warning"}>
           {a.message}
         </Banner>
       ))}
 
       {steps.length > 0 && (
-        <BlockStack gap="200">
-          <Text as="h3" variant="headingSm">
-            Mutation plan
-          </Text>
-          {steps.slice(0, visibleSteps).map((step, i) => (
-            <div
-              key={`${step.description}-${i}`}
-              className="tidysync-plan-step"
-              style={{ animationDelay: `${i * 40}ms` }}
-            >
-              <div className="tidysync-plan-step-num">{i + 1}</div>
-              <Text as="p" variant="bodyMd">
-                {step.description}
-              </Text>
-            </div>
-          ))}
-          {streamPlan && visibleSteps < steps.length && (
-            <div className="tidysync-generating-line" style={{ width: "70%" }} />
-          )}
-        </BlockStack>
+        <section className="tidysync-diff-section">
+          <h3 className="tidysync-diff-section-title">Here&apos;s what I&apos;ll do</h3>
+          <div className="tidysync-diff-steps">
+            {steps.slice(0, visibleSteps).map((step, i) => (
+              <div
+                key={`${step.description}-${i}`}
+                className="tidysync-plan-step"
+                style={{ animationDelay: `${i * 40}ms` }}
+              >
+                <div className="tidysync-plan-step-num">{i + 1}</div>
+                <Text as="p" variant="bodyMd">
+                  {step.description}
+                </Text>
+              </div>
+            ))}
+            {streamPlan && visibleSteps < steps.length && (
+              <div className="tidysync-generating-line" style={{ width: "70%" }} />
+            )}
+          </div>
+        </section>
       )}
 
       {rows.length > 0 && (
-        <BlockStack gap="200">
-          <Text as="h3" variant="headingSm">
-            Diff preview ({Math.min(rows.length, 50)} of {rows.length} changes)
-          </Text>
-          {rows.slice(0, 50).map((row, i) => (
-            <div
-              key={`${row.resourceTitle}-${row.field}-${i}`}
-              className="tidysync-diff-row"
-              style={{ animationDelay: `${i * 28}ms` }}
-            >
-              <Text as="p" variant="bodySm" fontWeight="semibold">
-                {row.resourceTitle ?? "Item"} · {row.field}
-              </Text>
-              <Text as="p" variant="bodySm">
-                <span className="tidysync-diff-before">{String(row.before ?? "—")}</span>
-                {" → "}
-                <span className="tidysync-diff-after">{String(row.after ?? "—")}</span>
-              </Text>
-            </div>
-          ))}
-        </BlockStack>
+        <section className="tidysync-diff-section">
+          <div className="tidysync-diff-section-head">
+            <h3 className="tidysync-diff-section-title">Preview changes</h3>
+            <span className="tidysync-diff-count">
+              Showing {Math.min(rows.length, 50)} of {rows.length}
+            </span>
+          </div>
+          <div className="tidysync-diff-list">
+            {rows.slice(0, 50).map((row, i) => (
+              <div
+                key={`${row.resourceTitle}-${row.field}-${i}`}
+                className="tidysync-diff-row"
+                style={{ animationDelay: `${i * 28}ms` }}
+              >
+                <div className="tidysync-diff-row-top">
+                  <span className="tidysync-diff-product">{row.resourceTitle ?? "Item"}</span>
+                  <span className="tidysync-diff-field">{friendlyField(row.field)}</span>
+                </div>
+                <div className="tidysync-diff-values">
+                  <span className="tidysync-diff-before">{String(row.before ?? "—")}</span>
+                  <span className="tidysync-diff-arrow" aria-hidden="true">
+                    →
+                  </span>
+                  <span className="tidysync-diff-after">{String(row.after ?? "—")}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       {failedItems.map((item) => (
@@ -145,12 +189,12 @@ export function DiffPreviewPanel({
             </Banner>
           ) : (
             <Banner tone="warning">
-              I didn&apos;t find any product changes to preview for this job. Try something like &quot;Increase all
-              prices by 10%&quot; or &quot;Polish thin product descriptions&quot; in the Agent tab.
+              I couldn&apos;t match that to any products yet. Try naming the product with @, or something like
+              &quot;Increase all prices by 10%&quot;.
             </Banner>
           )}
         </>
       )}
-    </BlockStack>
+    </div>
   );
 }

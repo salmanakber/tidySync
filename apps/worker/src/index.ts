@@ -35,7 +35,10 @@ function createWorker(queueName: string, processor: (data: JobPayload) => Promis
       await processor(job.data);
       console.log(`[${queueName}] Completed job ${job.data.jobId}`);
     },
-    { connection, concurrency: 2 },
+    {
+      connection,
+      concurrency: queueName === QUEUE_NAMES.BULK_EDIT ? 4 : 2,
+    },
   );
 
   worker.on("failed", (job, err) => {

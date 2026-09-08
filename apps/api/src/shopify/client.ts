@@ -51,10 +51,15 @@ function isShopifyUnauthorized(err: unknown): boolean {
     message?: string;
     response?: { code?: number };
   };
-  if (e.networkStatusCode === 401) return true;
-  if (e.response?.code === 401) return true;
+  if (e.networkStatusCode === 401 || e.networkStatusCode === 403) return true;
+  if (e.response?.code === 401 || e.response?.code === 403) return true;
   const msg = e.message ?? "";
-  return msg.includes("Unauthorized") || msg.includes("401");
+  return (
+    msg.includes("Unauthorized") ||
+    msg.includes("Forbidden") ||
+    msg.includes("401") ||
+    msg.includes("403")
+  );
 }
 
 export async function exchangeSessionToken(
@@ -134,7 +139,9 @@ async function onlineSessionForShop(shop: string): Promise<Session | null> {
 
 /**
  * Resolve a Shopify Admin API session for merchant-initiated requests.
- * When an App Bridge session token is present, always exchange it — never use stale DB tokens.
+ * Prefer a fresh token exchange when App Bridge sends a session token; if that
+ * fails (expired JWT, clock skew, transient Shopify error), fall back to the
+ * stored offline/online token so AI Edit / previews keep working.
  */
 export async function resolveMerchantSession(
   shop: string,
@@ -143,25 +150,26 @@ export async function resolveMerchantSession(
   if (sessionToken) {
     try {
       return await exchangeSessionToken(shop, sessionToken, "online");
-    } catch {
+    } catch (onlineErr) {
       try {
         return await exchangeSessionToken(shop, sessionToken, "offline");
       } catch {
-        throw new Error(
-          "Shopify session token exchange failed. Re-open TidySync from Shopify Admin and click Connect if prompted.",
+        console.warn(
+          `[shopify] session token exchange failed for ${shop}; trying stored sessions`,
+          onlineErr instanceof Error ? onlineErr.message : onlineErr,
         );
       }
     }
   }
 
-  const online = await onlineSessionForShop(shop);
-  if (online) return online;
-
   const offline = await offlineSessionForShop(shop);
   if (offline) return offline;
 
+  const online = await onlineSessionForShop(shop);
+  if (online) return online;
+
   throw new Error(
-    "No Shopify connection for this store. Open TidySync from Shopify Admin and complete Connect / install.",
+    "Shopify connection needs a refresh. Re-open TidySync from Shopify Admin and click Connect if prompted — then try again.",
   );
 }
 

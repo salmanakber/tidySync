@@ -648,9 +648,19 @@ export function Dashboard() {
       setSelectedJob(result.generateNlBulkEdit);
       setPreviewOpen(true);
       setNlPrompt("");
-      void loadData();
+      void loadData({ silent: true });
     } catch (e) {
-      showOperationalError(e, "Bulk edit failed");
+      const msg = errorMessage(e, "I couldn't build that preview");
+      if (msg.includes("Connect") || msg.includes("session") || msg.includes("Shopify")) {
+        pushAlert({
+          tone: "warning",
+          title: "Shopify connection needs a refresh",
+          message: msg,
+          primaryAction: { content: "Connect", onAction: beginInstall },
+        });
+      } else {
+        showOperationalError(e, "I couldn't build that preview — try rephrasing or mentioning a product with @");
+      }
     } finally {
       setAiLoading(false);
     }
@@ -2268,8 +2278,8 @@ export function Dashboard() {
             : selectedJob?.type === "AGENT_RUN"
               ? "Agent mission result"
               : selectedJob?.type === "IMPORT"
-                ? "Review import — confirmation required"
-                : "Review AI changes — confirmation required"
+                ? "Review your import"
+                : "Review your changes"
         }
         primaryAction={
           selectedJob?.status === "PREVIEW" &&
@@ -2277,7 +2287,7 @@ export function Dashboard() {
           selectedJob?.type !== "AGENT_RUN"
             ? {
                 content:
-                  selectedJob?.type === "IMPORT" ? "Confirm & import to Shopify" : "Confirm & apply changes",
+                  selectedJob?.type === "IMPORT" ? "Import to Shopify" : "Apply to Shopify",
                 onAction: () => selectedJob && handleApprove(selectedJob.id),
                 loading: approveLoading,
                 disabled: approveLoading,
@@ -2294,7 +2304,7 @@ export function Dashboard() {
                 },
               }
             : {
-                content: "Close",
+                content: "Not yet",
                 onAction: () => setPreviewOpen(false),
                 disabled: approveLoading,
               },
@@ -2302,19 +2312,16 @@ export function Dashboard() {
         size="large"
       >
         <Modal.Section>
-          <BlockStack gap="400">
+          <div className="tidysync-preview-modal">
             {selectedJob?.status === "PREVIEW" &&
               selectedJob?.type !== "BACKUP" &&
               selectedJob?.type !== "AGENT_RUN" && (
-              <Banner tone="warning">
+              <div className="tidysync-preview-reassure" role="status">
+                <strong>Safe to review.</strong>{" "}
                 {selectedJob?.type === "IMPORT"
-                  ? "Nothing is created in Shopify until you click "
-                  : "Nothing is changed in your Shopify store until you click "}
-                <strong>
-                  {selectedJob?.type === "IMPORT" ? "Confirm & import to Shopify" : "Confirm & apply changes"}
-                </strong>
-                . Review every row below before confirming.
-              </Banner>
+                  ? "Nothing is created in Shopify until you click Import to Shopify."
+                  : "Nothing changes in your store until you click Apply to Shopify."}
+              </div>
             )}
             <DiffPreviewPanel
               impactSummary={selectedJob?.impactSummary}
@@ -2325,8 +2332,9 @@ export function Dashboard() {
               streamPlan={false}
               jobType={selectedJob?.type}
               jobStatus={selectedJob?.status}
+              nlPrompt={selectedJob?.nlPrompt}
             />
-          </BlockStack>
+          </div>
         </Modal.Section>
       </Modal>
 

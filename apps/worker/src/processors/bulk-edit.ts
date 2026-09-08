@@ -276,6 +276,24 @@ async function processAiDescriptionRewrite(
 }
 
 export async function processBulkEditJob(jobId: string, tenantId: string, shop: string) {
+  try {
+    await processBulkEditJobInner(jobId, tenantId, shop);
+  } catch (err) {
+    const { friendlyShopifyError } = await import("../shopify");
+    const message = friendlyShopifyError(err);
+    await prisma.job.update({
+      where: { id: jobId },
+      data: {
+        status: "FAILED",
+        finishedAt: new Date(),
+        errorSummary: message,
+      },
+    });
+    throw new Error(message);
+  }
+}
+
+async function processBulkEditJobInner(jobId: string, tenantId: string, shop: string) {
   const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job?.mutationPlan) throw new Error("Bulk edit job missing plan");
 

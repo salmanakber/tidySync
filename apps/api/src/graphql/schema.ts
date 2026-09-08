@@ -730,11 +730,10 @@ export const resolvers = {
         }
       }
 
-      const { canApplyBulkEditSynchronously, applyBulkEditSynchronously } = await import(
-        "../services/apply-bulk-edit"
-      );
+      const { canApplyBulkEditSynchronously, applyBulkEditSynchronously, isSmallBulkEditJob } =
+        await import("../services/apply-bulk-edit");
 
-      // Small AI/bulk edits (≤20 rows): apply immediately — no Redis queue / progress stall
+      // Small AI/bulk edits (≤50 rows): apply immediately — no Redis queue wait
       if (canApplyBulkEditSynchronously(job)) {
         await prisma.job.update({
           where: { id: job.id },
@@ -742,33 +741,65 @@ export const resolvers = {
         });
         try {
           await applyBulkEditSynchronously(job.id, tenantId, shop, ctx.sessionToken);
+          await prisma.auditLog.create({
+            data: {
+              tenantId,
+              action: "job.approved",
+              resourceType: "job",
+              resourceId: job.id,
+              metadata: { type: job.type, mode: "sync" },
+            },
+          });
+          return mapJob(
+            await prisma.job.findUniqueOrThrow({
+              where: { id: job.id },
+              include: { lineItems: { take: 0 } },
+            }),
+          );
         } catch (err) {
-          const message = err instanceof Error ? err.message : "Apply failed";
+          const fresh = await prisma.job.findUnique({ where: { id: job.id } });
+          const alreadyWrote = (fresh?.successCount ?? 0) > 0 || (fresh?.processedCount ?? 0) > 0;
+          if (alreadyWrote) {
+            const message = err instanceof Error ? err.message : "Apply failed";
+            await prisma.job.update({
+              where: { id: job.id },
+              data: {
+                status: fresh?.status === "COMPLETED" ? "COMPLETED" : "FAILED",
+                errorSummary: message,
+                finishedAt: fresh?.finishedAt ?? new Date(),
+              },
+            });
+            if (fresh?.status === "COMPLETED") {
+              return mapJob(
+                await prisma.job.findUniqueOrThrow({
+                  where: { id: job.id },
+                  include: { lineItems: { take: 0 } },
+                }),
+              );
+            }
+            throw new Error(message);
+          }
+          // Fall through to queue so a worker can retry with the offline token
+          console.warn(
+            `[approveJob] sync apply failed for ${job.id}, queueing instead:`,
+            err instanceof Error ? err.message : err,
+          );
           await prisma.job.update({
             where: { id: job.id },
-            data: { status: "FAILED", errorSummary: message, finishedAt: new Date() },
+            data: {
+              status: "PREVIEW",
+              errorSummary: null,
+              finishedAt: null,
+              startedAt: null,
+              processedCount: 0,
+              successCount: 0,
+              failedCount: 0,
+            },
           });
-          throw new Error(message);
         }
-
-        await prisma.auditLog.create({
-          data: {
-            tenantId,
-            action: "job.approved",
-            resourceType: "job",
-            resourceId: job.id,
-            metadata: { type: job.type, mode: "sync" },
-          },
-        });
-
-        return mapJob(
-          await prisma.job.findUniqueOrThrow({
-            where: { id: job.id },
-            include: { lineItems: { take: 0 } },
-          }),
-        );
       }
 
+      const smallBulk = isSmallBulkEditJob(job);
       const updated = await prisma.job.update({
         where: { id: job.id },
         data: { status: "QUEUED", approvedAt: new Date() },
@@ -776,16 +807,24 @@ export const resolvers = {
       });
 
       const queuePayload = { jobId: job.id, tenantId, shop };
+      // BullMQ: lower priority number = runs first. Tiny edits jump ahead of large jobs.
+      const queueOpts = smallBulk
+        ? { priority: 1, removeOnComplete: 50, removeOnFail: 20 }
+        : { priority: 10, removeOnComplete: 50, removeOnFail: 20 };
 
       const enqueue = async () => {
         if (job.type === "IMPORT") {
-          await importQueue.add("import", queuePayload);
+          await importQueue.add("import", queuePayload, queueOpts);
         } else if (job.type === "EXPORT" || job.type === "BACKUP") {
-          await exportQueue.add(job.type === "BACKUP" ? "backup" : "export", queuePayload);
+          await exportQueue.add(
+            job.type === "BACKUP" ? "backup" : "export",
+            queuePayload,
+            queueOpts,
+          );
         } else if (job.type === "BULK_EDIT") {
-          await bulkEditQueue.add("bulk-edit", queuePayload);
+          await bulkEditQueue.add("bulk-edit", queuePayload, queueOpts);
         } else if (job.type === "SUPPLIER_FEED_SYNC") {
-          await bulkEditQueue.add("supplier-feed", queuePayload);
+          await bulkEditQueue.add("supplier-feed", queuePayload, queueOpts);
         }
       };
 

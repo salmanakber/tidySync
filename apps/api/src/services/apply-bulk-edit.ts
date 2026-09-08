@@ -2,7 +2,45 @@ import { prisma } from "@tidysync/database";
 import type { ExtendedDiffRow, MutationPlan } from "@tidysync/shared";
 import { merchantGraphqlRequest } from "../shopify/client";
 
-const SMALL_BULK_SYNC_LIMIT = 20;
+const SMALL_BULK_SYNC_LIMIT = 50;
+
+/** Prefer sync when the change set is small — merchants should not wait on Redis for tiny edits. */
+export function canApplyBulkEditSynchronously(job: {
+  type: string;
+  rowCount: number | null;
+  mutationPlan: unknown;
+  diffPreview: unknown;
+}): boolean {
+  if (job.type !== "BULK_EDIT") return false;
+
+  const plan = job.mutationPlan as MutationPlan | null;
+  if (!plan?.steps?.length) return false;
+
+  const needsAiWorker = plan.steps.some(
+    (s) => s.action === "ai_improve_seo" || s.action === "ai_rewrite_description",
+  );
+  if (needsAiWorker) return false;
+
+  const root = job.mutationPlan as { action?: string };
+  if (root.action === "merge_products" || root.action === "bulk_merge_products") return false;
+
+  const rows = (job.diffPreview as { rows?: unknown[] } | null)?.rows;
+  const count = Array.isArray(rows) && rows.length > 0 ? rows.length : (job.rowCount ?? 0);
+  if (count <= 0 || count > SMALL_BULK_SYNC_LIMIT) return false;
+
+  return Array.isArray(rows) && rows.length > 0;
+}
+
+export function isSmallBulkEditJob(job: {
+  type: string;
+  rowCount: number | null;
+  diffPreview: unknown;
+}): boolean {
+  if (job.type !== "BULK_EDIT") return false;
+  const rows = (job.diffPreview as { rows?: unknown[] } | null)?.rows;
+  const count = Array.isArray(rows) && rows.length > 0 ? rows.length : (job.rowCount ?? 0);
+  return count > 0 && count <= SMALL_BULK_SYNC_LIMIT;
+}
 
 const VARIANTS_BULK_UPDATE = `#graphql
   mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
@@ -50,30 +88,6 @@ function productUpdateInput(row: ExtendedDiffRow): Record<string, unknown> {
       .filter(Boolean);
   }
   return input;
-}
-
-export function canApplyBulkEditSynchronously(job: {
-  type: string;
-  rowCount: number | null;
-  mutationPlan: unknown;
-  diffPreview: unknown;
-}): boolean {
-  if (job.type !== "BULK_EDIT") return false;
-  const rows = (job.diffPreview as { rows?: unknown[] } | null)?.rows;
-  const count = rows?.length ?? job.rowCount ?? 0;
-  if (count <= 0 || count > SMALL_BULK_SYNC_LIMIT) return false;
-
-  const plan = job.mutationPlan as MutationPlan | null;
-  if (!plan?.steps?.length) return false;
-  const needsAiWorker = plan.steps.some(
-    (s) => s.action === "ai_improve_seo" || s.action === "ai_rewrite_description",
-  );
-  if (needsAiWorker) return false;
-
-  const root = job.mutationPlan as { action?: string };
-  if (root.action === "merge_products" || root.action === "bulk_merge_products") return false;
-
-  return Array.isArray(rows) && rows.length > 0;
 }
 
 /** Apply a small approved bulk edit immediately (no Redis/worker queue). */

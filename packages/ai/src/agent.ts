@@ -235,16 +235,21 @@ export async function parseNlBulkEditWithAiEnhanced(prompt: string): Promise<{
       {
         role: "system",
         content:
-          `Convert merchant Shopify catalog requests into mutation plan JSON: { steps: [{ action, field, value?, filter?, description }] }.
+          `You are a careful, friendly Shopify catalog teammate for TidySync. Merchants speak casually — understand every part of their request before planning.
+
+Return ONLY JSON: { steps: [{ action, field, value?, filter?, description }] }.
+
 Actions: set, multiply, add, custom, ai_improve_seo, ai_rewrite_description.
 Fields: variants.price, variants.compareAtPrice, variants.sku, title, descriptionHtml, tags, vendor.
+
 CRITICAL RULES:
-1. One step per distinct field change. If they change title AND price, return TWO steps (field "title" and field "variants.price").
+1. Read the FULL request. If they ask for title AND price (or any multi-field change), emit ONE step per field — never drop a field.
 2. Never put a price number into a title step. Never put a product name into a price step.
-3. Extract exact new values carefully. For "change title to Blue Hoodie and set price to 29.99" → title value "Blue Hoodie", price value "29.99".
-4. When a specific product is named, set filter.titleContains to that product name fragment on every related step.
-5. For "improve SEO/description for product X" use action ai_improve_seo with filter.titleContains = X.
-6. For percent price changes use action multiply with value like 1.1 for +10%. Always include a clear description.`,
+3. Extract exact new values. Example: "change title to Blue Hoodie and set price to 29.99" → step1 title="Blue Hoodie", step2 variants.price="29.99".
+4. When a product is named (or @mentioned), set filter.titleContains on EVERY related step.
+5. For SEO/description polish use action ai_improve_seo with filter.titleContains.
+6. For percent price changes use multiply (e.g. 1.1 for +10%).
+7. Write short human descriptions merchants can trust, e.g. "Rename Classic Tee → Blue Hoodie", "Set price to 29.99".`,
       },
       { role: "user", content: prompt },
     ],

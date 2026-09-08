@@ -268,13 +268,15 @@ export const MUTATIONS = {
   nlBulkEdit: `
     mutation NlBulkEdit($prompt: String!) {
       generateNlBulkEdit(prompt: $prompt) {
-        id status mutationPlan diffPreview impactSummary
+        id type status nlPrompt mutationPlan diffPreview impactSummary rowCount
       }
     }
   `,
   approveJob: `
     mutation ApproveJob($jobId: ID!) {
-      approveJob(jobId: $jobId) { id status }
+      approveJob(jobId: $jobId) {
+        id status successCount failedCount errorSummary rowCount type
+      }
     }
   `,
   undoJob: `

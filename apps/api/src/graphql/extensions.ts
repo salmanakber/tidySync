@@ -1495,20 +1495,32 @@ export async function generateNlBulkEditWithAi(
   let diff: { rows: unknown[]; totalChanges: number };
   try {
     diff = await buildDiffFromMutationPlan(shop, plan, sessionToken);
+    if (sessionToken) {
+      try {
+        const { refreshOfflineTokenFromSession } = await import("../shopify/client");
+        await refreshOfflineTokenFromSession(shop, sessionToken);
+      } catch {
+        /* preview can still succeed with online token; offline refresh is best-effort */
+      }
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    const friendly =
+      msg.includes("session") || msg.includes("Connect") || msg.includes("Forbidden") || msg.includes("401") || msg.includes("403")
+        ? "I couldn't reach your Shopify catalog just now. Re-open TidySync from Shopify Admin, click Connect if prompted, then try your edit again."
+        : msg.includes("Shopify") || msg.includes("connection")
+          ? msg
+          : err instanceof Error
+            ? err.message
+            : "Could not load products for preview";
     await prisma.job.update({
       where: { id: job.id },
       data: {
         status: "FAILED",
-        errorSummary: msg.includes("Shopify") || msg.includes("connection")
-          ? msg
-          : err instanceof Error
-            ? err.message
-            : "Could not load products for preview",
+        errorSummary: friendly,
       },
     });
-    throw err;
+    throw new Error(friendly);
   }
 
   if (diff.totalChanges === 0) {

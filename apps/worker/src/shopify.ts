@@ -19,7 +19,9 @@ export async function getShopGraphqlClient(shop: string) {
   const sessionRow = await sessionRepository.findOfflineForShop(shop);
 
   if (!sessionRow?.accessToken) {
-    throw new Error(`No offline session for shop ${shop}`);
+    throw new Error(
+      `Shopify is not connected for ${shop}. Re-open TidySync from Shopify Admin and click Connect, then approve the change again.`,
+    );
   }
 
   const session = new Session({
@@ -31,4 +33,16 @@ export async function getShopGraphqlClient(shop: string) {
   });
 
   return new shopify.clients.Graphql({ session });
+}
+
+/** Turn Shopify API errors into merchant-friendly messages. */
+export function friendlyShopifyError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (msg.includes("403") || msg.includes("Forbidden")) {
+    return "Shopify blocked this update (session expired or missing permission). Re-open TidySync from Shopify Admin, click Connect if prompted, then try again.";
+  }
+  if (msg.includes("401") || msg.includes("Unauthorized")) {
+    return "Shopify connection expired. Re-open TidySync from Shopify Admin and click Connect, then try again.";
+  }
+  return msg;
 }
