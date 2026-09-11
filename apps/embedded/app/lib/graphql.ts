@@ -501,4 +501,12 @@ export const MUTATIONS = {
       }
     }
   `,
+  selectFreePlan: `
+    mutation SelectFreePlan {
+      selectFreePlan {
+        id billingStatus
+        plan { name slug isFree }
+      }
+    }
+  `,
 };

@@ -1094,12 +1094,23 @@ export function Dashboard() {
     ? Math.min(100, Math.round((tenant.productCount / tenant.plan.maxProducts) * 100))
     : 0;
 
+  const needsPlanSelection =
+    Boolean(tenant) &&
+    !tenant?.billingBypass &&
+    tenant?.billingStatus === "PENDING_APPROVAL";
+
   const needsBilling =
-    tenant &&
-    !tenant.billingBypass &&
-    tenant.billingStatus &&
-    tenant.billingStatus !== "ACTIVE" &&
-    !tenant.plan?.isFree;
+    needsPlanSelection ||
+    (Boolean(tenant) &&
+      !tenant?.billingBypass &&
+      Boolean(tenant?.billingStatus) &&
+      tenant?.billingStatus !== "ACTIVE" &&
+      !tenant?.plan?.isFree);
+
+  // After install/reinstall, land on Billing so Free is clearly selectable (App Store 1.2.2)
+  useEffect(() => {
+    if (needsPlanSelection) setTab(11);
+  }, [needsPlanSelection]);
 
   const planGates = useMemo(() => {
     const plan = tenant?.plan;
@@ -1263,7 +1274,20 @@ export function Dashboard() {
           </Layout.Section>
         )}
 
-        {needsBilling && (
+        {needsPlanSelection && (
+          <Layout.Section>
+            <Banner
+              tone="info"
+              title="Choose a plan to continue"
+              action={{ content: "View plans", onAction: () => setTab(11) }}
+            >
+              Every install requires choosing a plan. You can continue on Free or upgrade —
+              nothing is charged until you approve in Shopify.
+            </Banner>
+          </Layout.Section>
+        )}
+
+        {needsBilling && !needsPlanSelection && (
           <Layout.Section>
             <Banner
               tone="warning"
@@ -2188,13 +2212,16 @@ export function Dashboard() {
                     <div>
                       <p className="tidysync-section-title">Choose a plan</p>
                       <p className="tidysync-section-sub">
-                        Upgrade for higher product limits and more AI credits. Billing runs through Shopify.
+                        {needsPlanSelection
+                          ? "Select Free or a paid plan to finish setup. Paid plans require Shopify approval."
+                          : "Upgrade for higher product limits and more AI credits. Billing runs through Shopify."}
                       </p>
                     </div>
 
                     <div className="tidysync-plan-cards">
                       {plans.map((plan) => {
-                        const isCurrent = tenant?.plan?.slug === plan.slug;
+                        const isCurrent =
+                          tenant?.billingStatus === "ACTIVE" && tenant?.plan?.slug === plan.slug;
                         return (
                           <div
                             key={plan.id}
@@ -2233,18 +2260,52 @@ export function Dashboard() {
                                   Current plan
                                 </Button>
                               ) : plan.isFree ? (
-                                <Button fullWidth disabled={tenant?.plan?.isFree}>
-                                  Included
+                                <Button
+                                  fullWidth
+                                  variant="primary"
+                                  onClick={async () => {
+                                    try {
+                                      await gqlRequest(
+                                        MUTATIONS.selectFreePlan,
+                                        {},
+                                        shop,
+                                        { forceAuthRefresh: true },
+                                      );
+                                      await loadData();
+                                      pushAlert({
+                                        tone: "success",
+                                        title: "Free plan selected",
+                                        message: "You're on Free. Upgrade anytime from Billing.",
+                                        autoDismissMs: 4500,
+                                      });
+                                    } catch (e) {
+                                      showOperationalError(e, "Could not select Free plan");
+                                    }
+                                  }}
+                                >
+                                  Continue with Free
                                 </Button>
                               ) : (
                                 <Button
                                   fullWidth
                                   variant="primary"
                                   onClick={async () => {
-                                    const result = await gqlRequest<{
-                                      createPlanSubscription: { confirmationUrl: string };
-                                    }>(MUTATIONS.subscribePlan, { planSlug: plan.slug }, shop);
-                                    window.open(result.createPlanSubscription.confirmationUrl, "_top");
+                                    try {
+                                      const result = await gqlRequest<{
+                                        createPlanSubscription: { confirmationUrl: string };
+                                      }>(
+                                        MUTATIONS.subscribePlan,
+                                        { planSlug: plan.slug },
+                                        shop,
+                                        { forceAuthRefresh: true },
+                                      );
+                                      window.open(
+                                        result.createPlanSubscription.confirmationUrl,
+                                        "_top",
+                                      );
+                                    } catch (e) {
+                                      showOperationalError(e, "Could not start subscription");
+                                    }
                                   }}
                                 >
                                   Upgrade to {plan.name}

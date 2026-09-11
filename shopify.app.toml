@@ -16,9 +16,9 @@ redirect_urls = [
 [webhooks]
 api_version = "2025-01"
 
-  # Billing + mandatory GDPR compliance webhooks (App Store requirement)
+  # Billing + uninstall + mandatory GDPR compliance webhooks (App Store 1.2.2)
   [[webhooks.subscriptions]]
-  topics = ["app_subscriptions/update", "app_purchases_one_time/update"]
+  topics = ["app_subscriptions/update", "app_purchases_one_time/update", "app/uninstalled"]
   compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
   uri = "/webhooks/shopify"
 

@@ -14,6 +14,8 @@ import {
   createCreditTopUpPurchase,
   listAvailablePlans,
   computeAiCreditsRemaining,
+  selectFreePlan,
+  reconcileBillingForMerchantSession,
 } from "../services/billing";
 import { computeAgentRunsRemaining } from "../services/tenant-limits";
 import {
@@ -278,6 +280,7 @@ export const typeDefs = `#graphql
     saveMappingTemplate(name: String!, platformKey: String!, mappings: JSON!): MappingTemplate!
     cancelJob(jobId: ID!): Job!
     createPlanSubscription(planSlug: String!): BillingConfirmation!
+    selectFreePlan: Tenant!
     purchaseCreditTopUp(credits: Int!): BillingConfirmation!
     adminUpdateTenantPlan(tenantId: ID!, planSlug: String!): Tenant!
     adminUpdateTenantStatus(tenantId: ID!, status: String!): Tenant!
@@ -329,7 +332,15 @@ export const resolvers = {
       const { tenantId, shop } = requireMerchant(ctx);
       let tenant = await tenantRepository.findById(tenantId);
       if (!tenant) return null;
+
+      // App Store 1.2.2: reconcile against Shopify activeSubscriptions — never trust DB alone
       if (shop) {
+        try {
+          await reconcileBillingForMerchantSession(shop);
+          tenant = (await tenantRepository.findById(tenantId)) ?? tenant;
+        } catch {
+          /* offline token may be missing mid-install — plan picker still works */
+        }
         const forceRefresh = args.refreshCatalog ?? tenant.productCount === 0;
         tenant =
           (await import("../services/tenant").then((m) =>
@@ -1059,6 +1070,11 @@ export const resolvers = {
     ) => {
       const { tenantId, shop } = requireActiveMerchant(ctx);
       return createPlanSubscription(shop, tenantId, args.planSlug);
+    },
+    selectFreePlan: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
+      const { tenantId, shop } = requireActiveMerchant(ctx);
+      const tenant = await selectFreePlan(tenantId, shop);
+      return mapTenant(tenant);
     },
     purchaseCreditTopUp: async (
       _: unknown,

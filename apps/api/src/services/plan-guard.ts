@@ -24,7 +24,16 @@ export async function getTenantWithPlan(tenantId: string) {
 
 export async function assertActiveSubscription(tenantId: string) {
   const { tenant, plan } = await loadTenantWithPlan(tenantId);
-  if (tenant.billingBypass || plan.isFree) return tenant;
+  if (tenant.billingBypass) return tenant;
+  // App Store 1.2.2: install/reinstall must choose a plan (including Free) before use
+  if (tenant.billingStatus === "PENDING_APPROVAL") {
+    throw appError(
+      "BILLING_REQUIRED",
+      "Choose a plan in Billing to continue. You can select Free or upgrade — paid plans require Shopify approval.",
+      { planName: plan.name, planSlug: plan.slug, needsPlanSelection: true },
+    );
+  }
+  if (plan.isFree) return tenant;
   if (tenant.billingStatus === "ACTIVE") return tenant;
   throw appError(
     "BILLING_REQUIRED",

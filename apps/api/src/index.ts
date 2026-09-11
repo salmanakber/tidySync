@@ -57,7 +57,11 @@ app.post(
       const shop = validation.domain ?? (req.headers["x-shopify-shop-domain"] as string) ?? "";
 
       const payload = JSON.parse(rawBody) as Record<string, unknown>;
-      if (
+      if (topic === "APP_UNINSTALLED" || topic === "app/uninstalled") {
+        // App Store 1.2.2: clear paid plan so reinstall cannot silently restore it
+        const { handleAppUninstalled } = await import("./services/billing");
+        await handleAppUninstalled(shop);
+      } else if (
         topic === "APP_SUBSCRIPTIONS_UPDATE" ||
         topic === "APP_PURCHASES_ONE_TIME_UPDATE"
       ) {
@@ -193,6 +197,16 @@ app.get("/auth/callback", async (req, res) => {
     } catch {
       /* best-effort cleanup of stale offline tokens */
     }
+  }
+  // Reconcile billing against Shopify (never restore a paid plan from our DB alone)
+  try {
+    const { reconcileBillingForMerchantSession } = await import("./services/billing");
+    await reconcileBillingForMerchantSession(session.shop);
+  } catch (err) {
+    console.warn(
+      `[auth/callback] billing reconcile skipped for ${session.shop}`,
+      err instanceof Error ? err.message : err,
+    );
   }
 
   // Return into Shopify Admin so App Bridge gets host + can mint idToken

@@ -23,7 +23,8 @@ export async function ensureAiCreditsReset(tenantId: string) {
 }
 
 export async function consumeAiCredit(tenantId: string, credits = 1) {
-  const tenant = (await ensureAiCreditsReset(tenantId)) ?? (await tenantRepository.findById(tenantId));
+  const tenant =
+    (await ensureAiCreditsReset(tenantId)) ?? (await tenantRepository.findById(tenantId));
   if (!tenant?.plan) {
     throw appError("NOT_FOUND", "Tenant plan not found.");
   }
@@ -43,23 +44,45 @@ export async function consumeAiCredit(tenantId: string, credits = 1) {
   return tenantRepository.incrementAiCreditsUsed(tenantId, credits);
 }
 
+/**
+ * Ensure a tenant row exists for this shop.
+ * App Store 1.2.2: on reinstall / first install, never restore a remembered paid plan
+ * from our DB — start on free + PENDING_APPROVAL so the merchant must choose a plan
+ * (including Free) before paid features unlock.
+ */
 export async function ensureTenant(shopDomain: string, shopName?: string) {
   const freePlan = await prisma.plan.findFirst({ where: { slug: "free" } });
   const { featureFlagRepository } = await import("@tidysync/database");
   const requireApproval = await featureFlagRepository.isEnabled("require_install_approval");
   const existing = await tenantRepository.findByShopDomain(shopDomain);
+
   if (existing) {
+    const isReinstall = existing.status === "UNINSTALLED";
+    if (isReinstall || existing.billingStatus === "PENDING_APPROVAL") {
+      return tenantRepository.upsertByShopDomain(shopDomain, {
+        shopName,
+        planId: freePlan?.id ?? null,
+        status: "ACTIVE",
+        shopifySubscriptionId: null,
+        billingStatus: "PENDING_APPROVAL",
+        resetInstalledAt: isReinstall,
+      });
+    }
+
+    // Normal session reopen — do not rewrite planId from a stale remembered value
     return tenantRepository.upsertByShopDomain(shopDomain, {
       shopName,
-      planId: existing.planId ?? freePlan?.id,
+      status: "ACTIVE",
     });
   }
+
   return prisma.tenant.create({
     data: {
       shopDomain,
       shopName,
       planId: freePlan?.id,
       status: "ACTIVE",
+      billingStatus: "PENDING_APPROVAL",
       installApproved: !requireApproval,
       aiCreditsResetAt: new Date(),
     },

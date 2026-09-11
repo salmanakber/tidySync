@@ -18,21 +18,37 @@ export const tenantRepository = {
 
   upsertByShopDomain(
     shopDomain: string,
-    data: { shopName?: string; planId?: string },
+    data: {
+      shopName?: string;
+      planId?: string | null;
+      status?: "ACTIVE" | "SUSPENDED" | "UNINSTALLED";
+      shopifySubscriptionId?: string | null;
+      billingStatus?: "ACTIVE" | "PENDING_APPROVAL" | "DECLINED" | "FROZEN";
+      resetInstalledAt?: boolean;
+    },
   ) {
     return prisma.tenant.upsert({
       where: { shopDomain },
       create: {
         shopDomain,
         shopName: data.shopName,
-        planId: data.planId,
-        status: "ACTIVE",
+        planId: data.planId ?? undefined,
+        status: data.status ?? "ACTIVE",
+        billingStatus: data.billingStatus ?? "PENDING_APPROVAL",
+        shopifySubscriptionId: data.shopifySubscriptionId ?? undefined,
         aiCreditsResetAt: new Date(),
       },
       update: {
         shopName: data.shopName ?? undefined,
-        status: "ACTIVE",
+        status: data.status ?? "ACTIVE",
+        ...(data.planId !== undefined ? { planId: data.planId } : {}),
+        ...(data.shopifySubscriptionId !== undefined
+          ? { shopifySubscriptionId: data.shopifySubscriptionId }
+          : {}),
+        ...(data.billingStatus !== undefined ? { billingStatus: data.billingStatus } : {}),
+        ...(data.resetInstalledAt ? { installedAt: new Date() } : {}),
       },
+      include: { plan: true },
     });
   },
 
