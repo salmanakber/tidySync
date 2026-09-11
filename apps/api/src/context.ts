@@ -34,6 +34,10 @@ async function merchantContextForShop(shop: string): Promise<GraphQLContext | nu
   if (!tenant) {
     await ensureTenant(shop);
     tenant = await tenantRepository.findByShopDomain(shop);
+  } else if (tenant.status === "UNINSTALLED") {
+    // Reinstall: session token proves the app is installed again — reactivate + reset plan picker
+    await ensureTenant(shop);
+    tenant = await tenantRepository.findByShopDomain(shop);
   }
   if (!tenant) return null;
   return {

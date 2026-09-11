@@ -88,45 +88,59 @@ function billingChargeLookupIds(chargeId: string, type: "subscription" | "onetim
   return [...new Set([chargeId, gid, numeric].filter(Boolean))];
 }
 
-export async function createPlanSubscription(shop: string, tenantId: string, planSlug: string) {
+export async function createPlanSubscription(
+  shop: string,
+  tenantId: string,
+  planSlug: string,
+  sessionToken?: string,
+) {
   const plan = await prisma.plan.findUnique({ where: { slug: planSlug } });
   if (!plan || plan.isFree) throw new Error("Invalid plan for subscription");
 
-  const client = await getShopGraphqlClient(shop);
+  // Prefer live App Bridge session token — offline DB token may be missing after reinstall
+  const { merchantGraphqlRequest } = await import("../shopify/client");
   const name = plan.shopifyPlanName ?? `TidySync ${plan.name}`;
 
-  const response = await client.request(APP_SUBSCRIPTION_CREATE, {
-    variables: {
-      name,
-      returnUrl: `${process.env.APP_URL ?? "http://localhost:4000"}/billing/confirm?shop=${encodeURIComponent(shop)}&type=subscription&plan=${planSlug}`,
-      test: billingTestMode(),
-      lineItems: [
-        {
-          plan: {
-            appRecurringPricingDetails: {
-              price: { amount: plan.priceMonthlyCents / 100, currencyCode: "USD" },
-              interval: "EVERY_30_DAYS",
-            },
+  const response = (await merchantGraphqlRequest(shop, sessionToken, APP_SUBSCRIPTION_CREATE, {
+    name,
+    returnUrl: `${process.env.APP_URL ?? "http://localhost:4000"}/billing/confirm?shop=${encodeURIComponent(shop)}&type=subscription&plan=${planSlug}`,
+    test: billingTestMode(),
+    lineItems: [
+      {
+        plan: {
+          appRecurringPricingDetails: {
+            price: { amount: plan.priceMonthlyCents / 100, currencyCode: "USD" },
+            interval: "EVERY_30_DAYS",
           },
         },
-      ],
-    },
-  });
-
-  const data = response.data as {
-    appSubscriptionCreate: {
+      },
+    ],
+  })) as {
+    data?: {
+      appSubscriptionCreate: {
+        appSubscription: { id: string; status: string } | null;
+        confirmationUrl: string | null;
+        userErrors: Array<{ message: string }>;
+      };
+    };
+    appSubscriptionCreate?: {
       appSubscription: { id: string; status: string } | null;
       confirmationUrl: string | null;
       userErrors: Array<{ message: string }>;
     };
   };
 
-  if (data.appSubscriptionCreate.userErrors?.length) {
-    throw new Error(data.appSubscriptionCreate.userErrors.map((e) => e.message).join(", "));
+  const payload = response.data?.appSubscriptionCreate ?? response.appSubscriptionCreate;
+  if (!payload) {
+    throw new Error("Failed to create subscription — empty Shopify response");
   }
 
-  const subscription = data.appSubscriptionCreate.appSubscription;
-  if (!subscription?.id || !data.appSubscriptionCreate.confirmationUrl) {
+  if (payload.userErrors?.length) {
+    throw new Error(payload.userErrors.map((e) => e.message).join(", "));
+  }
+
+  const subscription = payload.appSubscription;
+  if (!subscription?.id || !payload.confirmationUrl) {
     throw new Error("Failed to create subscription");
   }
 
@@ -142,48 +156,62 @@ export async function createPlanSubscription(shop: string, tenantId: string, pla
   });
 
   await tenantRepository.update(tenantId, {
+    status: "ACTIVE",
     billingStatus: "PENDING_APPROVAL",
     shopifySubscriptionId: subscription.id,
   });
 
   return {
-    confirmationUrl: data.appSubscriptionCreate.confirmationUrl,
+    confirmationUrl: payload.confirmationUrl,
     chargeId: subscription.id,
   };
 }
 
-export async function createCreditTopUpPurchase(shop: string, tenantId: string, credits: number) {
+export async function createCreditTopUpPurchase(
+  shop: string,
+  tenantId: string,
+  credits: number,
+  sessionToken?: string,
+) {
   if (credits < 1 || credits > 500) throw new Error("Credits must be between 1 and 500");
 
   const tenant = await tenantRepository.findById(tenantId);
   if (tenant?.plan?.isFree) throw new Error("Credit top-ups require a paid plan");
 
   const amountCents = credits * CREDIT_TOP_UP_PRICE_CENTS;
-  const client = await getShopGraphqlClient(shop);
+  const { merchantGraphqlRequest } = await import("../shopify/client");
 
-  const response = await client.request(APP_PURCHASE_ONE_TIME_CREATE, {
-    variables: {
-      name: `TidySync AI credits (${credits})`,
-      returnUrl: `${process.env.APP_URL ?? "http://localhost:4000"}/billing/confirm?shop=${encodeURIComponent(shop)}&type=onetime&credits=${credits}`,
-      test: billingTestMode(),
-      price: { amount: amountCents / 100, currencyCode: "USD" },
-    },
-  });
-
-  const data = response.data as {
-    appPurchaseOneTimeCreate: {
+  const response = (await merchantGraphqlRequest(shop, sessionToken, APP_PURCHASE_ONE_TIME_CREATE, {
+    name: `TidySync AI credits (${credits})`,
+    returnUrl: `${process.env.APP_URL ?? "http://localhost:4000"}/billing/confirm?shop=${encodeURIComponent(shop)}&type=onetime&credits=${credits}`,
+    test: billingTestMode(),
+    price: { amount: amountCents / 100, currencyCode: "USD" },
+  })) as {
+    data?: {
+      appPurchaseOneTimeCreate: {
+        appPurchaseOneTime: { id: string; status: string } | null;
+        confirmationUrl: string | null;
+        userErrors: Array<{ message: string }>;
+      };
+    };
+    appPurchaseOneTimeCreate?: {
       appPurchaseOneTime: { id: string; status: string } | null;
       confirmationUrl: string | null;
       userErrors: Array<{ message: string }>;
     };
   };
 
-  if (data.appPurchaseOneTimeCreate.userErrors?.length) {
-    throw new Error(data.appPurchaseOneTimeCreate.userErrors.map((e) => e.message).join(", "));
+  const payload = response.data?.appPurchaseOneTimeCreate ?? response.appPurchaseOneTimeCreate;
+  if (!payload) {
+    throw new Error("Failed to create one-time purchase — empty Shopify response");
   }
 
-  const purchase = data.appPurchaseOneTimeCreate.appPurchaseOneTime;
-  if (!purchase?.id || !data.appPurchaseOneTimeCreate.confirmationUrl) {
+  if (payload.userErrors?.length) {
+    throw new Error(payload.userErrors.map((e) => e.message).join(", "));
+  }
+
+  const purchase = payload.appPurchaseOneTime;
+  if (!purchase?.id || !payload.confirmationUrl) {
     throw new Error("Failed to create one-time purchase");
   }
 
@@ -199,7 +227,7 @@ export async function createCreditTopUpPurchase(shop: string, tenantId: string, 
   });
 
   return {
-    confirmationUrl: data.appPurchaseOneTimeCreate.confirmationUrl,
+    confirmationUrl: payload.confirmationUrl,
     chargeId: purchase.id,
   };
 }

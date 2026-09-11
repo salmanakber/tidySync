@@ -55,6 +55,7 @@ import { BackupStudio } from "./BackupStudio";
 import { DuplicateStudio } from "./DuplicateStudio";
 import { GoogleSheetsStudio } from "./GoogleSheetsStudio";
 import { MigrationWizard } from "./MigrationWizard";
+import { WelcomeTour, shouldAutoStartWelcomeTour, type WelcomePlanKind } from "./WelcomeTour";
 import { WorkspaceNav } from "./WorkspaceNav";
 import { LiveJobsBar } from "./LiveJobsBar";
 import { StickyJobProgress } from "./StickyJobProgress";
@@ -314,16 +315,44 @@ export function Dashboard() {
       if (tenantData.meTenant?.shopDomain) {
         setSessionShop(tenantData.meTenant.shopDomain);
       }
-      const jobsData = await gqlRequest<{ jobs: Job[] }>(QUERIES.jobs, { limit: 8 }, shop);
-      setJobs(jobsData.jobs);
-      const plansData = await gqlRequest<{ availablePlans: PlanOption[] }>(QUERIES.availablePlans, {}, shop);
-      setPlans(plansData.availablePlans);
-      const templatesData = await gqlRequest<{ mappingTemplates: typeof mappingTemplates }>(
-        QUERIES.mappingTemplates,
-        {},
-        shop,
-      );
-      setMappingTemplates(templatesData.mappingTemplates);
+
+      // Plans must load even when billing is PENDING (features locked until plan chosen)
+      try {
+        const plansData = await gqlRequest<{ availablePlans: PlanOption[] }>(
+          QUERIES.availablePlans,
+          {},
+          shop,
+        );
+        setPlans(plansData.availablePlans);
+      } catch {
+        /* non-fatal */
+      }
+
+      const pendingPlan =
+        tenantData.meTenant &&
+        !tenantData.meTenant.billingBypass &&
+        tenantData.meTenant.billingStatus === "PENDING_APPROVAL";
+
+      if (!pendingPlan) {
+        try {
+          const jobsData = await gqlRequest<{ jobs: Job[] }>(QUERIES.jobs, { limit: 8 }, shop);
+          setJobs(jobsData.jobs);
+        } catch (e) {
+          showOperationalError(e, "Could not load jobs");
+        }
+        try {
+          const templatesData = await gqlRequest<{ mappingTemplates: typeof mappingTemplates }>(
+            QUERIES.mappingTemplates,
+            {},
+            shop,
+          );
+          setMappingTemplates(templatesData.mappingTemplates);
+        } catch {
+          /* non-fatal */
+        }
+      } else {
+        setJobs([]);
+      }
       setError(null);
     } catch (e) {
       const message = errorMessage(e, "Failed to load dashboard data");
@@ -1107,10 +1136,108 @@ export function Dashboard() {
       tenant?.billingStatus !== "ACTIVE" &&
       !tenant?.plan?.isFree);
 
-  // After install/reinstall, land on Billing so Free is clearly selectable (App Store 1.2.2)
+  // After install/reinstall, force Billing only until a plan is chosen (App Store 1.2.2)
   useEffect(() => {
-    if (needsPlanSelection) setTab(11);
-  }, [needsPlanSelection]);
+    if (needsPlanSelection && tab !== 11) setTab(11);
+  }, [needsPlanSelection, tab]);
+
+  const selectWorkspaceTab = useCallback(
+    (index: number) => {
+      if (needsPlanSelection && index !== 11) {
+        setTab(11);
+        return;
+      }
+      setTab(index);
+    },
+    [needsPlanSelection],
+  );
+
+  const [planActionLoading, setPlanActionLoading] = useState<string | null>(null);
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
+  const [welcomePlanKind, setWelcomePlanKind] = useState<WelcomePlanKind>("free");
+  const [welcomePlanName, setWelcomePlanName] = useState("Free");
+
+  const openWelcome = useCallback((kind: WelcomePlanKind, name: string) => {
+    setWelcomePlanKind(kind);
+    setWelcomePlanName(name);
+    setWelcomeOpen(true);
+  }, []);
+
+  const handleSelectFreePlan = useCallback(async () => {
+    if (!shop) return;
+    setPlanActionLoading("free");
+    try {
+      await gqlRequest(MUTATIONS.selectFreePlan, {}, shop, { forceAuthRefresh: true });
+      await loadData();
+      setTab(0);
+      openWelcome("free", "Free");
+    } catch (e) {
+      showOperationalError(e, "Could not select Free plan");
+    } finally {
+      setPlanActionLoading(null);
+    }
+  }, [shop, loadData, pushAlert, showOperationalError, openWelcome]);
+
+  const handleUpgradePlan = useCallback(
+    async (planSlug: string, planName?: string) => {
+      if (!shop) return;
+      setPlanActionLoading(planSlug);
+      try {
+        const result = await gqlRequest<{
+          createPlanSubscription: { confirmationUrl: string };
+        }>(MUTATIONS.subscribePlan, { planSlug }, shop, { forceAuthRefresh: true });
+        // Remember which plan for welcome after Shopify redirect
+        try {
+          sessionStorage.setItem(
+            "tidysync_pending_welcome",
+            JSON.stringify({ kind: "paid", name: planName ?? planSlug }),
+          );
+        } catch {
+          /* ignore */
+        }
+        window.open(result.createPlanSubscription.confirmationUrl, "_top");
+      } catch (e) {
+        showOperationalError(e, "Could not start subscription");
+      } finally {
+        setPlanActionLoading(null);
+      }
+    },
+    [shop, showOperationalError],
+  );
+
+  // After paid plan approval redirect (?billing=success) — show welcome + tour
+  useEffect(() => {
+    if (typeof window === "undefined" || !tenant) return;
+    if (tenant.billingStatus !== "ACTIVE") return;
+    const params = new URLSearchParams(window.location.search);
+    const billing = params.get("billing");
+    let pending: { kind?: string; name?: string } | null = null;
+    try {
+      const raw = sessionStorage.getItem("tidysync_pending_welcome");
+      if (raw) pending = JSON.parse(raw) as { kind?: string; name?: string };
+    } catch {
+      pending = null;
+    }
+    if (billing === "success" || pending) {
+      try {
+        sessionStorage.removeItem("tidysync_pending_welcome");
+      } catch {
+        /* ignore */
+      }
+      if (shouldAutoStartWelcomeTour() || billing === "success" || pending) {
+        openWelcome(
+          pending?.kind === "paid" || !tenant.plan?.isFree ? "paid" : "free",
+          pending?.name ?? tenant.plan?.name ?? "Starter",
+        );
+      }
+      if (billing) {
+        params.delete("billing");
+        params.delete("tab");
+        const next = `${window.location.pathname}${params.toString() ? `?${params}` : ""}`;
+        window.history.replaceState({}, "", next);
+      }
+    }
+  }, [tenant, openWelcome]);
 
   const planGates = useMemo(() => {
     const plan = tenant?.plan;
@@ -1194,6 +1321,115 @@ export function Dashboard() {
     );
   }
 
+  // App Store 1.2.2: hide all features until merchant explicitly chooses Free or a paid plan
+  if (needsPlanSelection && !welcomeOpen) {
+    return (
+      <div className="tidysync-page-shell">
+        <Page
+          fullWidth
+          title="Choose a plan"
+          subtitle={tenant?.shopName ?? tenant?.shopDomain ?? shop}
+        >
+          <Layout>
+            <Layout.Section>
+              <Banner tone="info" title="Finish setup to unlock TidySync">
+                Select Free or a paid plan below. Features stay locked until you choose. Paid plans
+                require Shopify approval — Free starts immediately.
+              </Banner>
+            </Layout.Section>
+            <Layout.Section>
+              <div className="tidysync-billing-hero">
+                <InlineStack align="space-between" blockAlign="start" wrap>
+                  <div>
+                    <Text as="h2" variant="headingMd">
+                      <span style={{ color: "#fff" }}>No plan selected yet</span>
+                    </Text>
+                    <div className="meta">
+                      Pick Free or upgrade — nothing is charged until you approve in Shopify.
+                    </div>
+                  </div>
+                  <div
+                    className="tidysync-feature-icon"
+                    style={{
+                      background: "rgba(255,255,255,0.12)",
+                      color: "#fff",
+                      marginBottom: 0,
+                    }}
+                  >
+                    <Icon source={CashDollarIcon} />
+                  </div>
+                </InlineStack>
+              </div>
+            </Layout.Section>
+            <Layout.Section>
+              {plans.length === 0 ? (
+                <Banner tone="info">Loading plans…</Banner>
+              ) : (
+                <div className="tidysync-plan-cards">
+                  {plans.map((plan) => (
+                    <div key={plan.id} className="tidysync-plan-card">
+                      <InlineStack align="space-between" blockAlign="center">
+                        <Text as="h3" variant="headingSm">
+                          {plan.name}
+                        </Text>
+                      </InlineStack>
+                      <div className="tidysync-plan-price">
+                        {plan.isFree
+                          ? "Free"
+                          : `$${(plan.priceMonthlyCents / 100).toFixed(0)}`}
+                        {!plan.isFree && (
+                          <span style={{ fontSize: 14, fontWeight: 500, color: "#6d7175" }}>
+                            /mo
+                          </span>
+                        )}
+                      </div>
+                      <ul className="tidysync-checklist">
+                        <li>{plan.maxProducts.toLocaleString()} products</li>
+                        <li>{plan.aiCreditsPerMonth} AI credits / month</li>
+                        {plan.isFree ? (
+                          <li>Import, export &amp; core catalog tools</li>
+                        ) : (
+                          <>
+                            {plan.agentEnabled && <li>AI Agent missions</li>}
+                            {plan.scheduledJobs && <li>Scheduled automation</li>}
+                            {plan.auditLogEnabled && <li>Audit log &amp; CSV export</li>}
+                          </>
+                        )}
+                      </ul>
+                      <div style={{ marginTop: "auto", paddingTop: 8 }}>
+                        {plan.isFree ? (
+                          <Button
+                            fullWidth
+                            variant="primary"
+                            loading={planActionLoading === "free"}
+                            disabled={Boolean(planActionLoading)}
+                            onClick={() => void handleSelectFreePlan()}
+                          >
+                            Continue with Free
+                          </Button>
+                        ) : (
+                          <Button
+                            fullWidth
+                            variant="primary"
+                            loading={planActionLoading === plan.slug}
+                            disabled={Boolean(planActionLoading)}
+                            onClick={() => void handleUpgradePlan(plan.slug, plan.name)}
+                          >
+                            Upgrade to {plan.name}
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Layout.Section>
+          </Layout>
+        </Page>
+      </div>
+    );
+  }
+
   return (
     <div className="tidysync-page-shell">
     <AppAlertStack
@@ -1274,20 +1510,7 @@ export function Dashboard() {
           </Layout.Section>
         )}
 
-        {needsPlanSelection && (
-          <Layout.Section>
-            <Banner
-              tone="info"
-              title="Choose a plan to continue"
-              action={{ content: "View plans", onAction: () => setTab(11) }}
-            >
-              Every install requires choosing a plan. You can continue on Free or upgrade —
-              nothing is charged until you approve in Shopify.
-            </Banner>
-          </Layout.Section>
-        )}
-
-        {needsBilling && !needsPlanSelection && (
+        {needsBilling && (
           <Layout.Section>
             <Banner
               tone="warning"
@@ -1345,7 +1568,7 @@ export function Dashboard() {
             <WorkspaceNav
               tabs={tabs}
               activeIndex={tab}
-              onSelect={setTab}
+              onSelect={selectWorkspaceTab}
               collapsed={sidebarCollapsed}
               onCollapsedChange={setSidebarCollapsed}
               lockedTabIds={lockedNavTabs}
@@ -2194,13 +2417,17 @@ export function Dashboard() {
                         <div>
                           <Text as="h2" variant="headingMd">
                             <span style={{ color: "#fff" }}>
-                              {tenant?.plan?.name ?? "Free"} plan
+                              {tenant?.billingStatus === "ACTIVE"
+                                ? `${tenant?.plan?.name ?? "Free"} plan`
+                                : "Choose a plan"}
                             </span>
                           </Text>
                           <div className="meta">
-                            {tenant?.productCount?.toLocaleString() ?? 0} products ·{" "}
-                            {tenant?.plan?.aiCreditsRemaining ?? "—"} AI credits left
-                            {tenant?.billingBypass ? " · Testing mode on" : ""}
+                            {tenant?.billingStatus === "ACTIVE"
+                              ? `${tenant?.productCount?.toLocaleString() ?? 0} products · ${
+                                  tenant?.plan?.aiCreditsRemaining ?? "—"
+                                } AI credits left${tenant?.billingBypass ? " · Testing mode on" : ""}`
+                              : "Select Free or a paid plan to unlock the app"}
                           </div>
                         </div>
                         <div className="tidysync-feature-icon" style={{ background: "rgba(255,255,255,0.12)", color: "#fff", marginBottom: 0 }}>
@@ -2212,9 +2439,7 @@ export function Dashboard() {
                     <div>
                       <p className="tidysync-section-title">Choose a plan</p>
                       <p className="tidysync-section-sub">
-                        {needsPlanSelection
-                          ? "Select Free or a paid plan to finish setup. Paid plans require Shopify approval."
-                          : "Upgrade for higher product limits and more AI credits. Billing runs through Shopify."}
+                        Upgrade for higher product limits and more AI credits. Billing runs through Shopify.
                       </p>
                     </div>
 
@@ -2263,25 +2488,9 @@ export function Dashboard() {
                                 <Button
                                   fullWidth
                                   variant="primary"
-                                  onClick={async () => {
-                                    try {
-                                      await gqlRequest(
-                                        MUTATIONS.selectFreePlan,
-                                        {},
-                                        shop,
-                                        { forceAuthRefresh: true },
-                                      );
-                                      await loadData();
-                                      pushAlert({
-                                        tone: "success",
-                                        title: "Free plan selected",
-                                        message: "You're on Free. Upgrade anytime from Billing.",
-                                        autoDismissMs: 4500,
-                                      });
-                                    } catch (e) {
-                                      showOperationalError(e, "Could not select Free plan");
-                                    }
-                                  }}
+                                  loading={planActionLoading === "free"}
+                                  disabled={Boolean(planActionLoading)}
+                                  onClick={() => void handleSelectFreePlan()}
                                 >
                                   Continue with Free
                                 </Button>
@@ -2289,24 +2498,9 @@ export function Dashboard() {
                                 <Button
                                   fullWidth
                                   variant="primary"
-                                  onClick={async () => {
-                                    try {
-                                      const result = await gqlRequest<{
-                                        createPlanSubscription: { confirmationUrl: string };
-                                      }>(
-                                        MUTATIONS.subscribePlan,
-                                        { planSlug: plan.slug },
-                                        shop,
-                                        { forceAuthRefresh: true },
-                                      );
-                                      window.open(
-                                        result.createPlanSubscription.confirmationUrl,
-                                        "_top",
-                                      );
-                                    } catch (e) {
-                                      showOperationalError(e, "Could not start subscription");
-                                    }
-                                  }}
+                                  loading={planActionLoading === plan.slug}
+                                  disabled={Boolean(planActionLoading)}
+                                  onClick={() => void handleUpgradePlan(plan.slug, plan.name)}
                                 >
                                   Upgrade to {plan.name}
                                 </Button>
@@ -2593,6 +2787,14 @@ export function Dashboard() {
           </div>
         </div>
       )}
+
+      <WelcomeTour
+        open={welcomeOpen}
+        planKind={welcomePlanKind}
+        planName={welcomePlanName}
+        onClose={() => setWelcomeOpen(false)}
+        onGoToTab={selectWorkspaceTab}
+      />
     </Page>
     </div>
   );

@@ -150,10 +150,16 @@ export function alertFromError(
       };
     }
     if (error.code === "UNAUTHORIZED" || error.code === "FORBIDDEN") {
+      const reconnect =
+        error.message.includes("App not installed") ||
+        error.message.includes("Click Connect") ||
+        error.message.includes("re-authorize");
       return {
         tone: "critical",
-        title: "Access denied",
-        message: error.message,
+        title: reconnect ? "Reconnect Shopify" : "Access denied",
+        message: reconnect
+          ? "Open TidySync from Shopify Admin (or click Connect) so we can create your subscription."
+          : error.message,
         code: error.code,
       };
     }

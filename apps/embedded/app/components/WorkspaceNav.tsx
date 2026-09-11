@@ -34,6 +34,8 @@ interface WorkspaceNavProps {
   collapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
   lockedTabIds?: Record<string, boolean>;
+  /** When set, only these tab ids are clickable; others are locked. */
+  onlyAllowedTabIds?: string[];
 }
 
 const LOCKED_TAB_LABELS: Record<string, string> = {
@@ -75,6 +77,7 @@ export function WorkspaceNav({
   collapsed = false,
   onCollapsedChange,
   lockedTabIds = {},
+  onlyAllowedTabIds,
 }: WorkspaceNavProps) {
   const groups: NavGroup[] = NAV_GROUPS.map((group) => ({
     label: group.label,
@@ -90,6 +93,8 @@ export function WorkspaceNav({
       })
       .filter((x): x is NavGroup["items"][number] => x != null),
   })).filter((g) => g.items.length > 0);
+
+  const allowed = onlyAllowedTabIds ? new Set(onlyAllowedTabIds) : null;
 
   return (
     <aside
@@ -117,29 +122,40 @@ export function WorkspaceNav({
       </div>
 
       <nav className="tidysync-sidebar-nav">
-        {groups.map((group) => (
+        {groups.map((group) => {
+          const visibleItems = allowed
+            ? group.items.filter(({ tab }) => allowed.has(tab.id))
+            : group.items;
+          if (!visibleItems.length) return null;
+          return (
           <div key={group.label} className="tidysync-sidebar-group">
             <span className="tidysync-sidebar-group-label">{group.label}</span>
             <ul className="tidysync-sidebar-list">
-              {group.items.map(({ index, tab, icon }) => {
+              {visibleItems.map(({ index, tab, icon }) => {
                 const active = activeIndex === index;
                 const isPremium =
                   tab.id === "agent" ||
                   tab.id === "backups" ||
                   tab.id === "schedules" ||
                   tab.id === "audit";
-                const locked = Boolean(lockedTabIds[tab.id]);
+                const locked =
+                  Boolean(lockedTabIds[tab.id]) ||
+                  (allowed != null && !allowed.has(tab.id));
                 return (
                   <li key={tab.id}>
                     <button
                       type="button"
                       className={`tidysync-sidebar-link${active ? " is-active" : ""}${isPremium ? " is-premium" : ""}${locked ? " is-locked" : ""}`}
-                      onClick={() => onSelect(index)}
+                      onClick={() => {
+                        if (locked) return;
+                        onSelect(index);
+                      }}
                       aria-current={active ? "page" : undefined}
+                      disabled={locked}
                       title={
                         collapsed
                           ? locked
-                            ? `${tab.content} (${LOCKED_TAB_LABELS[tab.id] ?? "Upgrade"})`
+                            ? `${tab.content} (${LOCKED_TAB_LABELS[tab.id] ?? "Choose a plan"})`
                             : tab.content
                           : undefined
                       }
@@ -153,7 +169,7 @@ export function WorkspaceNav({
                       )}
                       {locked && (
                         <span className="tidysync-sidebar-pill is-lock">
-                          {LOCKED_TAB_LABELS[tab.id] ?? "Upgrade"}
+                          {LOCKED_TAB_LABELS[tab.id] ?? "Plan"}
                         </span>
                       )}
                     </button>
@@ -162,7 +178,8 @@ export function WorkspaceNav({
               })}
             </ul>
           </div>
-        ))}
+          );
+        })}
       </nav>
     </aside>
   );

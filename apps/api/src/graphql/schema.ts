@@ -1069,7 +1069,7 @@ export const resolvers = {
       ctx: GraphQLContext,
     ) => {
       const { tenantId, shop } = requireActiveMerchant(ctx);
-      return createPlanSubscription(shop, tenantId, args.planSlug);
+      return createPlanSubscription(shop, tenantId, args.planSlug, ctx.sessionToken);
     },
     selectFreePlan: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
       const { tenantId, shop } = requireActiveMerchant(ctx);
@@ -1082,7 +1082,7 @@ export const resolvers = {
       ctx: GraphQLContext,
     ) => {
       const { tenantId, shop } = requireActiveMerchant(ctx);
-      return createCreditTopUpPurchase(shop, tenantId, args.credits);
+      return createCreditTopUpPurchase(shop, tenantId, args.credits, ctx.sessionToken);
     },
     adminUpdateTenantPlan: async (
       _: unknown,
